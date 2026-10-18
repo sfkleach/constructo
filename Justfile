@@ -83,9 +83,9 @@ draft-release VERSION: test shippable
         echo "error: local main differs from origin/main; pull or push before tagging." >&2
         exit 1
     fi
-    # The tag must agree with the version that will be published.
+    # The tag must agree with the version that will be published, optionally with a suffix for drafts.
     cargo_version=$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -n 1)
-    if [[ "{{VERSION}}" != "v$cargo_version" ]]; then
+    if [[ "{{VERSION}}" != "v$cargo_version" && "{{VERSION}}" != "v$cargo_version-"* ]]; then
         echo "error: tag '{{VERSION}}' does not match the Cargo.toml version 'v$cargo_version'." >&2
         exit 1
     fi
