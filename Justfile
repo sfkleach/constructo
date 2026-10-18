@@ -2,9 +2,9 @@ default:
     @just --list
 
 shippable:
-    python3 ./local/scripts/check-changelog.py
+    python3 ./.local/scripts/check-changelog.py
 
-test: unittest lint fmt-check audit functest conttest
+test: unittest lint fmt-check audit functest
 
 unittest:
     cargo test
@@ -32,57 +32,29 @@ fmt:
 fmt-check:
     cargo fmt --check
 
-build-debug:
+build:
     cargo build
-    ls -alh target/debug/constructo
+    ls -alh _build/target/debug/constructo
 
 build-release:
     cargo build --release
-    ls -alh target/release/constructo
+    ls -alh _build/target/release/constructo
 
-clear-executable-debug:
-    rm -f target/debug/constructo
+clear-executable:
+    rm -f _build/target/debug/constructo
 
 clear-executable-release:
-    rm -f target/release/constructo
+    rm -f _build/target/release/constructo
 
-clear-executables: clear-executable-debug clear-executable-release
+clear-executables: clear-executable clear-executable-release
 
-functest-debug:
+functest:
     #!/usr/bin/env bash
     set -euo pipefail
-    rm -f target/debug/constructo target/debug/constructo-bundle
+    rm -f _build/target/debug/constructo
     cargo build
-    bash tests/functest.sh target/debug/constructo plain
+    bash tests/functest.sh _build/target/debug/constructo plain
 
-functest-setuid:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    rm -f target/release/constructo target/release/constructo-bundle
-    cargo build --release
-    if [ "$(id -u)" = "0" ]; then
-        chown root:root target/release/constructo
-        chmod u+s target/release/constructo
-    else
-        sudo chown root:root target/release/constructo
-        sudo chmod u+s target/release/constructo
-    fi
-    bash tests/functest.sh target/release/constructo setuid
-
-functest: functest-debug functest-setuid
-
-# Run the containerized tests. Requires podman to be installed.
-conttest:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if ! command -v podman >/dev/null 2>&1; then
-        echo "SKIP: conttest (podman not installed)"
-        exit 0
-    fi
-    rustup target add x86_64-unknown-linux-musl
-    rm -f target/x86_64-unknown-linux-musl/debug/constructo
-    cargo build --target x86_64-unknown-linux-musl
-    bash tests/conttest.sh target/x86_64-unknown-linux-musl/debug/constructo
 
 # Install constructo locally via cargo install --path . (no sudo required).
 install:
@@ -92,12 +64,29 @@ install:
 # Monitor the workflow run manually via: gh run list --workflow=release-draft.yml
 # Run just publish-release once CI has completed and the draft release looks correct.
 # Usage: just draft-release v0.2.0
-draft-release VERSION:
+draft-release VERSION: test shippable
     #!/usr/bin/env bash
     set -euo pipefail
     # Refuse to tag a dirty working tree — uncommitted changes would not be part of the release.
     if ! git diff --quiet || ! git diff --cached --quiet; then
         echo "error: working tree has uncommitted changes; commit or stash them before tagging." >&2
+        exit 1
+    fi
+    # Releases are cut from main, and only once main matches the remote.
+    branch=$(git rev-parse --abbrev-ref HEAD)
+    if [[ "$branch" != "main" ]]; then
+        echo "error: releases must be tagged from main, but the current branch is '$branch'." >&2
+        exit 1
+    fi
+    git fetch origin main
+    if [[ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]]; then
+        echo "error: local main differs from origin/main; pull or push before tagging." >&2
+        exit 1
+    fi
+    # The tag must agree with the version that will be published.
+    cargo_version=$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -n 1)
+    if [[ "{{VERSION}}" != "v$cargo_version" ]]; then
+        echo "error: tag '{{VERSION}}' does not match the Cargo.toml version 'v$cargo_version'." >&2
         exit 1
     fi
     echo "Signing and pushing tag {{VERSION}}..."
@@ -127,8 +116,8 @@ publish-release VERSION:
 
 # Initialize decision records
 init-decisions:
-    python3 ./local/scripts/decisions.py --init
+    python3 ./.local/scripts/decisions.py --init
 
 # Add a new decision record
 add-decision TOPIC:
-    python3 ./local/scripts/decisions.py --add "{{TOPIC}}"
+    python3 ./.local/scripts/decisions.py --add "{{TOPIC}}"

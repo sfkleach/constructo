@@ -3,6 +3,8 @@ name = "constructo"
 version = "0.1.0"
 edition = "2021"
 description = "A typed, simple-object notation, and tools for processing it"
+license = "MIT"
+repository = "https://github.com/sfkleach/constructo"
 
 [lib]
 name = "constructo"

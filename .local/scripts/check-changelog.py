@@ -27,11 +27,11 @@ def lock_version() -> str:
     with open("Cargo.lock") as f:
         content = f.read()
     # Cargo.lock lists the workspace packages first; find the [[package]] block
-    # for 'fuselage' and extract its version.
-    m = re.search(r'\[\[package\]\]\s+name\s*=\s*"fuselage"\s+version\s*=\s*"([^"]+)"', content)
+    # for 'constructo' and extract its version.
+    m = re.search(r'\[\[package\]\]\s+name\s*=\s*"constructo"\s+version\s*=\s*"([^"]+)"', content)
     if m:
         return m.group(1)
-    print("FAIL: Could not find fuselage package entry in Cargo.lock.")
+    print("FAIL: Could not find constructo package entry in Cargo.lock.")
     sys.exit(1)
 
 
