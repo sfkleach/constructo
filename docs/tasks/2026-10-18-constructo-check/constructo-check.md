@@ -109,7 +109,8 @@ enum Option<T> = None | Some(T);
 
 Loading can be disabled with `--no-prelude`. 
 
-Implement the prelude loading as an initial action.
+Implement the prelude loading as an initial action. Integrate the examples
+that were failing (such as `mutual.types`) into the functional tests.
 
 
 ## Step 99: Populate the CHANGELOG
