@@ -26,3 +26,9 @@ Note that the `--stdin` option is intended to process the standard input as
 if it was another file. However at this stage, it is just echoed back to the
 terminal.
 
+
+## Step 99: Populate the CHANGELOG
+
+Before finishing the task, populate `CHANGELOG.md` in the
+[Keep a Changelog](https://keepachangelog.com/) format, recording the changes
+made in each step under an "Unreleased" section.
