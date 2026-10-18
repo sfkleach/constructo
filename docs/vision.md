@@ -23,12 +23,18 @@ She runs the tool on the types file alone.
 
 ```
 > constructo check harbour.types
-ERROR: Expected semi-colon (line 2, col 1) 
+ERROR: Expected semi-colon (harbour.types, line 2, col 1)
 ```
 
-It points at the line and column of a missing `;`. Once fixed, the tool also
-runs the post-parse checks and tells her she declared a variant twice (Dev). The
-corrected text reads:
+It points at the file, line and column of a missing `;`. Once fixed, the tool also
+runs the post-parse checks and tells her she declared a variant twice (Dev):
+
+```
+> constructo check harbour.types
+ERROR: Duplicate constructor Dev (harbour.types, line 1, col 32); first declared at line 1, col 12
+```
+
+The corrected text reads:
 
 ```
 enum Env = Dev, Staging, Prod;
@@ -54,7 +60,7 @@ He validates it against `harbour.types`.
 
 ```
 > constructo check harbour.types prod.values
-WARNING: Literal Int (non-negative) supplied where Nat expected (line 1, col 45)
+WARNING: Literal Int (non-negative) supplied where Nat expected (prod.values, line 1, col 45)
 ```
 
 The tool warns him that he has used a signed integer literal where a natural
