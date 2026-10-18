@@ -1,0 +1,2 @@
+// Grammatical, but rejected by the post-parse validity check.
+enum Dup = A, A(Int);

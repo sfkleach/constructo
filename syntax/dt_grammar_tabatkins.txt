@@ -1,199 +1,176 @@
 // Data-types Grammar
 Diagram(
     Comment('Data_Types'),
-    ZeroOrMore(NonTerminal('Expression'))
+    ZeroOrMore(NonTerminal('EnumDecl'))
 )
 
-// Expression
+// EnumDecl
 Diagram(
-    Comment('Expression'),
-    Choice(0,
-        NonTerminal('Literal'),
-        NonTerminal('Identifier'),
-        NonTerminal('DelimitedExpression'),
-        NonTerminal('ApplyExpression'),
-        NonTerminal('GetExpression'),
-        NonTerminal('InvokExpression'),
-        NonTerminal('OperatorExpression'),
-        NonTerminal('FormExpression'),
-        NonTerminal('PrefixForm')
-    )
-)
-
-// Arguments
-Diagram(
-    Comment('Arguments'),
-    Optional(
-        Sequence(
-            NonTerminal('Expression'),
-            ZeroOrMore(
-                Sequence(
-                    Terminal(','),
-                    NonTerminal('Expression')
-                )
-            )
-        )
-    )
-)
-
-// Statements
-Diagram(
-    Comment('Statements'),
+    Comment('EnumDecl'),
     Sequence(
+        Terminal('enum'),
+        NonTerminal('TypeName'),
+        Optional(NonTerminal('TypeParams')),
+        Terminal('='),
+        NonTerminal('Variant'),
         ZeroOrMore(
             Sequence(
-                NonTerminal('Expression'),
-                Choice(0, Terminal(';'), Terminal('\\n'))
+                Terminal(','),
+                NonTerminal('Variant')
             )
         ),
-        Optional(NonTerminal('Expression'))
+        Optional(Terminal(',')),
+        Terminal(';')
     )
 )
 
-// Literal
+// TypeParams
 Diagram(
-    Comment('Literal'),
-    Choice(0,
-        NonTerminal('number'),
-        NonTerminal('string')
+    Comment('TypeParams'),
+    Sequence(
+        Terminal('<'),
+        NonTerminal('TypeName'),
+        ZeroOrMore(
+            Sequence(
+                Terminal(','),
+                NonTerminal('TypeName')
+            )
+        ),
+        Terminal('>')
     )
 )
 
-// DelimitedExpression
+// Variant
 Diagram(
-    Comment('DelimitedExpression'),
-    Choice(
-        0,
-        Sequence(
-            Terminal('('),
-            NonTerminal('arguments'),
-            Terminal(')')
-        ),
-        Sequence(
-            Terminal('['),
-            NonTerminal('arguments'),
-            Terminal(']')
-        ),
-        Sequence(
-            Terminal('{'),
-            NonTerminal('arguments'),
-            Terminal('}')
+    Comment('Variant'),
+    Sequence(
+        NonTerminal('TypeName'),
+        Optional(
+            Choice(0,
+                NonTerminal('RecordBody'),
+                NonTerminal('TupleBody')
+            )
         )
     )
 )
 
-// ApplyExpression
+// RecordBody
 Diagram(
-    Comment('ApplyExpression'),
+    Comment('RecordBody'),
     Sequence(
-        NonTerminal('Expression'),
-        NonTerminal('DelimitedExpression')
-    )
-)
-
-// GetExpression
-Diagram(
-    Comment('GetExpression'),
-    Sequence(
-        NonTerminal('Expression'),
-        Terminal('.'),
-        NonTerminal('identifier')
-    )
-)
-
-// InvokeExpression
-Diagram(
-    Comment('InvokeExpression'),
-    Sequence(
-        NonTerminal('GetExpression'),
-        NonTerminal('DelimitedExpression')
-    )
-)
-
-// OperatorExpression
-Diagram(
-    Comment('OperatorExpression'),
-    Sequence(
-        NonTerminal('Expression'),
-        NonTerminal('operator'),
-        NonTerminal('Expression')
-    )
-)
-
-// FormExpression
-Diagram(
-    Comment('FormExpression'),
-    Sequence(
-        NonTerminal('form-start'),
+        Terminal('{'),
         Optional(
             Sequence(
-                NonTerminal('Expression'),
-                Terminal(':')
+                NonTerminal('Field'),
+                ZeroOrMore(
+                    Sequence(
+                        Terminal(','),
+                        NonTerminal('Field')
+                    )
+                ),
+                Optional(Terminal(','))
             )
         ),
-        NonTerminal('Statements'),
-        ZeroOrMore(NonTerminal('Part')),
-        NonTerminal('form-end')
+        Terminal('}')
     )
 )
 
-
-
-// Part
+// Field
 Diagram(
-    Comment('Part'),
-    Choice(
-        0,
-        Sequence(
-            NonTerminal('NamedBreaker'),
-            NonTerminal('Statements')
+    Comment('Field'),
+    Sequence(
+        NonTerminal('field-name'),
+        Terminal(':'),
+        NonTerminal('Type')
+    )
+)
+
+// TupleBody
+Diagram(
+    Comment('TupleBody'),
+    Sequence(
+        Terminal('('),
+        Optional(
+            Sequence(
+                NonTerminal('Type'),
+                ZeroOrMore(
+                    Sequence(
+                        Terminal(','),
+                        NonTerminal('Type')
+                    )
+                ),
+                Optional(Terminal(','))
+            )
         ),
-        Sequence(
-            Terminal('CascadedBreaker'),
-            Optional(
-                Sequence(
-                    NonTerminal('Expression'),
-                    Terminal(':')
-                )
-            ),
-            NonTerminal('Statements')
+        Terminal(')')
+    )
+)
+
+// Type
+Diagram(
+    Comment('Type'),
+    Choice(0,
+        NonTerminal('TypeRef'),
+        NonTerminal('ArrayType'),
+        NonTerminal('RecordBody')
+    )
+)
+
+// TypeRef
+Diagram(
+    Comment('TypeRef'),
+    Sequence(
+        NonTerminal('TypeName'),
+        Optional(
+            Sequence(
+                Terminal('<'),
+                NonTerminal('Type'),
+                ZeroOrMore(
+                    Sequence(
+                        Terminal(','),
+                        NonTerminal('Type')
+                    )
+                ),
+                Terminal('>')
+            )
         )
     )
 )
 
-// NamedBreaker
+// ArrayType
 Diagram(
-    Comment('NamedBreaker'),
+    Comment('ArrayType'),
     Sequence(
-        NonTerminal('Identifier'),
-        Terminal(':'),
+        Terminal('['),
+        NonTerminal('Type'),
+        Terminal(']')
     )
 )
 
-
-// Cascaded Breaker
+// TypeName
 Diagram(
-    Comment('CascadedBreaker'),
+    Comment('TypeName'),
     Sequence(
-        NonTerminal('CoreIdentifier'),
-        Terminal('-'),
-        NonTerminal('enclosing-form-start'),
-        Terminal(':')
+        NonTerminal('[A-Z]'),
+        ZeroOrMore(NonTerminal('[A-Za-z0-9_]'))
     )
 )
 
-// PrefixForm
+// field-name
 Diagram(
-    Comment('PrefixForm'),
+    Comment('field-name'),
     Sequence(
-        NonTerminal('CoreIdentifier'),
-        Terminal('!'),
-        ZeroOrMore(NonTerminal('Expression')),
-        ZeroOrMore(
-            Choice(0, NonTerminal('NamedBreaker'), NonTerminal('CascadedBreaker')),
-            ZeroOrMore(NonTerminal('Expression'))
-        ),
-        Optional(Choice(0, Terminal(';'), Terminal('\\n')))
+        NonTerminal('[a-z_]'),
+        ZeroOrMore(NonTerminal('[A-Za-z0-9_]'))
     )
 )
 
+// Comment
+Diagram(
+    Comment('Line comment (whitespace)'),
+    Sequence(
+        Terminal('//'),
+        ZeroOrMore(NonTerminal('any-char-except-newline')),
+        NonTerminal('newline')
+    )
+)

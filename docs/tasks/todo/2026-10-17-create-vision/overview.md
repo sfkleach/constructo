@@ -19,8 +19,8 @@ Examples:
 ```
 // Comments are supported.
 enum Shape =
-  Circle { radius: Float },           // commas are optional.
-  Box { width: Float, height: InFloatt };  // semi-colon is required.
+  Circle { radius: Float },                 // commas separate.
+  Box { width: Float, height: InFloatt };   // semi-colon terminates.
 
 // Recursive types are supported.
 enum List<T> =

@@ -1,0 +1,4 @@
+// Forward references and mutual recursion are fine.
+enum Tree<T> = Leaf(T), Node(Forest<T>);
+enum Forest<T> = Trees([Tree<T>]);
+enum Config = Config { name: String, limits: { cpu: Nat, mem: Nat }, owner: Option<String> };

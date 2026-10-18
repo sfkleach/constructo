@@ -1,0 +1,6 @@
+Circle { radius: 3.0 }
+Box { width: 7.0, height: 1.0 }
+Cons { head: True, tail: Nil }
+Move { x: +8, y: -1 }
+ChangeColor(255, 255, 255)
+Error(["C9602", "C9678"])

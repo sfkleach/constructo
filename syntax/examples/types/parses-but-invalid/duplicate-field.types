@@ -1,0 +1,1 @@
+enum Dup = R { x: Int, x: Int };

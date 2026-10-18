@@ -1,0 +1,3 @@
+enum Shape =
+  Circle { radius: Float }
+  Box { width: Float, height: Float };
