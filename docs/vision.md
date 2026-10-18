@@ -8,6 +8,29 @@ YAML configs that fail at 2am because a port was written as a string.
 Priya writes `harbour.types`:
 
 ```
+enum Env = Dev, Staging, Prod, Dev
+enum Config =
+  Config {
+    name: String,
+    env: Env,
+    port: Nat,
+    replicas: Nat,
+    owner: Option<String>,
+  };
+```
+
+She runs the tool on the types file alone.
+
+```
+> constructo check harbour.types
+ERROR: Expected semi-colon (line 2, col 1) 
+```
+
+It points at the line and column of a missing `;`. Once fixed, the tool also
+runs the post-parse checks and tells her she declared a variant twice (Dev). The
+corrected text reads:
+
+```
 enum Env = Dev, Staging, Prod;
 enum Config =
   Config {
@@ -19,21 +42,26 @@ enum Config =
   };
 ```
 
-She runs the tool to check the syntax of the types file alone. It points at the
-line and column of a missing `;`. Once fixed, the tool also runs the post-parse
-checks and tells her she declared a variant twice.
-
 ## Day two: Tomás writes values
 
 Tomás writes `prod.values`:
 
 ```
-Config { name: "harbour", env: Prod, port: 8080, replicas: 3, owner: null }
+Config { name: "harbour", env: Prod, port: +8080, replicas: 3, owner: null }
 ```
 
-He validates it against `harbour.types`. The tool reports the syntax is fine and
-the value is type-correct. When he writes `port: +8080` the tool says an `Int`
-was supplied where `Nat` is expected, with the location.
+He validates it against `harbour.types`. 
+
+```
+> constructo check harbour.types prod.values
+WARNING: Literal Int (non-negative) supplied where Nat expected (line 1, col 45)
+```
+
+The tool warns him that he has used a signed integer literal where a natural
+number was expected. A non-negative signed literal such as `+8080` is accepted
+for a `Nat` with a warning; a negative one such as `-1` is an error. Once he
+removes the sign, `constructo
+check` reports that the syntax is fine and the value is type-correct. 
 
 ## Day three: CI
 
@@ -49,6 +77,7 @@ before deployment.
 - Validate stdin against a types file.
 - Post-parse checks: duplicate variants or fields, unknown types, wrong generic
   arity.
+- Warnings (e.g. `+8080` where a `Nat` is expected) are distinguished from errors.
 - Precise error locations; machine-friendly exit codes.
 
 ## Later
