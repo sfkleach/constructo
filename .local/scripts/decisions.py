@@ -242,7 +242,7 @@ class DecisionRecords:
         if existing_numbers:
             next_number = max(existing_numbers) + 1
         else:
-            next_number = 0  # Start numbering from 0
+            next_number = 1  # Start numbering from 1
 
         return next_number
 

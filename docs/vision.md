@@ -23,7 +23,7 @@ She runs the tool on the types file alone.
 
 ```
 > constructo check harbour.types
-ERROR: Expected semi-colon (harbour.types, line 2, col 1)
+ERROR: Expected comma or semi-colon (harbour.types, line 2, col 1)
 ```
 
 It points at the file, line and column of a missing `;`. Once fixed, the tool also

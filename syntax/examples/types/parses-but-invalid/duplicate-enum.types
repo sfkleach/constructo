@@ -1,0 +1,3 @@
+// A type may not be declared twice.
+enum A = X;
+enum A = Y;

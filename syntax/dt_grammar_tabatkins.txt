@@ -29,14 +29,23 @@ Diagram(
     Comment('TypeParams'),
     Sequence(
         Terminal('<'),
-        NonTerminal('TypeName'),
+        NonTerminal('TypeParam'),
         ZeroOrMore(
             Sequence(
                 Terminal(','),
-                NonTerminal('TypeName')
+                NonTerminal('TypeParam')
             )
         ),
         Terminal('>')
+    )
+)
+
+// TypeParam
+Diagram(
+    Comment('TypeParam'),
+    Sequence(
+        Optional(Terminal('_')),
+        NonTerminal('TypeName')
     )
 )
 

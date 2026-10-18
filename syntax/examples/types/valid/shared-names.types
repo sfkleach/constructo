@@ -1,0 +1,2 @@
+// Types and constructors are separate namespaces.
+enum Config = Config { port: Nat };

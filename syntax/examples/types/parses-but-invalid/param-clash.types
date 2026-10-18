@@ -1,0 +1,3 @@
+// A type parameter may not share a name with a declared type.
+enum B = Y;
+enum A<B> = X(B);

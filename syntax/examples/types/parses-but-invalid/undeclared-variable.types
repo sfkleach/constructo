@@ -1,0 +1,2 @@
+// A type variable must be declared by the enum that uses it.
+enum A = X(T);

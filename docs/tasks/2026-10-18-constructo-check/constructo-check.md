@@ -70,8 +70,9 @@ Type parameters may start with an underscore: `TypeParam = '_'? TypeName`.
 ### Diagnostics
 
 - The parser reports the first syntax error in each file, with no error recovery.
-  Post-parse checks run only on files that parsed, and report every error found,
-  ordered by file, line and column.
+  Post-parse checks report every error found, ordered by file, line and column. They are
+  skipped if any file had a syntax error, since the unparsed file may hold declarations
+  the others use.
 - Format: `ERROR: <message> (<file>, line L, col C)`, with `<stdin>` as the file
   name for standard input. A duplicate also names the first site, e.g.
   `first declared at line L, col C`. Update `docs/vision.md` to match.
