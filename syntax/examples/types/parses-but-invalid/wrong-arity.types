@@ -1,0 +1,2 @@
+enum Wrong = W(List<Int, Int>);
+enum List<T> = Nil(T);

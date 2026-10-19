@@ -1,0 +1,2 @@
+// An underscore parameter may be unused.
+enum Phantom<_T> = Phantom;

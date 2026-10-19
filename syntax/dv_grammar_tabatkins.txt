@@ -1,0 +1,199 @@
+// Data-values Grammar
+Diagram(
+    Comment('Data_Values'),
+    ZeroOrMore(NonTerminal('Value'))
+)
+
+// Value
+Diagram(
+    Comment('Value'),
+    Choice(0,
+        NonTerminal('Tagged'),
+        NonTerminal('Record'),
+        NonTerminal('Array'),
+        NonTerminal('Number'),
+        NonTerminal('String'),
+        Terminal('null')
+    )
+)
+
+// Tagged
+Diagram(
+    Comment('Tagged'),
+    Sequence(
+        NonTerminal('TypeName'),
+        Optional(
+            Choice(0,
+                NonTerminal('Record'),
+                NonTerminal('Tuple')
+            )
+        )
+    )
+)
+
+// Record
+Diagram(
+    Comment('Record'),
+    Sequence(
+        Terminal('{'),
+        Optional(
+            Sequence(
+                NonTerminal('Member'),
+                ZeroOrMore(
+                    Sequence(
+                        Terminal(','),
+                        NonTerminal('Member')
+                    )
+                ),
+                Optional(Terminal(','))
+            )
+        ),
+        Terminal('}')
+    )
+)
+
+// Member
+Diagram(
+    Comment('Member'),
+    Sequence(
+        NonTerminal('field-name'),
+        Terminal(':'),
+        NonTerminal('Value')
+    )
+)
+
+// Tuple
+Diagram(
+    Comment('Tuple'),
+    Sequence(
+        Terminal('('),
+        Optional(
+            Sequence(
+                NonTerminal('Value'),
+                ZeroOrMore(
+                    Sequence(
+                        Terminal(','),
+                        NonTerminal('Value')
+                    )
+                ),
+                Optional(Terminal(','))
+            )
+        ),
+        Terminal(')')
+    )
+)
+
+// Array
+Diagram(
+    Comment('Array'),
+    Sequence(
+        Terminal('['),
+        Optional(
+            Sequence(
+                NonTerminal('Value'),
+                ZeroOrMore(
+                    Sequence(
+                        Terminal(','),
+                        NonTerminal('Value')
+                    )
+                ),
+                Optional(Terminal(','))
+            )
+        ),
+        Terminal(']')
+    )
+)
+
+// Number
+Diagram(
+    Comment('Number'),
+    Choice(0,
+        NonTerminal('Nat'),
+        NonTerminal('Int'),
+        NonTerminal('Float')
+    )
+)
+
+// Nat
+Diagram(
+    Comment('Nat'),
+    OneOrMore(NonTerminal('digit'))
+)
+
+// Int
+Diagram(
+    Comment('Int'),
+    Sequence(
+        Choice(0, Terminal('+'), Terminal('-')),
+        OneOrMore(NonTerminal('digit'))
+    )
+)
+
+// Float
+Diagram(
+    Comment('Float'),
+    Sequence(
+        Optional(Choice(0, Terminal('+'), Terminal('-'))),
+        OneOrMore(NonTerminal('digit')),
+        Terminal('.'),
+        OneOrMore(NonTerminal('digit')),
+        Optional(
+            Sequence(
+                Choice(0, Terminal('e'), Terminal('E')),
+                Optional(Choice(0, Terminal('+'), Terminal('-'))),
+                OneOrMore(NonTerminal('digit'))
+            )
+        )
+    )
+)
+
+// String
+Diagram(
+    Comment('String'),
+    Sequence(
+        Terminal('"'),
+        ZeroOrMore(
+            Choice(0,
+                NonTerminal('any-char-except-quote-backslash-control'),
+                Sequence(
+                    Terminal('\\'),
+                    Choice(0,
+                        Terminal('"'), Terminal('\\'), Terminal('/'),
+                        Terminal('b'), Terminal('f'), Terminal('n'),
+                        Terminal('r'), Terminal('t'),
+                        Sequence(Terminal('u'), NonTerminal('4 hex digits'))
+                    )
+                )
+            )
+        ),
+        Terminal('"')
+    )
+)
+
+// TypeName
+Diagram(
+    Comment('TypeName'),
+    Sequence(
+        NonTerminal('[A-Z]'),
+        ZeroOrMore(NonTerminal('[A-Za-z0-9_]'))
+    )
+)
+
+// field-name
+Diagram(
+    Comment('field-name'),
+    Sequence(
+        NonTerminal('[a-z_]'),
+        ZeroOrMore(NonTerminal('[A-Za-z0-9_]'))
+    )
+)
+
+// Comment
+Diagram(
+    Comment('Line comment (whitespace)'),
+    Sequence(
+        Terminal('//'),
+        ZeroOrMore(NonTerminal('any-char-except-newline')),
+        NonTerminal('newline')
+    )
+)

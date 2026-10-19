@@ -1,0 +1,82 @@
+# Definition of Shippable
+
+This document defines what must be true before a release tag is pushed.
+It complements the [Definition of Done](definition-of-done.md),
+which governs individual tasks. Shippable is the release-level gate.
+
+Status: the README and the GitHub workflows referred to below (`release-check`,
+`release-draft.yml`, `release-publish.yml`) have yet to be written.
+
+## Version bump
+
+- [ ] `Cargo.toml` version is bumped appropriately (semver):
+  - Patch (`x.y.Z`) — bug fixes only, no new features, no breaking changes.
+  - Minor (`x.Y.0`) — new features, backwards compatible.
+  - Major (`X.0.0`) — breaking changes.
+- [ ] Run `cargo build` (or `cargo test`) so that `Cargo.lock` is regenerated
+  to match the new version.
+- [ ] Commit both `Cargo.toml` and `Cargo.lock` together.
+- [ ] `Cargo.toml` version matches the intended tag (e.g. `v0.2.1`). A draft tag
+  may add a suffix (e.g. `v0.2.1-draft.1`).
+
+## CHANGELOG
+
+- [ ] The top section of `CHANGELOG.md` is a version heading (not `Unreleased`).
+- [ ] The version in the heading matches `Cargo.toml`.
+- [ ] The version has not been used in any previous section (no duplicates).
+- [ ] The content accurately describes all changes since the previous release.
+
+Verify with:
+
+```bash
+just shippable
+```
+
+## Automated checks
+
+Run `just test` and confirm it passes cleanly:
+
+```bash
+just test
+```
+
+This covers unit tests, functional tests, formatting, clippy, build, and
+security audit. No failures, no warnings promoted to errors.
+
+## Documentation
+
+- [ ] README accurately reflects the current behaviour and options.
+- [ ] Any new features are documented (options table, examples, or linked doc).
+- [ ] Version numbers embedded in the README (e.g. manual download URLs) match the new version.
+- [ ] No broken links in the README (check relative links resolve correctly).
+
+## Release workflow
+
+- [ ] Run the `release-check` workflow manually on GitHub and confirm it passes:
+  **Actions → Release Check → Run workflow**.
+- [ ] Push a draft tag (e.g. `vX.Y.Z-draft.1`) and confirm the release workflow
+  builds successfully and produces the expected assets.
+- [ ] Confirm the draft release on GitHub looks correct: title, release notes,
+  binaries, checksum files.
+
+## crates.io (first publish of a new crate name only)
+
+- [ ] Confirm the crate name is not already taken:
+  `curl -sSf https://crates.io/api/v1/crates/constructo` → should 404.
+- [ ] Run `cargo publish --dry-run` locally and confirm it passes.
+
+## Tagging and publishing
+
+`just draft-release` runs `just test` and `just shippable` first. It then
+refuses to tag unless the working tree is clean, the current branch is `main`,
+`main` matches `origin/main`, and the tag matches the `Cargo.toml` version.
+
+```bash
+just draft-release vX.Y.Z   # sign and push tag; triggers release-draft.yml
+                              # monitor CI and review the draft release on GitHub
+just publish-release vX.Y.Z  # triggers release-publish.yml on GitHub Actions,
+                              # which runs cargo publish and flips the draft to published
+```
+
+`just publish-release` only accepts stable tags (`vX.Y.Z` with no suffix).
+`cargo publish` runs in CI via the trusted publisher — no local crates.io token required.

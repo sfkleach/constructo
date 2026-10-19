@@ -1,0 +1,2 @@
+// A type may not be named after a basic type.
+enum Nat = Zero;

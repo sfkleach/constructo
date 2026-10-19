@@ -1,0 +1,2 @@
+// The prelude already declares Bool, and its constructors True and False.
+enum Bool = Yes, No;

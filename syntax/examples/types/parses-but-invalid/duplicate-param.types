@@ -1,0 +1,2 @@
+// Type parameters must be distinct.
+enum A<T, T> = X(T);

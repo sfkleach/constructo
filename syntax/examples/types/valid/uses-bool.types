@@ -1,0 +1,2 @@
+// Bool comes from the standard prelude.
+enum Switch = On { enabled: Bool }, Off;

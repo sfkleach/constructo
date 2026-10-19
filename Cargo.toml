@@ -1,0 +1,18 @@
+[package]
+name = "constructo"
+version = "0.1.0"
+edition = "2021"
+description = "A typed, simple-object notation, and tools for processing it"
+license = "MIT"
+repository = "https://github.com/sfkleach/constructo"
+
+[lib]
+name = "constructo"
+path = "src/lib.rs"
+
+[[bin]]
+name = "constructo"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }

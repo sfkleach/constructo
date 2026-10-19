@@ -1,0 +1,31 @@
+[private]
+default:
+    just --list
+
+[private]
+mkbuild:
+    mkdir -p _build
+
+# Build the grammar files (HTML, PNG, PDF and SVG) for data-types and data-values
+build: mkbuild
+    uv run python3 tabatkins2html.py --input dt_grammar_tabatkins.txt --title 'Data-types Grammar' > _build/dt_grammar.html
+    sed '/^<title>.*$/d' < _build/dt_grammar.html > _build/tmp.html
+    wkhtmltoimage _build/tmp.html _build/dt_grammar.png
+    wkhtmltopdf _build/tmp.html _build/dt_grammar.pdf
+    uv run python3 tabatkins2html.py --input dv_grammar_tabatkins.txt --title 'Data-values Grammar' > _build/dv_grammar.html
+    sed '/^<title>.*$/d' < _build/dv_grammar.html > _build/tmp.html
+    wkhtmltoimage _build/tmp.html _build/dv_grammar.png
+    wkhtmltopdf _build/tmp.html _build/dv_grammar.pdf
+    uv run python3 html2svg.py --input _build/dt_grammar.html > _build/dt_grammar.svg
+    uv run python3 html2svg.py --input _build/dv_grammar.html > _build/dv_grammar.svg
+
+# Regenerate grammar.md from grammar.template.md and the grammar sources
+grammar-md: build
+    cp _build/dt_grammar.svg _build/dv_grammar.svg _build/dt_grammar.pdf _build/dv_grammar.pdf .
+    uv run python3 mkgrammar.py --template grammar.template.md --types dt_grammar_tabatkins.txt --values dv_grammar_tabatkins.txt > _build/grammar.md
+    cp _build/grammar.md grammar.md
+
+clean:
+    rm -rf _build
+
+rebuild: clean build

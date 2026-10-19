@@ -1,0 +1,33 @@
+version = 1
+revision = 3
+requires-python = ">=3.12"
+
+[[package]]
+name = "pymustache"
+version = "0.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/47/f0/3861f32a7f0bc1053ca9a57e24e5968b2aff5e09d355388118ecfa79ae9a/pymustache-0.3.tar.gz", hash = "sha256:84b87f00b1aaf9c67974f7707dc016177c625d69d1d91de12b0dd59b27269548", size = 5703, upload-time = "2016-02-22T01:32:45.409Z" }
+
+[[package]]
+name = "railroad-diagrams"
+version = "3.0.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/3a/08/25c49a573ff9c482cc7bc48574440170a6a9ad5562de5c50db8887ecfece/railroad-diagrams-3.0.1.tar.gz", hash = "sha256:a91332bac900cb3c367331fa9b699f0897bcf86b7264f65458675df430d04ce3", size = 22057, upload-time = "2023-02-14T21:23:28.346Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ca/43/fcf01f1ab9f744c545384bacea51016a267162de0b9e7c6fcd4996c84231/railroad_diagrams-3.0.1-py3-none-any.whl", hash = "sha256:d414ff2439ed53345950e197938097548721b5d097926fafeaabc2bb069b44f9", size = 15012, upload-time = "2023-02-14T21:23:26.353Z" },
+]
+
+[[package]]
+name = "syntax"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "pymustache" },
+    { name = "railroad-diagrams" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pymustache", specifier = ">=0.3" },
+    { name = "railroad-diagrams", specifier = ">=3.0.1" },
+]

@@ -1,0 +1,8 @@
+enum Message =
+    Quit,
+    Move { x: Int, y: Int },
+    Write(String),
+    ChangeColor(Nat, Nat, Nat),
+    Error([String]),
+    Ping(),
+    Pong {};

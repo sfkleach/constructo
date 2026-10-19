@@ -1,0 +1,2 @@
+// A type parameter must be used, unless it starts with an underscore.
+enum A<T> = X;

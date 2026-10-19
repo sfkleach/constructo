@@ -1,0 +1,185 @@
+// Data-types Grammar
+Diagram(
+    Comment('Data_Types'),
+    ZeroOrMore(NonTerminal('EnumDecl'))
+)
+
+// EnumDecl
+Diagram(
+    Comment('EnumDecl'),
+    Sequence(
+        Terminal('enum'),
+        NonTerminal('TypeName'),
+        Optional(NonTerminal('TypeParams')),
+        Terminal('='),
+        NonTerminal('Variant'),
+        ZeroOrMore(
+            Sequence(
+                Terminal(','),
+                NonTerminal('Variant')
+            )
+        ),
+        Optional(Terminal(',')),
+        Terminal(';')
+    )
+)
+
+// TypeParams
+Diagram(
+    Comment('TypeParams'),
+    Sequence(
+        Terminal('<'),
+        NonTerminal('TypeParam'),
+        ZeroOrMore(
+            Sequence(
+                Terminal(','),
+                NonTerminal('TypeParam')
+            )
+        ),
+        Terminal('>')
+    )
+)
+
+// TypeParam
+Diagram(
+    Comment('TypeParam'),
+    Sequence(
+        Optional(Terminal('_')),
+        NonTerminal('TypeName')
+    )
+)
+
+// Variant
+Diagram(
+    Comment('Variant'),
+    Sequence(
+        NonTerminal('TypeName'),
+        Optional(
+            Choice(0,
+                NonTerminal('RecordBody'),
+                NonTerminal('TupleBody')
+            )
+        )
+    )
+)
+
+// RecordBody
+Diagram(
+    Comment('RecordBody'),
+    Sequence(
+        Terminal('{'),
+        Optional(
+            Sequence(
+                NonTerminal('Field'),
+                ZeroOrMore(
+                    Sequence(
+                        Terminal(','),
+                        NonTerminal('Field')
+                    )
+                ),
+                Optional(Terminal(','))
+            )
+        ),
+        Terminal('}')
+    )
+)
+
+// Field
+Diagram(
+    Comment('Field'),
+    Sequence(
+        NonTerminal('field-name'),
+        Terminal(':'),
+        NonTerminal('Type')
+    )
+)
+
+// TupleBody
+Diagram(
+    Comment('TupleBody'),
+    Sequence(
+        Terminal('('),
+        Optional(
+            Sequence(
+                NonTerminal('Type'),
+                ZeroOrMore(
+                    Sequence(
+                        Terminal(','),
+                        NonTerminal('Type')
+                    )
+                ),
+                Optional(Terminal(','))
+            )
+        ),
+        Terminal(')')
+    )
+)
+
+// Type
+Diagram(
+    Comment('Type'),
+    Choice(0,
+        NonTerminal('TypeRef'),
+        NonTerminal('ArrayType'),
+        NonTerminal('RecordBody')
+    )
+)
+
+// TypeRef
+Diagram(
+    Comment('TypeRef'),
+    Sequence(
+        NonTerminal('TypeName'),
+        Optional(
+            Sequence(
+                Terminal('<'),
+                NonTerminal('Type'),
+                ZeroOrMore(
+                    Sequence(
+                        Terminal(','),
+                        NonTerminal('Type')
+                    )
+                ),
+                Terminal('>')
+            )
+        )
+    )
+)
+
+// ArrayType
+Diagram(
+    Comment('ArrayType'),
+    Sequence(
+        Terminal('['),
+        NonTerminal('Type'),
+        Terminal(']')
+    )
+)
+
+// TypeName
+Diagram(
+    Comment('TypeName'),
+    Sequence(
+        NonTerminal('[A-Z]'),
+        ZeroOrMore(NonTerminal('[A-Za-z0-9_]'))
+    )
+)
+
+// field-name
+Diagram(
+    Comment('field-name'),
+    Sequence(
+        NonTerminal('[a-z_]'),
+        ZeroOrMore(NonTerminal('[A-Za-z0-9_]'))
+    )
+)
+
+// Comment
+Diagram(
+    Comment('Line comment (whitespace)'),
+    Sequence(
+        Terminal('//'),
+        ZeroOrMore(NonTerminal('any-char-except-newline')),
+        NonTerminal('newline')
+    )
+)

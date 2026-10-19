@@ -1,0 +1,10 @@
+{ x: 17.0, y: 18.2, description: "X marks the spot" }
+{}
+[]
+[1, 2, 3,]
+null
+Quit
+Ping()
+Pong {}
+"esc \" \\ \n é"
+-2.5e3
