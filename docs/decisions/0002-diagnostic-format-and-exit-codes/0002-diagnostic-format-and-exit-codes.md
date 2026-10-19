@@ -20,3 +20,4 @@ means no errors, 1 means the inputs contain errors, and 2 means a usage or I/O p
 Filenames are needed once several inputs are accepted. The codes let CI tell a bad schema from a bad
 invocation. Giving up parser error recovery keeps the parser small: a file with a syntax error shows one error at
 a time. An unreadable file stops the run at once with exit code 2, so errors in later files are not reported.
+Inputs are read in order, so an earlier syntax error is reported first (see decision 6).

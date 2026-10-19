@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use constructo::{check_sources, prelude_source, Outcome, Source};
+use constructo::{check_sources, prelude_source, syntax_error, Outcome, Source};
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -51,7 +51,10 @@ fn main() -> ExitCode {
 }
 
 fn check(stdin: bool, no_prelude: bool, verbose: bool, files: &[PathBuf]) -> ExitCode {
+    // The inputs are read one at a time, and reading stops at the first syntax error. That way an unreadable later
+    // input cannot hide an earlier syntax error, which is the error the run is meant to stop at.
     let mut sources = Vec::new();
+    let mut syntax_failed = false;
     for file in files {
         match std::fs::read_to_string(file) {
             Ok(text) => sources.push(Source {
@@ -63,8 +66,12 @@ fn check(stdin: bool, no_prelude: bool, verbose: bool, files: &[PathBuf]) -> Exi
                 return ExitCode::from(EXIT_USAGE);
             }
         }
+        if syntax_error(sources.last().expect("a source was just pushed")).is_some() {
+            syntax_failed = true;
+            break;
+        }
     }
-    if stdin {
+    if stdin && !syntax_failed {
         let mut text = String::new();
         if let Err(e) = std::io::stdin().read_to_string(&mut text) {
             eprintln!("ERROR: Cannot read standard input: {}", e);

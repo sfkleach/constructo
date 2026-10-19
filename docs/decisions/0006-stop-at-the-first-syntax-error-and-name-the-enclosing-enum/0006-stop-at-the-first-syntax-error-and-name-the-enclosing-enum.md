@@ -18,6 +18,8 @@ reporting of every validity error are unchanged.
 ## Consequences
 
 - A user with syntax errors in several files fixes and reruns once per file.
+- Inputs are read one at a time and reading stops at the first syntax error, so an unreadable later input cannot
+  hide it: a syntax error in an earlier input gives exit code 1, whereas an unreadable earlier input still gives 2.
 - The behaviour is the same with and without `--verbose`, so the flag only adds commentary.
 - The library reports a per-source `Outcome` (`Ok`, `Failed` or `NotChecked`). Verbose mode lists `OK:` and
   `FAILED:` lines for the user's inputs only, never for the prelude, and ends with `OK: checked N file(s)` on

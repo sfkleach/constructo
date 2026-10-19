@@ -65,6 +65,11 @@ expect_exit "missing file is a usage error" 2 check "$EXAMPLES/valid/no-such-fil
 expect_exit "no arguments is a usage error" 2 check
 expect_exit "multiple valid files share a namespace" 0 check "$EXAMPLES/valid/shapes.types" "$EXAMPLES/valid/list.types"
 
+# An earlier syntax error wins over a later unreadable input, but an earlier unreadable input is still a usage error.
+expect_exit "syntax error before a missing file exits 1" 1 check "$EXAMPLES/invalid/missing-semicolon.types" "$EXAMPLES/valid/no-such-file.types"
+expect_exit "missing file before a syntax error exits 2" 2 check "$EXAMPLES/valid/no-such-file.types" "$EXAMPLES/invalid/missing-semicolon.types"
+expect_exit "syntax error stops before stdin is read" 1 check --stdin "$EXAMPLES/invalid/missing-semicolon.types" < /dev/null
+
 stdin_exit() {
     local name="$1" expected="$2" input="$3"; shift 3
     local actual=0

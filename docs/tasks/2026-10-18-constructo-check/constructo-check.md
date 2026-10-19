@@ -116,7 +116,7 @@ that were failing (such as `mutual.types`) into the functional tests.
 ## Step 4: Verbose mode
 
 The `--verbose` option was implemented in the previous steps and, as expected,
-generates additional commentary. This step refines it's behaviour. When it is
+generates additional commentary. This step refines its behaviour. When it is
 enabled:
 
 - Each file that is successfully checked should be reported clearly, along

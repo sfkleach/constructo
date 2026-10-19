@@ -56,6 +56,22 @@ impl Report {
     }
 }
 
+fn syntax_diagnostic(source: &Source, e: parser::SyntaxError) -> Diagnostic {
+    let diagnostic = Diagnostic::new(&source.name, e.pos, e.message);
+    match e.enum_name {
+        Some(name) => diagnostic.with_note(format!("in enum {}", name)),
+        None => diagnostic,
+    }
+}
+
+/// Returns the syntax error in a source, if it has one.
+///
+/// This lets a caller that reads its inputs one at a time stop reading at the first syntax error, before any later
+/// input could fail for some unrelated reason.
+pub fn syntax_error(source: &Source) -> Option<Diagnostic> {
+    parser::parse(&source.text).err().map(|e| syntax_diagnostic(source, e))
+}
+
 /// Checks the syntax and validity of a set of types files, which share one namespace.
 ///
 /// The files are parsed in order and checking stops at the first syntax error, which is the only diagnostic
@@ -71,10 +87,7 @@ pub fn check_sources(sources: &[Source]) -> Report {
                 decls,
             }),
             Err(e) => {
-                let mut diagnostic = Diagnostic::new(&source.name, e.pos, e.message);
-                if let Some(name) = e.enum_name {
-                    diagnostic = diagnostic.with_note(format!("in enum {}", name));
-                }
+                let diagnostic = syntax_diagnostic(source, e);
                 let mut outcomes = vec![Outcome::NotChecked; sources.len()];
                 outcomes[index] = Outcome::Failed;
                 return Report {
@@ -133,6 +146,20 @@ mod tests {
                 "ERROR: Duplicate type Bool (user, line 1, col 6); first declared at <prelude>, line 1, col 6",
                 "ERROR: Duplicate constructor True (user, line 1, col 18); first declared at <prelude>, line 1, col 13",
             ]
+        );
+    }
+
+    #[test]
+    fn syntax_error_reports_only_syntax_problems() {
+        let source = |text: &str| Source {
+            name: "f".to_string(),
+            text: text.to_string(),
+        };
+        assert_eq!(syntax_error(&source("enum A = X(Missing);")), None);
+        let e = syntax_error(&source("enum A = X")).unwrap();
+        assert_eq!(
+            e.to_string(),
+            "ERROR: Expected comma or semi-colon (f, line 1, col 11); in enum A"
         );
     }
 
