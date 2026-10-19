@@ -33,6 +33,7 @@ struct TypeInfo {
 
 struct Param<'a> {
     name: &'a str,
+    pos: Pos,
     underscore: bool,
     used: bool,
 }
@@ -152,6 +153,7 @@ impl<'a> Checker<'a> {
             }
             params.push(Param {
                 name,
+                pos: param.pos,
                 underscore: param.underscore,
                 used: false,
             });
@@ -167,9 +169,9 @@ impl<'a> Checker<'a> {
                 }
             }
         }
-        for (param, parsed) in params.iter().zip(&decl.params) {
+        for param in &params {
             if !param.used && !param.underscore {
-                self.report(file, parsed.pos, format!("Unused type parameter {}", param.name), None);
+                self.report(file, param.pos, format!("Unused type parameter {}", param.name), None);
             }
         }
     }
@@ -298,6 +300,17 @@ mod tests {
             vec!["ERROR: Unused type parameter T (f0, line 1, col 8)"]
         );
         assert_eq!(errors(&["enum A = X(T);"]).len(), 1);
+    }
+
+    #[test]
+    fn reports_an_unused_parameter_at_its_own_position_after_a_duplicate() {
+        assert_eq!(
+            errors(&["enum A<T, T, U> = X(T);"]),
+            vec![
+                "ERROR: Duplicate type parameter T (f0, line 1, col 11)",
+                "ERROR: Unused type parameter U (f0, line 1, col 14)",
+            ]
+        );
     }
 
     #[test]
