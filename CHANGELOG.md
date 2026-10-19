@@ -10,6 +10,8 @@ Following the style in https://keepachangelog.com/en/1.0.0/
   each) and then checks for duplicate types, constructors, fields and type parameters, names that clash with the
   basic types (`Nat`, `Int`, `Float`, `String`), unknown type names, generic arity, and unused type parameters.
 - Type parameters may start with an underscore, e.g. `<_T>`, to mark them as intentionally unused.
+- The standard prelude (`enum Bool = True, False;` and `enum Option<T> = None, Some(T);`) is loaded by default by
+  `constructo check`; `--no-prelude` disables it. The library exposes it as `PRELUDE` and `prelude_source()`.
 - `constructo check` is silent on success; `--verbose` (`-v`) prints a success message.
 - Diagnostics have the form `ERROR: <message> (<file>, line L, col C)`. The exit code is 0 for success, 1 if the
   inputs contain errors and 2 for usage or I/O problems.

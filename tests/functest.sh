@@ -30,28 +30,12 @@ expect_exit() {
     fi
 }
 
-# Examples that cannot pass until the standard prelude exists (Step 3 of the task).
-NEEDS_PRELUDE=(mutual.types)
-
-needs_prelude() {
-    local file
-    for file in "${NEEDS_PRELUDE[@]}"; do
-        [[ "$file" == "$1" ]] && return 0
-    done
-    return 1
-}
-
 echo "=== constructo functional tests ($CONSTRUCTO) ==="
 echo ""
 
 echo "--- valid types ---"
 for f in "$EXAMPLES"/valid/*.types; do
-    base="$(basename "$f")"
-    if needs_prelude "$base"; then
-        echo "  SKIP: valid/$base (needs the prelude)"
-    else
-        expect_exit "valid/$base" 0 check "$f"
-    fi
+    expect_exit "valid/$(basename "$f")" 0 check "$f"
 done
 echo ""
 
@@ -65,6 +49,15 @@ echo "--- parses but invalid ---"
 for f in "$EXAMPLES"/parses-but-invalid/*.types; do
     expect_exit "parses-but-invalid/$(basename "$f")" 1 check "$f"
 done
+echo ""
+
+echo "--- prelude ---"
+expect_exit "prelude supplies Option" 0 check "$EXAMPLES/valid/mutual.types"
+expect_exit "--no-prelude hides Option" 1 check --no-prelude "$EXAMPLES/valid/mutual.types"
+expect_exit "prelude supplies Bool" 0 check "$EXAMPLES/valid/uses-bool.types"
+expect_exit "prelude names cannot be redeclared" 1 check "$EXAMPLES/parses-but-invalid/redeclares-bool.types"
+expect_exit "--no-prelude allows redeclaring Bool" 0 check --no-prelude "$EXAMPLES/parses-but-invalid/redeclares-bool.types"
+expect_exit "--no-prelude with a self-contained file" 0 check --no-prelude "$EXAMPLES/valid/shapes.types"
 echo ""
 
 echo "--- invocation ---"

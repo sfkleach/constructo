@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use constructo::{check_sources, Source};
+use constructo::{check_sources, prelude_source, Source};
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -24,6 +24,10 @@ enum Command {
         #[arg(long)]
         stdin: bool,
 
+        /// Do not load the standard prelude (Bool and Option)
+        #[arg(long)]
+        no_prelude: bool,
+
         /// Print a message when the check succeeds
         #[arg(long, short)]
         verbose: bool,
@@ -37,11 +41,16 @@ enum Command {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
-        Command::Check { stdin, verbose, files } => check(stdin, verbose, &files),
+        Command::Check {
+            stdin,
+            no_prelude,
+            verbose,
+            files,
+        } => check(stdin, no_prelude, verbose, &files),
     }
 }
 
-fn check(stdin: bool, verbose: bool, files: &[PathBuf]) -> ExitCode {
+fn check(stdin: bool, no_prelude: bool, verbose: bool, files: &[PathBuf]) -> ExitCode {
     let mut sources = Vec::new();
     for file in files {
         match std::fs::read_to_string(file) {
@@ -67,6 +76,12 @@ fn check(stdin: bool, verbose: bool, files: &[PathBuf]) -> ExitCode {
         });
     }
 
+    // The prelude is an ordinary source that is checked ahead of the user's inputs.
+    let inputs = sources.len();
+    if !no_prelude {
+        sources.insert(0, prelude_source());
+    }
+
     // The processing is deliberately independent of the command line so that it is available as a library.
     let diagnostics = check_sources(&sources);
     for diagnostic in &diagnostics {
@@ -74,7 +89,7 @@ fn check(stdin: bool, verbose: bool, files: &[PathBuf]) -> ExitCode {
     }
     if diagnostics.is_empty() {
         if verbose {
-            println!("OK: checked {} input(s)", sources.len());
+            println!("OK: checked {} input(s)", inputs);
         }
         ExitCode::SUCCESS
     } else {

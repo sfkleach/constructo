@@ -64,8 +64,8 @@ The basic types are: Nat, Int, Float and String.
 ### Grammar change
 
 Type parameters may start with an underscore: `TypeParam = '_'? TypeName`.
-    Update `syntax/dt_grammar_tabatkins.txt`. An underscore parameter is declared but
-    may not be used in the body (it exists only to satisfy arity).
+Update `syntax/dt_grammar_tabatkins.txt`. An underscore parameter is declared
+but may not be used in the body (it exists only to satisfy arity).
 
 ### Diagnostics
 
@@ -103,14 +103,31 @@ Type parameters may start with an underscore: `TypeParam = '_'? TypeName`.
 The standard prelude is automatically loaded ahead of any other input (unless disabled). It includes:
 
 ```
-enum Bool = True | False;
-enum Option<T> = None | Some(T);
+enum Bool = True, False;
+enum Option<T> = None, Some(T);
 ```
 
 Loading can be disabled with `--no-prelude`. 
 
 Implement the prelude loading as an initial action. Integrate the examples
 that were failing (such as `mutual.types`) into the functional tests.
+
+## Step 4: Verbose mode
+
+The `--verbose` option was implemented in the previous steps and, as expected,
+generates additional commentary. This step refines it's behaviour. When it is
+enabled:
+
+- Each file that is successfully checked should be reported clearly, along
+  with the file name.
+- If all files are successfully parsed, then a final `OK` message is printed
+  along with a count of the files checked.
+- If a data-types file is not successfully parsed, then the checking is stopped
+  and the error, the associated enum (if known), and the location in the file
+  is reported.
+- If the "file" is stdin, then `<stdin>` is used to represent its name.
+
+N.B This option will be elaborated further when data-value files are added.
 
 
 ## Step 99: Populate the CHANGELOG

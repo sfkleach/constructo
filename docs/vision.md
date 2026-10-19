@@ -81,6 +81,8 @@ before deployment.
 - Validate the syntax of one or more values files.
 - Validate values files against a types file (syntax plus type-correctness).
 - Validate stdin against a types file.
+- A standard prelude declares `Bool` and `Option<T>`; it is loaded by default and `--no-prelude`
+  disables it.
 - Post-parse checks: duplicate variants or fields, unknown types, wrong generic
   arity.
 - Warnings (e.g. `+8080` where a `Nat` is expected) are distinguished from errors.
