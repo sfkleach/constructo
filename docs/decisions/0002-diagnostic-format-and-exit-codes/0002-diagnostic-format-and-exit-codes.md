@@ -1,5 +1,7 @@
 # 0002 - Diagnostic format and exit codes, 2026-10-18
 
+> Amended by [decision 6](../0006-stop-at-the-first-syntax-error-and-name-the-enclosing-enum/0006-stop-at-the-first-syntax-error-and-name-the-enclosing-enum.md): the run now stops at the first syntax error.
+
 ## Issue
 
 **Leap.** Choose the diagnostic format and exit codes for `check`, extending the single example in

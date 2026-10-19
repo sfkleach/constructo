@@ -11,6 +11,8 @@ use crate::lexer::{lex, Tok, Token};
 pub struct SyntaxError {
     pub pos: Pos,
     pub message: String,
+    /// The enum being parsed when the error occurred, if its name had been read.
+    pub enum_name: Option<String>,
 }
 
 type Result<T> = std::result::Result<T, SyntaxError>;
@@ -20,6 +22,7 @@ pub fn parse(text: &str) -> Result<Vec<EnumDecl>> {
     let mut parser = Parser {
         tokens: lex(text),
         index: 0,
+        current_enum: None,
     };
     let mut decls = Vec::new();
     while parser.peek() != &Tok::Eof {
@@ -31,6 +34,7 @@ pub fn parse(text: &str) -> Result<Vec<EnumDecl>> {
 struct Parser {
     tokens: Vec<Token>,
     index: usize,
+    current_enum: Option<String>,
 }
 
 impl Parser {
@@ -57,6 +61,7 @@ impl Parser {
         Err(SyntaxError {
             pos: self.pos(),
             message,
+            enum_name: self.current_enum.clone(),
         })
     }
 
@@ -80,8 +85,11 @@ impl Parser {
     }
 
     fn enum_decl(&mut self) -> Result<EnumDecl> {
+        // Errors before the name has been read are not attributed to the previous enum.
+        self.current_enum = None;
         self.expect(Tok::Enum, "'enum'")?;
         let (name, pos) = self.type_name("type name")?;
+        self.current_enum = Some(name.clone());
         let params = if self.peek() == &Tok::Lt {
             self.type_params()?
         } else {
@@ -276,6 +284,16 @@ mod tests {
             (2, 1, "Expected comma or semi-colon".to_string())
         );
         assert_eq!(err("enum A = X {a: Int b: Int};").2, "Expected comma or '}'");
+    }
+
+    #[test]
+    fn attributes_errors_to_the_enclosing_enum_once_it_is_named() {
+        let enum_of = |text: &str| parse(text).unwrap_err().enum_name;
+        assert_eq!(enum_of("enum Shape = Circle { r: }"), Some("Shape".to_string()));
+        assert_eq!(enum_of("enum Shape"), Some("Shape".to_string()));
+        assert_eq!(enum_of("enum a = X;"), None);
+        assert_eq!(enum_of("enum A = X; B"), None);
+        assert_eq!(enum_of("enum A = X; enum B = ;"), Some("B".to_string()));
     }
 
     #[test]

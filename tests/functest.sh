@@ -93,10 +93,39 @@ else
     fail "no output on success (got '$quiet')"
 fi
 loud="$("$CONSTRUCTO" check -v "$EXAMPLES/valid/shapes.types" 2>&1)"
-if [[ "$loud" == OK:* ]]; then
-    pass "-v prints a success message"
+if [[ "$loud" == *"OK: $EXAMPLES/valid/shapes.types"* && "$loud" == *"OK: checked 1 file(s)"* ]]; then
+    pass "-v reports each file and a final count"
 else
-    fail "-v prints a success message (got '$loud')"
+    fail "-v reports each file and a final count (got '$loud')"
+fi
+if [[ "$loud" != *"<prelude>"* ]]; then
+    pass "-v does not report the prelude"
+else
+    fail "-v does not report the prelude (got '$loud')"
+fi
+loud="$("$CONSTRUCTO" check -v "$EXAMPLES/valid/shapes.types" "$EXAMPLES/valid/list.types" 2>&1)"
+if [[ "$loud" == *"OK: checked 2 file(s)"* ]]; then
+    pass "-v counts several files"
+else
+    fail "-v counts several files (got '$loud')"
+fi
+loud="$(printf 'enum A = X;\n' | "$CONSTRUCTO" check -v --stdin 2>&1)"
+if [[ "$loud" == *"OK: <stdin>"* ]]; then
+    pass "-v names stdin as <stdin>"
+else
+    fail "-v names stdin as <stdin> (got '$loud')"
+fi
+loud="$("$CONSTRUCTO" check -v "$EXAMPLES/parses-but-invalid/duplicate-variant.types" "$EXAMPLES/valid/shapes.types" 2>/dev/null || true)"
+if [[ "$loud" == *"FAILED: "*duplicate-variant.types* && "$loud" == *"OK: "*shapes.types* && "$loud" != *"checked"* ]]; then
+    pass "-v marks failed files and gives no final OK"
+else
+    fail "-v marks failed files and gives no final OK (got '$loud')"
+fi
+err="$("$CONSTRUCTO" check -v "$EXAMPLES/valid/shapes.types" "$EXAMPLES/invalid/missing-semicolon.types" "$EXAMPLES/invalid/no-variants.types" 2>&1 || true)"
+if [[ "$err" == *"in enum Shape"* && "$err" != *"no-variants"* ]]; then
+    pass "stops at the first syntax error and names the enum"
+else
+    fail "stops at the first syntax error and names the enum (got '$err')"
 fi
 echo ""
 

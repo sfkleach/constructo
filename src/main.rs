@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use constructo::{check_sources, prelude_source, Source};
+use constructo::{check_sources, prelude_source, Outcome, Source};
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -77,19 +77,29 @@ fn check(stdin: bool, no_prelude: bool, verbose: bool, files: &[PathBuf]) -> Exi
     }
 
     // The prelude is an ordinary source that is checked ahead of the user's inputs.
-    let inputs = sources.len();
+    let first_input = usize::from(!no_prelude);
     if !no_prelude {
         sources.insert(0, prelude_source());
     }
 
     // The processing is deliberately independent of the command line so that it is available as a library.
-    let diagnostics = check_sources(&sources);
-    for diagnostic in &diagnostics {
+    let report = check_sources(&sources);
+    for diagnostic in &report.diagnostics {
         eprintln!("{}", diagnostic);
     }
-    if diagnostics.is_empty() {
+    if verbose {
+        // The prelude is not one of the user's inputs, so it is never reported.
+        for (source, outcome) in sources.iter().zip(&report.outcomes).skip(first_input) {
+            match outcome {
+                Outcome::Ok => println!("OK: {}", source.name),
+                Outcome::Failed => println!("FAILED: {}", source.name),
+                Outcome::NotChecked => {}
+            }
+        }
+    }
+    if report.is_ok() {
         if verbose {
-            println!("OK: checked {} input(s)", inputs);
+            println!("OK: checked {} file(s)", sources.len() - first_input);
         }
         ExitCode::SUCCESS
     } else {

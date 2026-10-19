@@ -45,8 +45,9 @@ struct Checker<'a> {
     found: Vec<(usize, Diagnostic)>,
 }
 
-/// Runs every post-parse check and returns the errors ordered by file, line and column.
-pub fn validate(files: &[ParsedFile]) -> Vec<Diagnostic> {
+/// Runs every post-parse check and returns the errors, each with the index of its file, ordered by file, line and
+/// column.
+pub fn validate(files: &[ParsedFile]) -> Vec<(usize, Diagnostic)> {
     let mut checker = Checker {
         files,
         types: HashMap::new(),
@@ -63,7 +64,7 @@ pub fn validate(files: &[ParsedFile]) -> Vec<Diagnostic> {
     let mut found = checker.found;
     // The sort is stable, so errors at one position keep the order in which they were found.
     found.sort_by_key(|(file, d)| (*file, d.pos));
-    found.into_iter().map(|(_, d)| d).collect()
+    found
 }
 
 impl<'a> Checker<'a> {
@@ -234,7 +235,11 @@ mod tests {
                 text: text.to_string(),
             })
             .collect();
-        check_sources(&sources).iter().map(|d| d.to_string()).collect()
+        check_sources(&sources)
+            .diagnostics
+            .iter()
+            .map(|d| d.to_string())
+            .collect()
     }
 
     #[test]
@@ -299,7 +304,7 @@ mod tests {
     fn skips_validation_when_any_file_has_a_syntax_error() {
         assert_eq!(
             errors(&["enum A = X(B);", "enum B = ;"]),
-            vec!["ERROR: Expected constructor name (f1, line 1, col 10)"]
+            vec!["ERROR: Expected constructor name (f1, line 1, col 10); in enum B"]
         );
     }
 }

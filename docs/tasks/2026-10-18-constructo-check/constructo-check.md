@@ -69,7 +69,8 @@ but may not be used in the body (it exists only to satisfy arity).
 
 ### Diagnostics
 
-- The parser reports the first syntax error in each file, with no error recovery.
+- The parser reports the first syntax error in each file, with no error recovery. (Step 4 later changed this:
+  the run stops at the first syntax error.)
   Post-parse checks report every error found, ordered by file, line and column. They are
   skipped if any file had a syntax error, since the unparsed file may hold declarations
   the others use.

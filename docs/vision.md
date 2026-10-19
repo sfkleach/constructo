@@ -23,10 +23,10 @@ She runs the tool on the types file alone.
 
 ```
 > constructo check harbour.types
-ERROR: Expected comma or semi-colon (harbour.types, line 2, col 1)
+ERROR: Expected comma or semi-colon (harbour.types, line 2, col 1); in enum Env
 ```
 
-It points at the file, line and column of a missing `;`. Once fixed, the tool also
+It points at the file, line and column of a missing `;`, and names the enum being parsed. Once fixed, the tool also
 runs the post-parse checks and tells her she declared a variant twice (Dev):
 
 ```
