@@ -11,7 +11,7 @@ pub mod validate;
 
 use diagnostics::Diagnostic;
 use parser::{parse_file, Parsed};
-use typecheck::{check_value, Env};
+use typecheck::{check_const, check_value, Env};
 use validate::{validate, ParsedFile};
 
 pub use parser::SourceKind;
@@ -68,8 +68,8 @@ impl Report {
 
 fn syntax_diagnostic(source: &Source, e: parser::SyntaxError) -> Diagnostic {
     let diagnostic = Diagnostic::new(&source.name, e.pos, e.message);
-    match e.enum_name {
-        Some(name) => diagnostic.with_note(format!("in enum {}", name)),
+    match e.context {
+        Some(context) => diagnostic.with_note(format!("in {}", context)),
         None => diagnostic,
     }
 }
@@ -91,6 +91,8 @@ pub struct CheckOptions {
     pub widening: bool,
     /// Carry on with the next top-level value after a type error, instead of stopping.
     pub continue_after_error: bool,
+    /// Let the definition of a const refer to other consts.
+    pub allow_refs: bool,
 }
 
 impl Default for CheckOptions {
@@ -99,6 +101,7 @@ impl Default for CheckOptions {
             type_check: true,
             widening: true,
             continue_after_error: false,
+            allow_refs: false,
         }
     }
 }
@@ -149,15 +152,16 @@ pub fn check_sources_with(sources: &[Source], options: &CheckOptions) -> Report 
     let mut indexes = Vec::new();
     let mut files = Vec::new();
     for (index, parsed) in parsed_sources.iter().enumerate() {
-        if let Parsed::Types(decls) = parsed {
+        if let Parsed::Types(file) = parsed {
             indexes.push(index);
             files.push(ParsedFile {
                 name: sources[index].name.clone(),
-                decls: decls.clone(),
+                decls: file.enums.clone(),
+                consts: file.consts.clone(),
             });
         }
     }
-    for (file, diagnostic) in validate(&files) {
+    for (file, diagnostic) in validate(&files, options.allow_refs) {
         outcomes[indexes[file]] = Outcome::Failed;
         diagnostics.push(diagnostic);
     }
@@ -180,14 +184,43 @@ fn type_check_values(
     outcomes: &mut [Outcome],
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let mut visible = Vec::new();
     let mut stopped = false;
+    // The declarations of a types file are all in scope in the whole of it, whatever their order, and in every types
+    // file, so the consts are checked against all of them.
+    let everything = parsed_sources.iter().filter_map(|parsed| match parsed {
+        Parsed::Types(file) => Some(file),
+        Parsed::Values(_) => None,
+    });
+    let env = Env::new(
+        everything.clone().flat_map(|file| &file.enums),
+        everything.flat_map(|file| &file.consts),
+    );
+    'consts: for (index, parsed) in parsed_sources.iter().enumerate() {
+        if let Parsed::Types(file) = parsed {
+            for constant in &file.consts {
+                if let Err(e) = check_const(&env, options.widening, constant) {
+                    diagnostics.push(Diagnostic::new(&sources[index].name, e.pos, e.message));
+                    outcomes[index] = Outcome::Failed;
+                    if !options.continue_after_error {
+                        stopped = true;
+                        break 'consts;
+                    }
+                }
+            }
+        }
+    }
+    // A values file sees only the types files that come before it.
+    let mut visible_enums = Vec::new();
+    let mut visible_consts = Vec::new();
     for (index, parsed) in parsed_sources.iter().enumerate() {
         match parsed {
-            Parsed::Types(decls) => visible.extend(decls),
+            Parsed::Types(file) => {
+                visible_enums.extend(&file.enums);
+                visible_consts.extend(&file.consts);
+            }
             Parsed::Values(_) if stopped => outcomes[index] = Outcome::NotChecked,
             Parsed::Values(values) => {
-                let env = Env::new(visible.iter().copied());
+                let env = Env::new(visible_enums.iter().copied(), visible_consts.iter().copied());
                 for value in values {
                     if let Err(e) = check_value(&env, options.widening, value) {
                         diagnostics.push(Diagnostic::new(&sources[index].name, e.pos, e.message));
@@ -413,5 +446,241 @@ mod tests {
     fn validity_errors_are_attributed_to_the_right_source_when_values_are_mixed_in() {
         let report = check_sources(&sources(&["1; 2", "enum A = X(Missing);"]));
         assert_eq!(report.outcomes, vec![Outcome::Ok, Outcome::Failed]);
+    }
+
+    fn messages(report: &Report) -> Vec<String> {
+        report.diagnostics.iter().map(|d| d.to_string()).collect()
+    }
+
+    fn with_refs(texts: &[&str]) -> Report {
+        let options = CheckOptions {
+            allow_refs: true,
+            ..CheckOptions::default()
+        };
+        check_sources_with(&sources(texts), &options)
+    }
+
+    const SHAPES: &str = "enum Shape = Circle { r: Float }, Dot;\n";
+
+    #[test]
+    fn consts_may_be_declared_in_any_order_among_the_enums() {
+        let text = "const Origin: Shape = Dot;\nenum Shape = Circle { r: Float }, Dot;\nconst unit: Shape = Circle { r: 1.0 };";
+        let report = check_sources(&sources(&[text]));
+        assert_eq!(messages(&report), Vec::<String>::new());
+        assert_eq!(report.kinds, vec![Some(SourceKind::Types)]);
+    }
+
+    #[test]
+    fn a_file_may_start_with_a_const() {
+        assert!(check_sources(&sources(&["const N: Nat = 1;"])).is_ok());
+    }
+
+    #[test]
+    fn consts_share_the_constructor_namespace() {
+        let report = check_sources(&sources(&[
+            "enum E = Red;\nconst Red: E = Red;\nconst X: Nat = 1;\nconst X: Nat = 2;",
+        ]));
+        assert_eq!(
+            messages(&report),
+            vec![
+                "ERROR: Duplicate const Red (f0, line 2, col 7); first declared at line 1, col 10",
+                "ERROR: Duplicate const X (f0, line 4, col 7); first declared at line 3, col 7",
+            ]
+        );
+        let report = check_sources(&sources(&["const Dev: Nat = 1;", "enum E = Dev, Other;"]));
+        assert_eq!(
+            messages(&report),
+            vec!["ERROR: Duplicate constructor Dev (f1, line 1, col 10); first declared at f0, line 1, col 7"]
+        );
+    }
+
+    #[test]
+    fn a_const_may_share_a_name_with_an_enum_type() {
+        let text = "enum Config = Settings { port: Nat };\nconst Config: Config = Settings { port: 80 };";
+        assert_eq!(messages(&check_sources(&sources(&[text]))), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_const_cannot_be_named_after_a_basic_type() {
+        let report = check_sources(&sources(&["const Nat: Nat = 1;"]));
+        assert_eq!(
+            messages(&report),
+            vec!["ERROR: Const name Nat clashes with a basic type (f0, line 1, col 7)"]
+        );
+    }
+
+    #[test]
+    fn the_type_of_a_const_must_be_known() {
+        let report = check_sources(&sources(&[
+            "const N: Missing = 1;",
+            "enum L<T> = Nil, C(T);\nconst M: L = Nil;",
+        ]));
+        assert_eq!(
+            messages(&report),
+            vec![
+                "ERROR: Unknown type Missing (f0, line 1, col 10)",
+                "ERROR: Type L takes 1 type argument(s) but 0 supplied (f1, line 2, col 10)",
+            ]
+        );
+        // A type parameter is not in scope in a const.
+        assert_eq!(check_sources(&sources(&["const N: T = 1;"])).diagnostics.len(), 1);
+    }
+
+    #[test]
+    fn the_value_of_a_const_is_checked_against_its_type() {
+        let text = format!(
+            "{}const A: Shape = Circle {{ r: 1 }};\nconst B: Nat = \"s\";\nconst C: Shape = Square;",
+            SHAPES
+        );
+        let report = check_sources_with(
+            &sources(&[&text]),
+            &CheckOptions {
+                continue_after_error: true,
+                ..CheckOptions::default()
+            },
+        );
+        assert_eq!(
+            messages(&report),
+            vec![
+                "ERROR: Expected Nat but found String (f0, line 3, col 16)",
+                "ERROR: Unknown constructor Square (f0, line 4, col 18)",
+            ]
+        );
+        assert_eq!(report.outcomes, vec![Outcome::Failed]);
+        // The run stops at the first type error unless it is told to continue.
+        assert_eq!(check_sources(&sources(&[&text])).diagnostics.len(), 1);
+    }
+
+    #[test]
+    fn a_const_value_is_not_type_checked_under_no_type_check() {
+        let options = CheckOptions {
+            type_check: false,
+            ..CheckOptions::default()
+        };
+        assert!(check_sources_with(&sources(&["const N: Nat = \"s\";"]), &options).is_ok());
+    }
+
+    #[test]
+    fn a_values_file_may_refer_to_consts() {
+        let types = format!(
+            "{}const Origin: Shape = Dot;\nconst limit: Nat = 10;\nconst Names: [String] = [\"a\"];",
+            SHAPES
+        );
+        let ok = "Circle { r: limit }; Origin; [Origin, Dot]";
+        assert_eq!(messages(&check_sources(&sources(&[&types, ok]))), Vec::<String>::new());
+        let report = check_sources(&sources(&[&types, "Circle { r: Origin }"]));
+        assert_eq!(
+            messages(&report),
+            vec!["ERROR: Expected Float but found const Origin of type Shape (f1, line 1, col 13)"]
+        );
+        let report = check_sources(&sources(&[&types, "Origin { r: 1.0 }"]));
+        assert_eq!(
+            messages(&report),
+            vec!["ERROR: Const Origin is a value and takes no fields (f1, line 1, col 1)"]
+        );
+        let report = check_sources(&sources(&[&types, "missing"]));
+        assert_eq!(
+            messages(&report),
+            vec!["ERROR: Unknown const missing (f1, line 1, col 1)"]
+        );
+        // As for types, a values file sees only the consts that come before it.
+        assert_eq!(check_sources(&sources(&[ok, &types])).diagnostics.len(), 1);
+    }
+
+    #[test]
+    fn a_const_reference_has_the_declared_type_with_widening() {
+        let types = "enum Option<T> = None, Some(T);\nconst n: Nat = 1;\nconst x: Float = 1.5;\nconst o: Option<Nat> = Some(1);";
+        assert!(check_sources(&sources(&[types, "[n, x]; [x, n]; Some(n)"])).is_ok());
+        let report = check_sources(&sources(&[types, "[o, None]; [o, Some(2.5)]"]));
+        assert_eq!(report.diagnostics.len(), 1);
+        let strict = CheckOptions {
+            widening: false,
+            ..CheckOptions::default()
+        };
+        assert_eq!(
+            check_sources_with(&sources(&[types, "[n, x]"]), &strict)
+                .diagnostics
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_const_may_not_refer_to_a_const_without_allow_refs() {
+        let text = "const A: Nat = 1;\nconst B: [Nat] = [0, A];";
+        assert_eq!(
+            messages(&check_sources(&sources(&[text]))),
+            vec!["ERROR: Reference to const A in const B requires --allow-refs (f0, line 2, col 22)"]
+        );
+        assert_eq!(messages(&with_refs(&[text])), Vec::<String>::new());
+    }
+
+    #[test]
+    fn consts_may_refer_to_consts_in_any_order_across_files() {
+        let report = with_refs(&["const B: Nat = A;\nconst C: Nat = B;", "const A: Nat = 3;"]);
+        assert_eq!(messages(&report), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_reference_is_type_checked_against_the_declared_type() {
+        let report = with_refs(&["const A: String = \"s\";\nconst B: Nat = A;"]);
+        assert_eq!(
+            messages(&report),
+            vec!["ERROR: Expected Nat but found const A of type String (f0, line 2, col 16)"]
+        );
+    }
+
+    #[test]
+    fn circular_consts_are_reported_once_each() {
+        let report = with_refs(&["const A: Nat = B;\nconst B: Nat = C;\nconst C: Nat = A;\nconst D: Nat = D;"]);
+        assert_eq!(
+            messages(&report),
+            vec![
+                "ERROR: Circular const definition A -> B -> C -> A (f0, line 3, col 16)",
+                "ERROR: Circular const definition D -> D (f0, line 4, col 16)",
+            ]
+        );
+        // The cycle is reported without any type-check, so it is found under --no-type-check as well.
+        let options = CheckOptions {
+            allow_refs: true,
+            type_check: false,
+            ..CheckOptions::default()
+        };
+        assert_eq!(
+            check_sources_with(&sources(&["const A: Nat = A;"]), &options)
+                .diagnostics
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_long_chain_of_consts_does_not_overflow_the_stack() {
+        let text: String = (0..20_000)
+            .map(|i| format!("const c{}: Nat = c{};\n", i, i + 1))
+            .chain(std::iter::once("const c20000: Nat = 1;\n".to_string()))
+            .collect();
+        assert!(with_refs(&[&text]).is_ok());
+    }
+
+    #[test]
+    fn a_const_value_is_attributed_to_its_own_file() {
+        let report = check_sources(&sources(&["enum A = X;", "const N: Nat = \"s\";"]));
+        assert_eq!(report.outcomes, vec![Outcome::Ok, Outcome::Failed]);
+    }
+
+    #[test]
+    fn a_failed_const_stops_the_values_that_follow() {
+        let report = check_sources(&sources(&["const N: Nat = \"s\";", "1"]));
+        assert_eq!(report.outcomes, vec![Outcome::Failed, Outcome::NotChecked]);
+    }
+
+    #[test]
+    fn a_syntax_error_in_a_const_names_it() {
+        let report = check_sources(&sources(&["const N: Nat = 1;\nconst M: Nat = 1 2;"]));
+        assert_eq!(
+            messages(&report),
+            vec!["ERROR: Expected semi-colon (f0, line 2, col 18); in const M"]
+        );
     }
 }

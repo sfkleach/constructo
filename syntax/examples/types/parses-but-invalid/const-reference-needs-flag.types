@@ -1,0 +1,3 @@
+// Without --allow-refs, a const may not refer to another const.
+const Base: Nat = 10;
+const Total: Nat = Base;

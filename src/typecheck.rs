@@ -6,7 +6,7 @@
 //!
 //! The errors are reported at the innermost term that fails. Checking a top-level value stops at its first error.
 
-use crate::ast::{EnumDecl, Field, TaggedBody, Type, Value, ValueKind, Variant, VariantBody};
+use crate::ast::{ConstDecl, EnumDecl, Field, TaggedBody, Type, TypeParam, Value, ValueKind, Variant, VariantBody};
 use crate::diagnostics::Pos;
 use std::collections::HashMap;
 use std::fmt;
@@ -32,15 +32,20 @@ fn error<T>(pos: Pos, message: impl Into<String>) -> Result<T> {
 pub struct Env<'a> {
     enums: HashMap<&'a str, &'a EnumDecl>,
     constructors: HashMap<&'a str, (&'a EnumDecl, &'a Variant)>,
+    consts: HashMap<&'a str, &'a ConstDecl>,
 }
 
 impl<'a> Env<'a> {
     /// Builds the scope from declarations that have already passed validation, so that there are no duplicates.
-    pub fn new(decls: impl IntoIterator<Item = &'a EnumDecl>) -> Self {
+    pub fn new(decls: impl IntoIterator<Item = &'a EnumDecl>, consts: impl IntoIterator<Item = &'a ConstDecl>) -> Self {
         let mut env = Env {
             enums: HashMap::new(),
             constructors: HashMap::new(),
+            consts: HashMap::new(),
         };
+        for constant in consts {
+            env.consts.entry(constant.name.as_str()).or_insert(constant);
+        }
         for decl in decls {
             env.enums.entry(decl.name.as_str()).or_insert(decl);
             for variant in &decl.variants {
@@ -61,6 +66,18 @@ pub fn check_value(env: &Env, widening: bool, value: &Value) -> Result<()> {
     };
     let top = checker.fresh();
     checker.check(value, &top)
+}
+
+/// Checks the value of a const against the type that the const declares.
+pub fn check_const(env: &Env, widening: bool, constant: &ConstDecl) -> Result<()> {
+    let mut checker = Checker {
+        env,
+        widening,
+        slots: Vec::new(),
+    };
+    // A const has no type parameters, so its declared type is already closed.
+    let declared = instantiate(&constant.ty, &[], &[]);
+    checker.check(&constant.value, &declared)
 }
 
 /// A type. The compound types share their parts, so that cloning a type, and so substituting it for a type parameter,
@@ -266,7 +283,16 @@ impl Checker<'_, '_> {
                     let found = format!("{} of type {}", name, decl.name);
                     self.check_variant(pos, decl, variant, body.as_ref(), &expected, &found)
                 }
-                None => error(pos, format!("Unknown constructor {}", name)),
+                None => match self.env.consts.get(name.as_str()) {
+                    Some(constant) if body.is_some() => {
+                        error(pos, format!("Const {} is a value and takes no fields", constant.name))
+                    }
+                    Some(constant) => self.check_const_ref(pos, constant, original),
+                    None if name.starts_with(|c: char| c.is_ascii_lowercase() || c == '_') => {
+                        error(pos, format!("Unknown const {}", name))
+                    }
+                    None => error(pos, format!("Unknown constructor {}", name)),
+                },
             },
         }
     }
@@ -291,6 +317,49 @@ impl Checker<'_, '_> {
                 }
                 _ => self.mismatch(pos, expected, found),
             },
+        }
+    }
+
+    /// Checks a reference to a const, which has the type that the const declares.
+    fn check_const_ref(&mut self, pos: Pos, constant: &ConstDecl, original: &Ty) -> Result<()> {
+        let declared = instantiate(&constant.ty, &[], &[]);
+        let found = format!("const {} of type {}", constant.name, self.show(&declared));
+        self.conforms(pos, &declared, original, &found)
+    }
+
+    /// Checks that a value of the closed type `declared` can be used where `original` is expected. This is the same
+    /// relation as for a literal: numbers widen, and a variable that is still free takes the declared type.
+    fn conforms(&mut self, pos: Pos, declared: &Ty, original: &Ty, found: &str) -> Result<()> {
+        let expected = self.shallow(original);
+        match (declared, &expected) {
+            (Ty::Nat | Ty::Int | Ty::Float, _) => {
+                let lit = rank(declared).expect("a numeric type has a rank");
+                self.check_number(pos, lit, original, &expected, found)
+            }
+            (_, Ty::Var(_)) => {
+                self.bind(&expected, declared.clone(), false);
+                Ok(())
+            }
+            (Ty::Str, Ty::Str) => Ok(()),
+            (Ty::Array(from), Ty::Array(to)) => self.conforms(pos, from, to, found),
+            (Ty::Enum(from_name, from_args), Ty::Enum(to_name, to_args))
+                if from_name == to_name && from_args.len() == to_args.len() =>
+            {
+                for (from, to) in from_args.iter().zip(to_args.iter()) {
+                    self.conforms(pos, from, to, found)?;
+                }
+                Ok(())
+            }
+            (Ty::Record(from), Ty::Record(to))
+                if from.len() == to.len() && from.iter().all(|(name, _)| to.iter().any(|(n, _)| n == name)) =>
+            {
+                for (name, from) in from.iter() {
+                    let to = &to.iter().find(|(n, _)| n == name).expect("the field exists").1;
+                    self.conforms(pos, from, to, found)?;
+                }
+                Ok(())
+            }
+            _ => self.mismatch(pos, &expected, found),
         }
     }
 
@@ -320,7 +389,7 @@ impl Checker<'_, '_> {
             (VariantBody::Unit, None) => Ok(()),
             (VariantBody::Unit, Some(_)) => error(pos, format!("Constructor {} takes no fields", name)),
             (VariantBody::Record(fields), Some(TaggedBody::Record(members))) => {
-                let fields = instantiate_fields(fields, decl, &args);
+                let fields = instantiate_fields(fields, &decl.params, &args);
                 self.check_members(pos, name, members, &fields)
             }
             (VariantBody::Record(_), _) => error(pos, format!("Constructor {} takes a record", name)),
@@ -335,7 +404,7 @@ impl Checker<'_, '_> {
                     return error(pos, message);
                 }
                 for (ty, value) in types.iter().zip(values) {
-                    let ty = instantiate(ty, decl, &args);
+                    let ty = instantiate(ty, &decl.params, &args);
                     self.check(value, &ty)?;
                 }
                 Ok(())
@@ -377,20 +446,20 @@ impl Checker<'_, '_> {
     }
 }
 
-fn instantiate_fields(fields: &[Field], decl: &EnumDecl, args: &[Ty]) -> Vec<(String, Ty)> {
+fn instantiate_fields(fields: &[Field], params: &[TypeParam], args: &[Ty]) -> Vec<(String, Ty)> {
     fields
         .iter()
-        .map(|f| (f.name.clone(), instantiate(&f.ty, decl, args)))
+        .map(|f| (f.name.clone(), instantiate(&f.ty, params, args)))
         .collect()
 }
 
-/// Turns a declared type into a `Ty`, replacing the enum's type parameters with the given arguments.
-fn instantiate(ty: &Type, decl: &EnumDecl, args: &[Ty]) -> Ty {
+/// Turns a declared type into a `Ty`, replacing the type parameters with the given arguments.
+fn instantiate(ty: &Type, params: &[TypeParam], args: &[Ty]) -> Ty {
     match ty {
         Type::Ref {
             name, args: type_args, ..
         } => {
-            if let Some(index) = decl.params.iter().position(|p| p.name == *name) {
+            if let Some(index) = params.iter().position(|p| p.name == *name) {
                 return args[index].clone();
             }
             match name.as_str() {
@@ -400,12 +469,12 @@ fn instantiate(ty: &Type, decl: &EnumDecl, args: &[Ty]) -> Ty {
                 "String" => Ty::Str,
                 _ => Ty::Enum(
                     name.clone(),
-                    Rc::new(type_args.iter().map(|t| instantiate(t, decl, args)).collect()),
+                    Rc::new(type_args.iter().map(|t| instantiate(t, params, args)).collect()),
                 ),
             }
         }
-        Type::Array(elem) => Ty::Array(Rc::new(instantiate(elem, decl, args))),
-        Type::Record(fields) => Ty::Record(Rc::new(instantiate_fields(fields, decl, args))),
+        Type::Array(elem) => Ty::Array(Rc::new(instantiate(elem, params, args))),
+        Type::Record(fields) => Ty::Record(Rc::new(instantiate_fields(fields, params, args))),
     }
 }
 
@@ -422,8 +491,8 @@ mod tests {
 
     /// Checks each value of `values` against `types`, and returns the error of each value as `line:col message`.
     fn errors(types: &str, values: &str, widening: bool) -> Vec<String> {
-        let decls = parse(&format!("enum Option<T> = None, Some(T); {}", types)).unwrap();
-        let env = Env::new(&decls);
+        let file = parse(&format!("enum Option<T> = None, Some(T); {}", types)).unwrap();
+        let env = Env::new(&file.enums, &file.consts);
         parse_values(values)
             .unwrap()
             .iter()
@@ -580,8 +649,8 @@ mod tests {
 
     #[test]
     fn null_needs_option_in_scope() {
-        let decls = parse("enum A = A;").unwrap();
-        let env = Env::new(&decls);
+        let file = parse("enum A = A;").unwrap();
+        let env = Env::new(&file.enums, &file.consts);
         let value = &parse_values("null").unwrap()[0];
         assert_eq!(
             check_value(&env, true, value).unwrap_err().message,

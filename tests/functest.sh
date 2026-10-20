@@ -133,6 +133,33 @@ expect_exit "a values file needs no types file under --no-type-check" 0 \
 expect_exit "stdin may hold values" 0 check --no-type-check --stdin < "$VALUES/valid/single-value.values"
 echo ""
 
+echo "--- consts ---"
+REFS="$EXAMPLES/refs"
+expect_exit "a const may refer to another with --allow-refs" 0 check --allow-refs "$REFS/chain.types"
+expect_exit "a const may not refer to another without --allow-refs" 1 check "$REFS/chain.types"
+expect_exit "a circular definition is an error with --allow-refs" 1 check --allow-refs "$REFS/cycle.types"
+err="$("$CONSTRUCTO" check --allow-refs "$REFS/cycle.types" 2>&1 >/dev/null || true)"
+if [[ "$err" == "ERROR: Circular const definition A -> B -> A ("*"cycle.types, line 3, col 16)" ]]; then
+    pass "a circular definition names the consts on the circle"
+else
+    fail "a circular definition names the consts on the circle (got '$err')"
+fi
+err="$("$CONSTRUCTO" check "$EXAMPLES/parses-but-invalid/const-reference-needs-flag.types" 2>&1 >/dev/null || true)"
+if [[ "$err" == "ERROR: Reference to const Base in const Total requires --allow-refs ("*"line 3, col 20)" ]]; then
+    pass "the error for a const reference names the flag"
+else
+    fail "the error for a const reference names the flag (got '$err')"
+fi
+expect_exit "an ill-typed const passes --no-type-check" 0 \
+    check --no-type-check "$EXAMPLES/parses-but-invalid/const-wrong-type.types"
+loud="$("$CONSTRUCTO" check -v "$EXAMPLES/valid/starts-with-const.types" 2>&1)"
+if [[ "$loud" == *"starts-with-const.types (data-types)"* ]]; then
+    pass "a file that starts with const is a data-types file"
+else
+    fail "a file that starts with const is a data-types file (got '$loud')"
+fi
+echo ""
+
 echo "--- prelude ---"
 expect_exit "prelude supplies Option" 0 check "$EXAMPLES/valid/mutual.types"
 expect_exit "--no-prelude hides Option" 1 check --no-prelude "$EXAMPLES/valid/mutual.types"

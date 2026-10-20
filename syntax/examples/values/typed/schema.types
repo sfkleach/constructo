@@ -6,3 +6,5 @@ enum Shape =
   Pair(Nat, Int);
 enum List<T> = Nil, Cons { head: T, tail: List<T> };
 enum Config = Config { name: String, owner: Option<String>, limits: { cpu: Nat, mem: Nat }, tags: [String] };
+const Unit: Shape = Circle { radius: 1.0 };
+const max_width: Float = 100.0;

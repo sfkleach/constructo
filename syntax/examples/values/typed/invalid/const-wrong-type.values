@@ -1,0 +1,2 @@
+// expect: Expected Nat but found const max_width of type Float
+Pair(max_width, 1);

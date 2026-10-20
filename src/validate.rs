@@ -1,8 +1,8 @@
-//! The post-parse checks: names, duplicates and generic arity.
+//! The post-parse checks: names, duplicates, generic arity and references between consts.
 //!
 //! All the parsed files are checked together as a single namespace.
 
-use crate::ast::{EnumDecl, Field, Type, VariantBody};
+use crate::ast::{ConstDecl, EnumDecl, Field, TaggedBody, Type, Value, ValueKind, VariantBody};
 use crate::diagnostics::{Diagnostic, Pos};
 use std::collections::HashMap;
 
@@ -17,6 +17,7 @@ fn is_basic(name: &str) -> bool {
 pub struct ParsedFile {
     pub name: String,
     pub decls: Vec<EnumDecl>,
+    pub consts: Vec<ConstDecl>,
 }
 
 /// Where a name was first declared: the index of the file and the position within it.
@@ -41,27 +42,34 @@ struct Param<'a> {
 struct Checker<'a> {
     files: &'a [ParsedFile],
     types: HashMap<&'a str, TypeInfo>,
+    /// The constructors and the consts, which share a namespace.
     constructors: HashMap<&'a str, Site>,
+    /// The consts that were registered, with the index of their file. A const whose name is a duplicate is not one.
+    consts: HashMap<&'a str, (usize, &'a ConstDecl)>,
+    allow_refs: bool,
     /// Each diagnostic is stored with the index of its file so they can be ordered.
     found: Vec<(usize, Diagnostic)>,
 }
 
 /// Runs every post-parse check and returns the errors, each with the index of its file, ordered by file, line and
-/// column.
-pub fn validate(files: &[ParsedFile]) -> Vec<(usize, Diagnostic)> {
+/// column. A const may only refer to another const if `allow_refs` is set, and then the references must not be circular.
+pub fn validate(files: &[ParsedFile], allow_refs: bool) -> Vec<(usize, Diagnostic)> {
     let mut checker = Checker {
         files,
         types: HashMap::new(),
         constructors: HashMap::new(),
+        consts: HashMap::new(),
+        allow_refs,
         found: Vec::new(),
     };
     checker.collect_types();
-    checker.collect_constructors();
+    checker.collect_value_names();
     for (file, parsed) in files.iter().enumerate() {
         for decl in &parsed.decls {
             checker.check_decl(file, decl);
         }
     }
+    checker.check_consts();
     let mut found = checker.found;
     // The sort is stable, so errors at one position keep the order in which they were found.
     found.sort_by_key(|(file, d)| (*file, d.pos));
@@ -106,23 +114,135 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn collect_constructors(&mut self) {
+    /// Registers the constructors and the consts, which share a namespace. Within a file the names are taken in the
+    /// order they were written, so that the one reported as a duplicate is the later one.
+    fn collect_value_names(&mut self) {
         let files = self.files;
         for (file, parsed) in files.iter().enumerate() {
-            for variant in parsed.decls.iter().flat_map(|d| &d.variants) {
-                let name = variant.name.as_str();
+            let variants = parsed.decls.iter().flat_map(|d| &d.variants);
+            let mut names: Vec<(Pos, &str, Option<&ConstDecl>)> = variants
+                .map(|v| (v.pos, v.name.as_str(), None))
+                .chain(parsed.consts.iter().map(|c| (c.pos, c.name.as_str(), Some(c))))
+                .collect();
+            names.sort_by_key(|(pos, ..)| *pos);
+            for (pos, name, constant) in names {
+                let (kind, label) = match constant {
+                    Some(_) => ("const", "Const"),
+                    None => ("constructor", "Constructor"),
+                };
                 if is_basic(name) {
-                    let message = format!("Constructor name {} clashes with a basic type", name);
-                    self.report(file, variant.pos, message, None);
+                    let message = format!("{} name {} clashes with a basic type", label, name);
+                    self.report(file, pos, message, None);
                 } else if let Some(&first) = self.constructors.get(name) {
-                    self.report(
-                        file,
-                        variant.pos,
-                        format!("Duplicate constructor {}", name),
-                        Some(first),
-                    );
+                    self.report(file, pos, format!("Duplicate {} {}", kind, name), Some(first));
                 } else {
-                    self.constructors.insert(name, Site { file, pos: variant.pos });
+                    self.constructors.insert(name, Site { file, pos });
+                    if let Some(constant) = constant {
+                        self.consts.insert(name, (file, constant));
+                    }
+                }
+            }
+        }
+    }
+
+    /// Checks the type of each const, and the references that its value makes to other consts.
+    fn check_consts(&mut self) {
+        let files = self.files;
+        // Each const with the registered consts that its value refers to, and where.
+        let mut edges: HashMap<&str, Vec<(&str, Pos)>> = HashMap::new();
+        for (file, parsed) in files.iter().enumerate() {
+            for constant in &parsed.consts {
+                self.check_type(file, &constant.ty, &mut Vec::new());
+                let mut refs = Vec::new();
+                self.collect_refs(&constant.value, &mut refs);
+                if !self.allow_refs {
+                    for &(target, pos) in &refs {
+                        let message = format!(
+                            "Reference to const {} in const {} requires --allow-refs",
+                            target, constant.name
+                        );
+                        self.report(file, pos, message, None);
+                    }
+                }
+                // A const whose name was a duplicate is not the one that references to the name resolve to.
+                if self
+                    .consts
+                    .get(constant.name.as_str())
+                    .is_some_and(|(f, c)| *f == file && c.pos == constant.pos)
+                {
+                    edges.insert(&constant.name, refs);
+                }
+            }
+        }
+        if self.allow_refs {
+            self.check_cycles(&edges);
+        }
+    }
+
+    /// Finds the references to registered consts in a value.
+    fn collect_refs(&self, value: &'a Value, refs: &mut Vec<(&'a str, Pos)>) {
+        match &value.kind {
+            ValueKind::Array(items) => items.iter().for_each(|item| self.collect_refs(item, refs)),
+            ValueKind::Record(members) => members.iter().for_each(|m| self.collect_refs(&m.value, refs)),
+            ValueKind::Tagged { name, body } => {
+                if self.consts.contains_key(name.as_str()) {
+                    refs.push((name, value.pos));
+                }
+                match body {
+                    Some(TaggedBody::Record(members)) => members.iter().for_each(|m| self.collect_refs(&m.value, refs)),
+                    Some(TaggedBody::Tuple(items)) => items.iter().for_each(|item| self.collect_refs(item, refs)),
+                    None => {}
+                }
+            }
+            ValueKind::Null | ValueKind::Nat(_) | ValueKind::Int(_) | ValueKind::Float(_) | ValueKind::Str(_) => {}
+        }
+    }
+
+    /// Reports each reference that closes a circle of consts. The search is a depth-first one with an explicit stack,
+    /// because a long chain of consts must not overflow the call stack.
+    fn check_cycles(&mut self, edges: &HashMap<&'a str, Vec<(&'a str, Pos)>>) {
+        let mut order: Vec<&str> = edges.keys().copied().collect();
+        order.sort_by_key(|name| {
+            let (file, constant) = self.consts[name];
+            (file, constant.pos)
+        });
+        // A const is on the current path while its state is `OnPath` and is finished once it is `Done`.
+        #[derive(PartialEq)]
+        enum State {
+            OnPath,
+            Done,
+        }
+        let mut state: HashMap<&str, State> = HashMap::new();
+        for start in order {
+            if state.contains_key(start) {
+                continue;
+            }
+            state.insert(start, State::OnPath);
+            // Each entry is a const on the path and the index of the next reference of it to follow.
+            let mut stack: Vec<(&str, usize)> = vec![(start, 0)];
+            while let Some(&(name, next)) = stack.last() {
+                let Some(&(target, pos)) = edges[name].get(next) else {
+                    state.insert(name, State::Done);
+                    stack.pop();
+                    continue;
+                };
+                stack.last_mut().expect("the stack is not empty").1 += 1;
+                match state.get(target) {
+                    None => {
+                        state.insert(target, State::OnPath);
+                        stack.push((target, 0));
+                    }
+                    Some(State::OnPath) => {
+                        let from = stack
+                            .iter()
+                            .position(|(n, _)| *n == target)
+                            .expect("the target is on the path");
+                        let mut path: Vec<&str> = stack[from..].iter().map(|(n, _)| *n).collect();
+                        path.push(target);
+                        let message = format!("Circular const definition {}", path.join(" -> "));
+                        self.report(self.consts[name].0, pos, message, None);
+                    }
+                    Some(State::Done) => {}
                 }
             }
         }

@@ -1,0 +1,4 @@
+// These consts refer to one another, which needs --allow-refs. The order does not matter.
+const Total: Nat = Base;
+const Base: Nat = 10;
+const Both: [Nat] = [Total, Base, 1];

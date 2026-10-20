@@ -1,0 +1,2 @@
+// expect: Const Unit is a value and takes no fields
+Unit { radius: 2.0 };

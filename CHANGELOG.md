@@ -38,6 +38,13 @@ Following the style in https://keepachangelog.com/en/1.0.0/
 - Library modules for the lexer, syntax tree, parser, validation and type-check, with `CheckOptions` to choose the
   options and `Report` to describe the outcome for each source.
 - `tests/functest.sh`, driven by the examples in `syntax/examples/`.
+- `const name: Type = value;` definitions in types files, which may be interleaved with enums and come in any order.
+  A file whose first token is `enum` or `const` is a types file, and `const` is a reserved word. Consts share the
+  constructor namespace, may have a name of either case, and cannot be named after a basic type. The value of a
+  const is checked against its declared type, and a values file can refer to a const by name. The type is required
+  for now.
+- `constructo check --allow-refs` lets the definition of a const refer to other consts. Without it such a reference is
+  an error, and with it a circular definition is.
 
 ### Changed
 
