@@ -6,9 +6,17 @@ Following the style in https://keepachangelog.com/en/1.0.0/
 
 ### Added
 
+- `constructo check` now type-checks data-values against the data-types that come before them on the command line
+  (and the prelude). Constructors must exist and have the declared shape, records must have exactly the declared
+  fields, and type parameters of generic enums are unified across a top-level value. Numbers widen from Nat to Int to
+  Float, and `[1, 2.5]` has type `[Float]`. Untagged top-level values are checked for internal consistency. `null` is
+  `None` of `Option<T>`. The first type error stops the run. See decisions 9 to 11.
+- Options `--no-type-check` (only check that values are well-formed), `--no-widening` (numbers must have exactly the
+  expected type) and `--continue` (carry on with the next value after a type error).
+- In verbose mode a type-checked values file is reported as `OK: prod.values (data-values, type-checked)`.
+- Library: the `typecheck` module, `CheckOptions` and `check_sources_with`; `Report` gains `type_checked`.
 - `constructo check` now classifies each input by its first token as data-types (`enum`, or no tokens) or data-values,
-  and checks that a data-values file is well-formed, reporting the file name and location of any syntax error. Values
-  are not yet checked against the types.
+  and checks that a data-values file is well-formed, reporting the file name and location of any syntax error.
 - In verbose mode each input is reported with its kind, e.g. `OK: prod.values (data-values)`.
 - Library: `parser::parse_values`, `parser::parse_file` and `SourceKind`; `Report` gains `kinds`.
 - The parser rejects input nested more than 200 levels deep instead of overflowing the stack.
@@ -29,6 +37,8 @@ Following the style in https://keepachangelog.com/en/1.0.0/
 - `tests/functest.sh`, driven by the examples in `syntax/examples/`.
 
 ### Fixed
+
+- A values file followed by further arguments was mistaken for a syntax error, which stopped later files from being read.
 
 ### Changed
 

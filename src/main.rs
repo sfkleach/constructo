@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use constructo::{check_sources, prelude_source, syntax_error, Outcome, Source};
+use constructo::{check_sources_with, prelude_source, syntax_error, CheckOptions, Outcome, Source, SourceKind};
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -28,6 +28,18 @@ enum Command {
         #[arg(long)]
         no_prelude: bool,
 
+        /// Only check that data-values are well-formed, not that they match the data-types
+        #[arg(long)]
+        no_type_check: bool,
+
+        /// Require numbers to have exactly the expected type: no Nat as an Int, and no Nat or Int as a Float
+        #[arg(long)]
+        no_widening: bool,
+
+        /// After a type error, carry on with the next value to report more errors
+        #[arg(long = "continue")]
+        continue_after_error: bool,
+
         /// Print a message when the check succeeds
         #[arg(long, short)]
         verbose: bool,
@@ -44,13 +56,23 @@ fn main() -> ExitCode {
         Command::Check {
             stdin,
             no_prelude,
+            no_type_check,
+            no_widening,
+            continue_after_error,
             verbose,
             files,
-        } => check(stdin, no_prelude, verbose, &files),
+        } => {
+            let options = CheckOptions {
+                type_check: !no_type_check,
+                widening: !no_widening,
+                continue_after_error,
+            };
+            check(stdin, no_prelude, verbose, &options, &files)
+        }
     }
 }
 
-fn check(stdin: bool, no_prelude: bool, verbose: bool, files: &[PathBuf]) -> ExitCode {
+fn check(stdin: bool, no_prelude: bool, verbose: bool, options: &CheckOptions, files: &[PathBuf]) -> ExitCode {
     // The inputs are read one at a time, and reading stops at the first syntax error. That way an unreadable later
     // input cannot hide an earlier syntax error, which is the error the run is meant to stop at.
     let mut sources = Vec::new();
@@ -90,7 +112,7 @@ fn check(stdin: bool, no_prelude: bool, verbose: bool, files: &[PathBuf]) -> Exi
     }
 
     // The processing is deliberately independent of the command line so that it is available as a library.
-    let report = check_sources(&sources);
+    let report = check_sources_with(&sources, options);
     for diagnostic in &report.diagnostics {
         eprintln!("{}", diagnostic);
     }
@@ -104,6 +126,9 @@ fn check(stdin: bool, no_prelude: bool, verbose: bool, files: &[PathBuf]) -> Exi
         {
             let label = kind.map(|k| format!(" ({})", k.label())).unwrap_or_default();
             match outcome {
+                Outcome::Ok if report.type_checked && *kind == Some(SourceKind::Values) => {
+                    println!("OK: {} (data-values, type-checked)", source.name)
+                }
                 Outcome::Ok => println!("OK: {}{}", source.name, label),
                 Outcome::Failed => println!("FAILED: {}{}", source.name, label),
                 Outcome::NotChecked => {}

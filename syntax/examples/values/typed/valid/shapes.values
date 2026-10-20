@@ -1,0 +1,6 @@
+// Fields may come in any order, and numbers widen: a Nat is acceptable as a Float.
+Circle { radius: 3 };
+Box { height: 1.5, width: 7.0 };
+Dot;
+Pair(1, -2);
+Pair(1, 2);

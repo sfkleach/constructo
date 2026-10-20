@@ -52,26 +52,80 @@ for f in "$EXAMPLES"/parses-but-invalid/*.types; do
 done
 echo ""
 
+# These examples are not checked against any types, so only the well-formed check applies.
 echo "--- valid values ---"
 for f in "$VALUES"/valid/*.values; do
-    expect_exit "values/valid/$(basename "$f")" 0 check "$f"
+    expect_exit "values/valid/$(basename "$f")" 0 check --no-type-check "$f"
 done
 echo ""
 
 echo "--- invalid values ---"
 for f in "$VALUES"/invalid/*.values; do
-    expect_exit "values/invalid/$(basename "$f")" 1 check "$f"
+    expect_exit "values/invalid/$(basename "$f")" 1 check --no-type-check "$f"
 done
 echo ""
 
+TYPED="$VALUES/typed"
+
+echo "--- well-typed values ---"
+for f in "$TYPED"/valid/*.values; do
+    expect_exit "typed/valid/$(basename "$f")" 0 check "$TYPED/schema.types" "$f"
+done
+echo ""
+
+echo "--- ill-typed values ---"
+for f in "$TYPED"/invalid/*.values; do
+    expect_exit "typed/invalid/$(basename "$f")" 1 check "$TYPED/schema.types" "$f"
+    expect_exit "typed/invalid/$(basename "$f") with --no-type-check" 0 check --no-type-check "$f"
+done
+echo ""
+
+echo "--- type-check options ---"
+expect_exit "types must come before the values that use them" 1 check "$TYPED/valid/shapes.values" "$TYPED/schema.types"
+expect_exit "values without any types fail the type-check" 1 check "$VALUES/valid/single-value.values"
+expect_exit "--no-widening rejects a Nat as a Float" 1 \
+    check --no-widening "$TYPED/schema.types" "$TYPED/valid/shapes.values"
+expect_exit "--no-widening accepts exact numbers" 0 \
+    check --no-widening "$TYPED/schema.types" "$TYPED/invalid/mixed-list.values" --no-type-check
+expect_exit "null needs the prelude" 1 check --no-prelude "$TYPED/schema.types" "$TYPED/valid/config.values"
+two_errors="$("$CONSTRUCTO" check "$TYPED/schema.types" "$TYPED/invalid/missing-field.values" \
+    "$TYPED/invalid/unknown-field.values" 2>&1 >/dev/null || true)"
+all_errors="$("$CONSTRUCTO" check --continue "$TYPED/schema.types" "$TYPED/invalid/missing-field.values" \
+    "$TYPED/invalid/unknown-field.values" 2>&1 >/dev/null || true)"
+if [[ "$(wc -l <<< "$two_errors")" -eq 1 && "$(wc -l <<< "$all_errors")" -eq 2 ]]; then
+    pass "a type error stops the run unless --continue is given"
+else
+    fail "a type error stops the run unless --continue is given (got '$two_errors' and '$all_errors')"
+fi
+if [[ "$two_errors" == "ERROR: Missing field height in Box ("*"missing-field.values, line 1, col 1)" ]]; then
+    pass "type error format"
+else
+    fail "type error format (got '$two_errors')"
+fi
+loud="$("$CONSTRUCTO" check -v "$TYPED/schema.types" "$TYPED/valid/shapes.values" 2>&1)"
+if [[ "$loud" == *"shapes.values (data-values, type-checked)"* ]]; then
+    pass "-v shows that values were type-checked"
+else
+    fail "-v shows that values were type-checked (got '$loud')"
+fi
+loud="$("$CONSTRUCTO" check -v --no-type-check "$TYPED/valid/shapes.values" 2>&1)"
+if [[ "$loud" == *"shapes.values (data-values)"* && "$loud" != *"type-checked"* ]]; then
+    pass "-v does not claim a type-check under --no-type-check"
+else
+    fail "-v does not claim a type-check under --no-type-check (got '$loud')"
+fi
+echo ""
+
 echo "--- mixed types and values ---"
-expect_exit "types and values together" 0 check "$EXAMPLES/valid/shapes.types" "$VALUES/valid/tagged.values"
-expect_exit "values are not yet checked against types" 0 \
-    check "$EXAMPLES/valid/message.types" "$VALUES/valid/untagged.values"
+expect_exit "types and values together" 0 \
+    check --no-type-check "$EXAMPLES/valid/shapes.types" "$VALUES/valid/tagged.values"
+expect_exit "values need not match the types under --no-type-check" 0 \
+    check --no-type-check "$EXAMPLES/valid/message.types" "$VALUES/valid/untagged.values"
 expect_exit "a values syntax error after types exits 1" 1 \
     check "$EXAMPLES/valid/shapes.types" "$VALUES/invalid/missing-separator.values"
-expect_exit "a values file needs no types file" 0 check "$VALUES/valid/single-value.values"
-expect_exit "stdin may hold values" 0 check --stdin < "$VALUES/valid/single-value.values"
+expect_exit "a values file needs no types file under --no-type-check" 0 \
+    check --no-type-check "$VALUES/valid/single-value.values"
+expect_exit "stdin may hold values" 0 check --no-type-check --stdin < "$VALUES/valid/single-value.values"
 echo ""
 
 echo "--- prelude ---"
@@ -135,14 +189,14 @@ if [[ "$loud" != *"<prelude>"* ]]; then
 else
     fail "-v does not report the prelude (got '$loud')"
 fi
-loud="$("$CONSTRUCTO" check -v "$EXAMPLES/valid/shapes.types" "$VALUES/valid/tagged.values" 2>&1)"
+loud="$("$CONSTRUCTO" check -v --no-type-check "$EXAMPLES/valid/shapes.types" "$VALUES/valid/tagged.values" 2>&1)"
 if [[ "$loud" == *"OK: $EXAMPLES/valid/shapes.types (data-types)"* \
     && "$loud" == *"OK: $VALUES/valid/tagged.values (data-values)"* ]]; then
     pass "-v shows the kind of each file"
 else
     fail "-v shows the kind of each file (got '$loud')"
 fi
-loud="$("$CONSTRUCTO" check -v "$VALUES/invalid/missing-separator.values" 2>&1 || true)"
+loud="$("$CONSTRUCTO" check -v --no-type-check "$VALUES/invalid/missing-separator.values" 2>&1 || true)"
 if [[ "$loud" == *"missing-separator.values, line 2, col 3)"* && "$loud" == *"FAILED: "*"(data-values)"* ]]; then
     pass "-v names the file, location and kind of a values error"
 else

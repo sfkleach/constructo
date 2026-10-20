@@ -9,5 +9,6 @@
   are checked with the standard prelude loaded, which declares `Bool` and `Option`;
   `redeclares-bool.types` is only valid under `--no-prelude`.
 
-Type-correctness of values against types (e.g. a bare `Quit` where the schema
-declares `Quit()`) is a separate check, not covered by these files.
+- `values/valid`, `values/invalid` are only checked for being well-formed (`--no-type-check`).
+- `values/typed`: values that are checked against `values/typed/schema.types` (and the prelude). `valid/` must pass
+  and `invalid/` must fail the type-check, though each invalid file is well-formed.
