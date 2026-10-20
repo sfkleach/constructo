@@ -5,9 +5,10 @@ use crate::diagnostics::Pos;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Tok {
     Enum,
+    Const,
     /// An identifier starting with an uppercase letter.
     TypeName(String),
-    /// An identifier starting with a lowercase letter or underscore, other than `enum`.
+    /// An identifier starting with a lowercase letter or underscore, other than `enum` and `const`.
     Name(String),
     Eq,
     Comma,
@@ -101,6 +102,8 @@ pub fn lex(text: &str) -> Vec<Token> {
             let word: String = chars[start..i].iter().collect();
             let tok = if word == "enum" {
                 Tok::Enum
+            } else if word == "const" {
+                Tok::Const
             } else if c.is_ascii_uppercase() {
                 Tok::TypeName(word)
             } else {

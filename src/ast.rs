@@ -2,6 +2,22 @@
 
 use crate::diagnostics::Pos;
 
+/// The declarations of a types file.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TypesFile {
+    pub enums: Vec<EnumDecl>,
+    pub consts: Vec<ConstDecl>,
+}
+
+/// `const name: Type = value;`
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConstDecl {
+    pub name: String,
+    pub pos: Pos,
+    pub ty: Type,
+    pub value: Value,
+}
+
 /// `enum Name<Params> = Variants;`
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnumDecl {
@@ -67,6 +83,7 @@ pub enum ValueKind {
     Array(Vec<Value>),
     Record(Vec<Member>),
     /// A constructor, optionally followed by a record or a tuple, as in `Quit`, `Move { x: 1 }` or `Write("hi")`.
+    /// A bare name with no body may instead be a reference to a const, and a lowercase name always is.
     Tagged {
         name: String,
         body: Option<TaggedBody>,

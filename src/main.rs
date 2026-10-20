@@ -40,6 +40,10 @@ enum Command {
         #[arg(long = "continue")]
         continue_after_error: bool,
 
+        /// Let the definition of a const refer to other consts
+        #[arg(long)]
+        allow_refs: bool,
+
         /// Print a message when the check succeeds
         #[arg(long, short)]
         verbose: bool,
@@ -59,6 +63,7 @@ fn main() -> ExitCode {
             no_type_check,
             no_widening,
             continue_after_error,
+            allow_refs,
             verbose,
             files,
         } => {
@@ -66,6 +71,7 @@ fn main() -> ExitCode {
                 type_check: !no_type_check,
                 widening: !no_widening,
                 continue_after_error,
+                allow_refs,
             };
             check(stdin, no_prelude, verbose, &options, &files)
         }

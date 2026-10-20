@@ -1,0 +1,2 @@
+const limit: Nat = 10
+const other: Nat = 11;

@@ -2,7 +2,9 @@
 //!
 //! The parser stops at the first syntax error: there is no error recovery.
 
-use crate::ast::{EnumDecl, Field, Member, TaggedBody, Type, TypeParam, Value, ValueKind, Variant, VariantBody};
+use crate::ast::{
+    ConstDecl, EnumDecl, Field, Member, TaggedBody, Type, TypeParam, TypesFile, Value, ValueKind, Variant, VariantBody,
+};
 use crate::diagnostics::Pos;
 use crate::lexer::{lex, Tok, Token};
 
@@ -11,8 +13,8 @@ use crate::lexer::{lex, Tok, Token};
 pub struct SyntaxError {
     pub pos: Pos,
     pub message: String,
-    /// The enum being parsed when the error occurred, if its name had been read.
-    pub enum_name: Option<String>,
+    /// The enum or const being parsed when the error occurred, if its name had been read, e.g. `enum Shape`.
+    pub context: Option<String>,
 }
 
 type Result<T> = std::result::Result<T, SyntaxError>;
@@ -40,12 +42,12 @@ impl SourceKind {
 /// The contents of a successfully parsed file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Parsed {
-    Types(Vec<EnumDecl>),
+    Types(TypesFile),
     Values(Vec<Value>),
 }
 
 /// Parses the text of a types file into its declarations.
-pub fn parse(text: &str) -> Result<Vec<EnumDecl>> {
+pub fn parse(text: &str) -> Result<TypesFile> {
     Parser::new(text).types()
 }
 
@@ -56,12 +58,12 @@ pub fn parse_values(text: &str) -> Result<Vec<Value>> {
 
 /// Classifies a file by its first token and parses it with the matching grammar.
 ///
-/// A types file always starts with `enum` and a values file never does. A file with no tokens is treated as a types
+/// A types file always starts with `enum` or `const` and a values file never does. A file with no tokens is treated as a types
 /// file, which is how it was handled before values files were supported. The kind is returned even when parsing fails.
 pub fn parse_file(text: &str) -> (SourceKind, Result<Parsed>) {
     let mut parser = Parser::new(text);
     let kind = match parser.peek() {
-        Tok::Enum | Tok::Eof => SourceKind::Types,
+        Tok::Enum | Tok::Const | Tok::Eof => SourceKind::Types,
         _ => SourceKind::Values,
     };
     let parsed = match kind {
@@ -74,7 +76,7 @@ pub fn parse_file(text: &str) -> (SourceKind, Result<Parsed>) {
 struct Parser {
     tokens: Vec<Token>,
     index: usize,
-    current_enum: Option<String>,
+    context: Option<String>,
     depth: u32,
 }
 
@@ -83,17 +85,23 @@ impl Parser {
         Parser {
             tokens: lex(text),
             index: 0,
-            current_enum: None,
+            context: None,
             depth: 0,
         }
     }
 
-    fn types(&mut self) -> Result<Vec<EnumDecl>> {
-        let mut decls = Vec::new();
+    fn types(&mut self) -> Result<TypesFile> {
+        let mut file = TypesFile::default();
         while self.peek() != &Tok::Eof {
-            decls.push(self.enum_decl()?);
+            // Errors before the name has been read are not attributed to the previous declaration.
+            self.context = None;
+            match self.peek() {
+                Tok::Const => file.consts.push(self.const_decl()?),
+                Tok::Enum => file.enums.push(self.enum_decl()?),
+                _ => return self.error("'enum' or 'const'"),
+            }
         }
-        Ok(decls)
+        Ok(file)
     }
 
     /// Runs a parser for a nested construct. The limit is a defensive check: the parser is recursive, so without it
@@ -103,7 +111,7 @@ impl Parser {
             return Err(SyntaxError {
                 pos: self.pos(),
                 message: "Nesting is too deep".to_string(),
-                enum_name: self.current_enum.clone(),
+                context: self.context.clone(),
             });
         }
         self.depth += 1;
@@ -136,7 +144,7 @@ impl Parser {
         Err(SyntaxError {
             pos: self.pos(),
             message,
-            enum_name: self.current_enum.clone(),
+            context: self.context.clone(),
         })
     }
 
@@ -160,11 +168,9 @@ impl Parser {
     }
 
     fn enum_decl(&mut self) -> Result<EnumDecl> {
-        // Errors before the name has been read are not attributed to the previous enum.
-        self.current_enum = None;
         self.expect(Tok::Enum, "'enum'")?;
         let (name, pos) = self.type_name("type name")?;
-        self.current_enum = Some(name.clone());
+        self.context = Some(format!("enum {}", name));
         let params = if self.peek() == &Tok::Lt {
             self.type_params()?
         } else {
@@ -193,6 +199,32 @@ impl Parser {
             params,
             variants,
         })
+    }
+
+    /// `const name: Type = value;` The name may be an identifier of either case, other than `null`.
+    fn const_decl(&mut self) -> Result<ConstDecl> {
+        self.expect(Tok::Const, "'const'")?;
+        let pos = self.pos();
+        let name = match self.peek() {
+            Tok::TypeName(name) => name.clone(),
+            Tok::Name(name) if name == "null" => {
+                return Err(SyntaxError {
+                    pos,
+                    message: "null is a literal and cannot be the name of a const".to_string(),
+                    context: None,
+                })
+            }
+            Tok::Name(name) => name.clone(),
+            _ => return self.error("const name"),
+        };
+        self.bump();
+        self.context = Some(format!("const {}", name));
+        self.expect(Tok::Colon, "':'")?;
+        let ty = self.ty()?;
+        self.expect(Tok::Eq, "'='")?;
+        let value = self.value()?;
+        self.expect(Tok::Semi, "semi-colon")?;
+        Ok(ConstDecl { name, pos, ty, value })
     }
 
     fn type_params(&mut self) -> Result<Vec<TypeParam>> {
@@ -354,6 +386,11 @@ impl Parser {
             Tok::Float(text) => self.literal(ValueKind::Float(text)),
             Tok::Str(text) => self.literal(ValueKind::Str(text)),
             Tok::Name(name) if name == "null" => self.literal(ValueKind::Null),
+            // A lowercase name can only refer to a const, so it takes no body.
+            Tok::Name(name) => {
+                self.bump();
+                ValueKind::Tagged { name, body: None }
+            }
             Tok::LBrace => ValueKind::Record(self.members()?),
             Tok::LBracket => ValueKind::Array(self.array()?),
             Tok::TypeName(name) => {
@@ -436,7 +473,9 @@ mod tests {
 
     #[test]
     fn parses_a_generic_recursive_enum() {
-        let decls = parse("enum List<T> = Nil, Cons { head: T, tail: List<T> };").unwrap();
+        let decls = parse("enum List<T> = Nil, Cons { head: T, tail: List<T> };")
+            .unwrap()
+            .enums;
         assert_eq!(decls.len(), 1);
         assert_eq!(decls[0].params.len(), 1);
         assert_eq!(decls[0].variants.len(), 2);
@@ -444,14 +483,14 @@ mod tests {
 
     #[test]
     fn accepts_empty_input_and_trailing_commas() {
-        assert!(parse("// Nothing here.\n").unwrap().is_empty());
+        assert_eq!(parse("// Nothing here.\n").unwrap(), TypesFile::default());
         assert!(parse("enum A = X(Int,), Y {a: Int,},;").is_ok());
         assert!(parse("enum A = Ping(), Pong {};").is_ok());
     }
 
     #[test]
     fn accepts_underscore_type_parameters() {
-        let decls = parse("enum Phantom<_T, U> = P(U);").unwrap();
+        let decls = parse("enum Phantom<_T, U> = P(U);").unwrap().enums;
         assert!(decls[0].params[0].underscore);
         assert!(!decls[0].params[1].underscore);
     }
@@ -473,12 +512,16 @@ mod tests {
 
     #[test]
     fn attributes_errors_to_the_enclosing_enum_once_it_is_named() {
-        let enum_of = |text: &str| parse(text).unwrap_err().enum_name;
-        assert_eq!(enum_of("enum Shape = Circle { r: }"), Some("Shape".to_string()));
-        assert_eq!(enum_of("enum Shape"), Some("Shape".to_string()));
-        assert_eq!(enum_of("enum a = X;"), None);
-        assert_eq!(enum_of("enum A = X; B"), None);
-        assert_eq!(enum_of("enum A = X; enum B = ;"), Some("B".to_string()));
+        let context_of = |text: &str| parse(text).unwrap_err().context;
+        assert_eq!(context_of("enum Shape = Circle { r: }"), Some("enum Shape".to_string()));
+        assert_eq!(context_of("enum Shape"), Some("enum Shape".to_string()));
+        assert_eq!(context_of("enum a = X;"), None);
+        assert_eq!(context_of("enum A = X; B"), None);
+        assert_eq!(context_of("enum A = X; enum B = ;"), Some("enum B".to_string()));
+        assert_eq!(context_of("const N: Nat = ;"), Some("const N".to_string()));
+        assert_eq!(context_of("const N Nat = 1;"), Some("const N".to_string()));
+        assert_eq!(context_of("const : Nat = 1;"), None);
+        assert_eq!(context_of("const A: Nat = 1; enum"), None);
     }
 
     #[test]
@@ -487,7 +530,7 @@ mod tests {
         assert_eq!(err("enum a = X;").2, "Expected type name");
         assert_eq!(err("enum A = X([]);").2, "Expected type");
         assert_eq!(err("enum L{T} = Nil;").2, "Expected '='");
-        assert_eq!(err("enum A = X; B").2, "Expected 'enum'");
+        assert_eq!(err("enum A = X; B").2, "Expected 'enum' or 'const'");
         assert_eq!(err("enum A = X(Int").2, "Expected comma or ')'");
         assert_eq!(err("enum A = X #").2, "Unexpected character '#'");
     }
@@ -544,7 +587,7 @@ mod tests {
         assert_eq!(value_err("{ x: 1 y: 2 }").2, "Expected comma or '}'");
         assert_eq!(value_err("{ \"x\": 1 }").2, "Expected field name");
         assert_eq!(value_err("(1, 2)").2, "Expected value");
-        assert_eq!(value_err("circle { radius: 3.0 }").2, "Expected value");
+        assert_eq!(value_err("circle { radius: 3.0 }").2, "Expected semi-colon");
         assert_eq!(value_err("Circle { radius: 3.0").2, "Expected comma or '}'");
         assert_eq!(
             value_err("3."),
@@ -559,12 +602,55 @@ mod tests {
         assert_eq!(parse_file("enum A = X;").0, SourceKind::Types);
         assert_eq!(parse_file("A { x: 1 }").0, SourceKind::Values);
         assert_eq!(parse_file("42").0, SourceKind::Values);
+        assert_eq!(parse_file("const N: Nat = 1;").0, SourceKind::Types);
+        assert_eq!(parse_file("n").0, SourceKind::Values);
         assert_eq!(parse_file("").0, SourceKind::Types);
         assert_eq!(parse_file("// Just a comment.\n").0, SourceKind::Types);
         // The kind is known even when the file does not parse.
-        let (kind, parsed) = parse_file("circle");
+        let (kind, parsed) = parse_file("circle {");
         assert_eq!(kind, SourceKind::Values);
         assert!(parsed.is_err());
+    }
+
+    #[test]
+    fn parses_const_definitions_interleaved_with_enums() {
+        let file =
+            parse("const A: Nat = 1;\nenum E = X;\nconst b: [E] = [X, X];\nconst C: { a: Nat } = { a: 2 };").unwrap();
+        assert_eq!(file.enums.len(), 1);
+        assert_eq!(
+            file.consts.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+            ["A", "b", "C"]
+        );
+        assert!(matches!(&file.consts[1].ty, Type::Array(_)));
+        assert!(matches!(&file.consts[2].value.kind, ValueKind::Record(m) if m.len() == 1));
+    }
+
+    #[test]
+    fn reports_const_syntax_errors() {
+        assert_eq!(err("const N = 1;"), (1, 9, "Expected ':'".to_string()));
+        assert_eq!(err("const N: Nat 1;").2, "Expected '='");
+        assert_eq!(err("const N: Nat = 1").2, "Expected semi-colon");
+        assert_eq!(err("const N: Nat = ;").2, "Expected value");
+        assert_eq!(err("const 1: Nat = 1;").2, "Expected const name");
+        assert_eq!(err("const enum: Nat = 1;").2, "Expected const name");
+        assert_eq!(
+            err("const null: Option<Nat> = None;").2,
+            "null is a literal and cannot be the name of a const"
+        );
+    }
+
+    #[test]
+    fn const_is_a_reserved_word() {
+        assert!(parse("enum E = X { const: Nat };").is_err());
+        assert!(parse_values("{ const: 1 }").is_err());
+        assert!(parse_values("const").is_err());
+    }
+
+    #[test]
+    fn a_lowercase_name_is_a_value_that_takes_no_body() {
+        let values = parse_values("limit; [Limit, limit]").unwrap();
+        assert!(matches!(&values[0].kind, ValueKind::Tagged { name, body: None } if name == "limit"));
+        assert_eq!(value_err("limit(1)").2, "Expected semi-colon");
     }
 
     #[test]

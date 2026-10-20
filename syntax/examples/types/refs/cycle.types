@@ -1,0 +1,3 @@
+// A circular definition is an error even with --allow-refs.
+const A: Nat = B;
+const B: Nat = A;
