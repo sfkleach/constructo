@@ -9,7 +9,10 @@ pub mod parser;
 pub mod validate;
 
 use diagnostics::Diagnostic;
+use parser::{parse_file, Parsed};
 use validate::{validate, ParsedFile};
+
+pub use parser::SourceKind;
 
 /// The standard prelude: declarations that are available to every types file unless the prelude is disabled.
 pub const PRELUDE: &str = "enum Bool = True, False;\nenum Option<T> = None, Some(T);\n";
@@ -48,6 +51,8 @@ pub struct Report {
     pub diagnostics: Vec<Diagnostic>,
     /// One outcome for each source, in the order the sources were given.
     pub outcomes: Vec<Outcome>,
+    /// The kind of each source, or `None` for a source that was not reached because checking stopped earlier.
+    pub kinds: Vec<Option<SourceKind>>,
 }
 
 impl Report {
@@ -72,38 +77,57 @@ pub fn syntax_error(source: &Source) -> Option<Diagnostic> {
     parser::parse(&source.text).err().map(|e| syntax_diagnostic(source, e))
 }
 
-/// Checks the syntax and validity of a set of types files, which share one namespace.
+/// Checks a set of sources, each of which is either a types file or a values file.
 ///
-/// The files are parsed in order and checking stops at the first syntax error, which is the only diagnostic
-/// reported. The post-parse checks then only run once every file has parsed, because a file that fails to parse
-/// may have contained the declarations that other files refer to, and checking without them would report
-/// spurious unknown names. The post-parse checks report every error they find.
+/// The kind of each source is decided by its first token. The sources are parsed in order and checking stops at the
+/// first syntax error, which is the only diagnostic reported. The post-parse checks then only run once every source has
+/// parsed, because a file that fails to parse may have contained the declarations that other files refer to, and
+/// checking without them would report spurious unknown names. The types files share one namespace and the post-parse
+/// checks report every error they find. A values file is only checked for being well-formed: it is not yet checked
+/// against the types.
 pub fn check_sources(sources: &[Source]) -> Report {
-    let mut parsed = Vec::new();
+    let mut kinds = vec![None; sources.len()];
+    // Each parsed types file is kept with the index of its source, because values files take no part in validation.
+    let mut types_files = Vec::new();
     for (index, source) in sources.iter().enumerate() {
-        match parser::parse(&source.text) {
-            Ok(decls) => parsed.push(ParsedFile {
-                name: source.name.clone(),
-                decls,
-            }),
+        let (kind, parsed) = parse_file(&source.text);
+        kinds[index] = Some(kind);
+        match parsed {
+            Ok(Parsed::Types(decls)) => types_files.push((
+                index,
+                ParsedFile {
+                    name: source.name.clone(),
+                    decls,
+                },
+            )),
+            Ok(Parsed::Values(_)) => {}
             Err(e) => {
-                let diagnostic = syntax_diagnostic(source, e);
                 let mut outcomes = vec![Outcome::NotChecked; sources.len()];
                 outcomes[index] = Outcome::Failed;
+                // Only the failing source and the ones before it were reached.
+                for later in &mut kinds[index + 1..] {
+                    *later = None;
+                }
                 return Report {
-                    diagnostics: vec![diagnostic],
+                    diagnostics: vec![syntax_diagnostic(source, e)],
                     outcomes,
+                    kinds,
                 };
             }
         }
     }
     let mut outcomes = vec![Outcome::Ok; sources.len()];
     let mut diagnostics = Vec::new();
-    for (file, diagnostic) in validate(&parsed) {
-        outcomes[file] = Outcome::Failed;
+    let (indexes, files): (Vec<usize>, Vec<ParsedFile>) = types_files.into_iter().unzip();
+    for (file, diagnostic) in validate(&files) {
+        outcomes[indexes[file]] = Outcome::Failed;
         diagnostics.push(diagnostic);
     }
-    Report { diagnostics, outcomes }
+    Report {
+        diagnostics,
+        outcomes,
+        kinds,
+    }
 }
 
 #[cfg(test)]
@@ -196,5 +220,64 @@ mod tests {
             .collect();
         let report = check_sources(&sources);
         assert_eq!(report.outcomes, vec![Outcome::Ok, Outcome::Failed, Outcome::Ok]);
+    }
+
+    fn sources(texts: &[&str]) -> Vec<Source> {
+        texts
+            .iter()
+            .enumerate()
+            .map(|(i, text)| Source {
+                name: format!("f{}", i),
+                text: text.to_string(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn checks_types_and_values_files_in_one_run() {
+        let report = check_sources(&sources(&["enum A = X;", "A; X { y: 1 };", "enum B = Y(A);"]));
+        assert!(report.is_ok());
+        assert_eq!(report.outcomes, vec![Outcome::Ok; 3]);
+        assert_eq!(
+            report.kinds,
+            vec![
+                Some(SourceKind::Types),
+                Some(SourceKind::Values),
+                Some(SourceKind::Types)
+            ]
+        );
+    }
+
+    #[test]
+    fn a_values_file_is_checked_without_any_types() {
+        assert!(check_sources(&sources(&["Circle { radius: 3.0 }"])).is_ok());
+    }
+
+    #[test]
+    fn values_are_not_yet_checked_against_the_types() {
+        assert!(check_sources(&sources(&["enum A = X;", "Unrelated(1, 2)"])).is_ok());
+    }
+
+    #[test]
+    fn reports_a_values_syntax_error_with_the_file_and_location() {
+        let report = check_sources(&sources(&["enum A = X;", "A;\nB { x: 1 y: 2 }", "enum C = Z;"]));
+        assert_eq!(
+            report.diagnostics.iter().map(|d| d.to_string()).collect::<Vec<_>>(),
+            vec!["ERROR: Expected comma or '}' (f1, line 2, col 10)"]
+        );
+        assert_eq!(
+            report.outcomes,
+            vec![Outcome::NotChecked, Outcome::Failed, Outcome::NotChecked]
+        );
+        assert_eq!(
+            report.kinds,
+            vec![Some(SourceKind::Types), Some(SourceKind::Values), None]
+        );
+    }
+
+    #[test]
+    fn validity_errors_are_attributed_to_the_right_source_when_values_are_mixed_in() {
+        let report = check_sources(&sources(&["1; 2", "enum A = X(Missing);"]));
+        assert_eq!(report.outcomes, vec![Outcome::Ok, Outcome::Failed]);
     }
 }

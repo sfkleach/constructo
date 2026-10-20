@@ -78,7 +78,7 @@ before deployment.
 ## Capabilities established
 
 - Validate the syntax of a types file.
-- Validate the syntax of one or more values files.
+- Validate the syntax of one or more values files. Values in a file are separated by semi-colons.
 - Validate values files against a types file (syntax plus type-correctness).
 - Validate stdin against a types file.
 - A standard prelude declares `Bool` and `Option<T>`; it is loaded by default and `--no-prelude`

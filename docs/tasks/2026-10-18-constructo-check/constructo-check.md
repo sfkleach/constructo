@@ -130,6 +130,31 @@ enabled:
 
 N.B This option will be elaborated further when data-value files are added.
 
+## Step 5: Implement the well-formedness `check` for data-values
+
+We will implement the check for data-values in two steps. In this step we simply
+verify that any data-values file is well-formed; in the next step we verify that
+it is well-typed.
+
+- Classify each file as data-types or data-values
+- If we find a data-values file, check if they are well-formed
+- If not, raise an appropriate error message along with the filename and location
+- If so, in verbose mode, list the name of the file.
+
+### Refinements agreed during the step
+
+- A file is classified by its first token: a types file always starts with `enum` and a values file never does. A
+  file with no tokens is treated as a types file. The rule must not depend on the file name, because files holding
+  both types and values are planned.
+- Values in a file are separated by semi-colons, with an optional trailing one. Which constructors take a record or
+  a tuple depends on the types in force, so juxtaposition would be ambiguous. See decision 7.
+- Verbose mode shows the kind of each file, e.g. `OK: prod.values (data-values)`.
+- Values are checked independently of any types in this step, and no types file is needed.
+- A string accepts the escapes of the grammar, including `\uXXXX` and surrogate pairs. A raw control character or a
+  newline in a string is an error.
+- The parser rejects input nested deeper than 200 levels, rather than overflowing the stack.
+
+
 
 ## Step 99: Populate the CHANGELOG
 

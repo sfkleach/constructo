@@ -2,7 +2,7 @@
 //!
 //! The parser stops at the first syntax error: there is no error recovery.
 
-use crate::ast::{EnumDecl, Field, Type, TypeParam, Variant, VariantBody};
+use crate::ast::{EnumDecl, Field, Member, TaggedBody, Type, TypeParam, Value, ValueKind, Variant, VariantBody};
 use crate::diagnostics::Pos;
 use crate::lexer::{lex, Tok, Token};
 
@@ -17,27 +17,101 @@ pub struct SyntaxError {
 
 type Result<T> = std::result::Result<T, SyntaxError>;
 
+/// The deepest nesting of arrays, records, tuples and type arguments that the parser accepts.
+const MAX_DEPTH: u32 = 200;
+
+/// The kind of a file, which is decided by its first token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceKind {
+    Types,
+    Values,
+}
+
+impl SourceKind {
+    /// The name used for the kind in messages.
+    pub fn label(self) -> &'static str {
+        match self {
+            SourceKind::Types => "data-types",
+            SourceKind::Values => "data-values",
+        }
+    }
+}
+
+/// The contents of a successfully parsed file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Parsed {
+    Types(Vec<EnumDecl>),
+    Values(Vec<Value>),
+}
+
 /// Parses the text of a types file into its declarations.
 pub fn parse(text: &str) -> Result<Vec<EnumDecl>> {
-    let mut parser = Parser {
-        tokens: lex(text),
-        index: 0,
-        current_enum: None,
+    Parser::new(text).types()
+}
+
+/// Parses the text of a values file into its values.
+pub fn parse_values(text: &str) -> Result<Vec<Value>> {
+    Parser::new(text).values()
+}
+
+/// Classifies a file by its first token and parses it with the matching grammar.
+///
+/// A types file always starts with `enum` and a values file never does. A file with no tokens is treated as a types
+/// file, which is how it was handled before values files were supported. The kind is returned even when parsing fails.
+pub fn parse_file(text: &str) -> (SourceKind, Result<Parsed>) {
+    let mut parser = Parser::new(text);
+    let kind = match parser.peek() {
+        Tok::Enum | Tok::Eof => SourceKind::Types,
+        _ => SourceKind::Values,
     };
-    let mut decls = Vec::new();
-    while parser.peek() != &Tok::Eof {
-        decls.push(parser.enum_decl()?);
-    }
-    Ok(decls)
+    let parsed = match kind {
+        SourceKind::Types => parser.types().map(Parsed::Types),
+        SourceKind::Values => parser.values().map(Parsed::Values),
+    };
+    (kind, parsed)
 }
 
 struct Parser {
     tokens: Vec<Token>,
     index: usize,
     current_enum: Option<String>,
+    depth: u32,
 }
 
 impl Parser {
+    fn new(text: &str) -> Parser {
+        Parser {
+            tokens: lex(text),
+            index: 0,
+            current_enum: None,
+            depth: 0,
+        }
+    }
+
+    fn types(&mut self) -> Result<Vec<EnumDecl>> {
+        let mut decls = Vec::new();
+        while self.peek() != &Tok::Eof {
+            decls.push(self.enum_decl()?);
+        }
+        Ok(decls)
+    }
+
+    /// Runs a parser for a nested construct. The limit is a defensive check: the parser is recursive, so without it
+    /// deeply nested input would overflow the stack and crash instead of being reported as a syntax error.
+    fn nested<T>(&mut self, parse: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        if self.depth >= MAX_DEPTH {
+            return Err(SyntaxError {
+                pos: self.pos(),
+                message: "Nesting is too deep".to_string(),
+                enum_name: self.current_enum.clone(),
+            });
+        }
+        self.depth += 1;
+        let result = parse(self);
+        self.depth -= 1;
+        result
+    }
+
     fn peek(&self) -> &Tok {
         &self.tokens[self.index].tok
     }
@@ -56,6 +130,7 @@ impl Parser {
     fn error<T>(&self, expected: &str) -> Result<T> {
         let message = match self.peek() {
             Tok::Invalid(c) => format!("Unexpected character '{}'", c),
+            Tok::Error(message) => message.clone(),
             _ => format!("Expected {}", expected),
         };
         Err(SyntaxError {
@@ -210,6 +285,10 @@ impl Parser {
     }
 
     fn ty(&mut self) -> Result<Type> {
+        self.nested(Self::ty_unchecked)
+    }
+
+    fn ty_unchecked(&mut self) -> Result<Type> {
         match self.peek() {
             Tok::TypeName(_) => {
                 let (name, pos) = self.type_name("type")?;
@@ -237,6 +316,112 @@ impl Parser {
             Tok::LBrace => Ok(Type::Record(self.record_body()?)),
             _ => self.error("type"),
         }
+    }
+}
+
+impl Parser {
+    /// A values file is a sequence of values separated by semi-colons, with an optional final semi-colon.
+    fn values(&mut self) -> Result<Vec<Value>> {
+        let mut values = Vec::new();
+        if self.peek() == &Tok::Eof {
+            return Ok(values);
+        }
+        loop {
+            values.push(self.value()?);
+            match self.peek() {
+                Tok::Semi => {
+                    self.bump();
+                    if self.peek() == &Tok::Eof {
+                        break;
+                    }
+                }
+                Tok::Eof => break,
+                _ => return self.error("semi-colon"),
+            }
+        }
+        Ok(values)
+    }
+
+    fn value(&mut self) -> Result<Value> {
+        self.nested(Self::value_unchecked)
+    }
+
+    fn value_unchecked(&mut self) -> Result<Value> {
+        let pos = self.pos();
+        let kind = match self.peek().clone() {
+            Tok::Nat(text) => self.literal(ValueKind::Nat(text)),
+            Tok::Int(text) => self.literal(ValueKind::Int(text)),
+            Tok::Float(text) => self.literal(ValueKind::Float(text)),
+            Tok::Str(text) => self.literal(ValueKind::Str(text)),
+            Tok::Name(name) if name == "null" => self.literal(ValueKind::Null),
+            Tok::LBrace => ValueKind::Record(self.members()?),
+            Tok::LBracket => ValueKind::Array(self.array()?),
+            Tok::TypeName(name) => {
+                self.bump();
+                let body = match self.peek() {
+                    Tok::LBrace => Some(TaggedBody::Record(self.members()?)),
+                    Tok::LParen => Some(TaggedBody::Tuple(self.tuple()?)),
+                    _ => None,
+                };
+                ValueKind::Tagged { name, body }
+            }
+            _ => return self.error("value"),
+        };
+        Ok(Value { pos, kind })
+    }
+
+    /// Consumes the current token, which has already been read as a literal.
+    fn literal(&mut self, kind: ValueKind) -> ValueKind {
+        self.bump();
+        kind
+    }
+
+    fn members(&mut self) -> Result<Vec<Member>> {
+        self.expect(Tok::LBrace, "'{'")?;
+        let mut members = Vec::new();
+        while self.peek() != &Tok::RBrace {
+            let pos = self.pos();
+            let name = match self.peek() {
+                Tok::Name(name) => name.clone(),
+                _ => return self.error("field name"),
+            };
+            self.bump();
+            self.expect(Tok::Colon, "':'")?;
+            let value = self.value()?;
+            members.push(Member { name, pos, value });
+            match self.peek() {
+                Tok::Comma => self.bump(),
+                Tok::RBrace => {}
+                _ => return self.error("comma or '}'"),
+            }
+        }
+        self.expect(Tok::RBrace, "'}'")?;
+        Ok(members)
+    }
+
+    fn tuple(&mut self) -> Result<Vec<Value>> {
+        self.expect(Tok::LParen, "'('")?;
+        self.value_list(Tok::RParen, "')'")
+    }
+
+    fn array(&mut self) -> Result<Vec<Value>> {
+        self.expect(Tok::LBracket, "'['")?;
+        self.value_list(Tok::RBracket, "']'")
+    }
+
+    /// Parses comma-separated values, with an optional trailing comma, up to and including the closing token.
+    fn value_list(&mut self, close: Tok, close_name: &str) -> Result<Vec<Value>> {
+        let mut values = Vec::new();
+        while self.peek() != &close {
+            values.push(self.value()?);
+            match self.peek() {
+                Tok::Comma => self.bump(),
+                tok if tok == &close => {}
+                _ => return self.error(&format!("comma or {}", close_name)),
+            }
+        }
+        self.expect(close, close_name)?;
+        Ok(values)
     }
 }
 
@@ -305,5 +490,91 @@ mod tests {
         assert_eq!(err("enum A = X; B").2, "Expected 'enum'");
         assert_eq!(err("enum A = X(Int").2, "Expected comma or ')'");
         assert_eq!(err("enum A = X #").2, "Unexpected character '#'");
+    }
+
+    fn value_err(text: &str) -> (u32, u32, String) {
+        let e = parse_values(text).unwrap_err();
+        (e.pos.line, e.pos.col, e.message)
+    }
+
+    #[test]
+    fn parses_values_separated_by_semicolons() {
+        let values = parse_values("Circle { radius: 3.0 };\nQuit; [1, 2,]; null; \"s\"; +8; -2.5e3;").unwrap();
+        assert_eq!(values.len(), 7);
+        assert!(
+            matches!(&values[0].kind, ValueKind::Tagged { name, body: Some(TaggedBody::Record(m)) }
+            if name == "Circle" && m.len() == 1)
+        );
+        assert!(matches!(&values[1].kind, ValueKind::Tagged { body: None, .. }));
+        assert!(matches!(&values[3].kind, ValueKind::Null));
+        assert!(matches!(&values[5].kind, ValueKind::Int(t) if t == "+8"));
+    }
+
+    #[test]
+    fn a_single_value_needs_no_semicolon() {
+        assert_eq!(parse_values("{ x: 1 }").unwrap().len(), 1);
+        assert_eq!(parse_values("{ x: 1 };").unwrap().len(), 1);
+        assert!(parse_values("// Only a comment.\n").unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_semicolon_separates_values_so_a_tag_does_not_swallow_the_next_value() {
+        let values = parse_values("Quit; { x: 1 }").unwrap();
+        assert!(matches!(&values[0].kind, ValueKind::Tagged { body: None, .. }));
+        assert!(matches!(&values[1].kind, ValueKind::Record(_)));
+        // Without the separator the record is the body of the tag.
+        let values = parse_values("Quit { x: 1 }").unwrap();
+        assert_eq!(values.len(), 1);
+    }
+
+    #[test]
+    fn distinguishes_an_empty_tuple_from_a_bare_tag() {
+        let values = parse_values("Ping(); Ping; Pong {}").unwrap();
+        assert!(matches!(&values[0].kind, ValueKind::Tagged { body: Some(TaggedBody::Tuple(t)), .. } if t.is_empty()));
+        assert!(matches!(&values[1].kind, ValueKind::Tagged { body: None, .. }));
+        assert!(matches!(&values[2].kind, ValueKind::Tagged { body: Some(TaggedBody::Record(m)), .. } if m.is_empty()));
+    }
+
+    #[test]
+    fn reports_value_syntax_errors() {
+        assert_eq!(value_err("1 2"), (1, 3, "Expected semi-colon".to_string()));
+        assert_eq!(value_err("1;;2").2, "Expected value");
+        assert_eq!(value_err(";").2, "Expected value");
+        assert_eq!(value_err("[1 2]").2, "Expected comma or ']'");
+        assert_eq!(value_err("{ x: 1 y: 2 }").2, "Expected comma or '}'");
+        assert_eq!(value_err("{ \"x\": 1 }").2, "Expected field name");
+        assert_eq!(value_err("(1, 2)").2, "Expected value");
+        assert_eq!(value_err("circle { radius: 3.0 }").2, "Expected value");
+        assert_eq!(value_err("Circle { radius: 3.0").2, "Expected comma or '}'");
+        assert_eq!(
+            value_err("3."),
+            (1, 3, "Expected a digit after the decimal point".to_string())
+        );
+        assert_eq!(value_err("\"\\q\"").2, "Invalid escape in string");
+        assert_eq!(value_err("Write(\"oops)").2, "Unterminated string");
+    }
+
+    #[test]
+    fn classifies_a_file_by_its_first_token() {
+        assert_eq!(parse_file("enum A = X;").0, SourceKind::Types);
+        assert_eq!(parse_file("A { x: 1 }").0, SourceKind::Values);
+        assert_eq!(parse_file("42").0, SourceKind::Values);
+        assert_eq!(parse_file("").0, SourceKind::Types);
+        assert_eq!(parse_file("// Just a comment.\n").0, SourceKind::Types);
+        // The kind is known even when the file does not parse.
+        let (kind, parsed) = parse_file("circle");
+        assert_eq!(kind, SourceKind::Values);
+        assert!(parsed.is_err());
+    }
+
+    #[test]
+    fn rejects_very_deep_nesting_instead_of_overflowing_the_stack() {
+        let deep_value = "[".repeat(10_000);
+        assert_eq!(value_err(&deep_value).2, "Nesting is too deep");
+        let deep_type = format!("enum A = X({});", "[".repeat(10_000));
+        assert_eq!(err(&deep_type).2, "Nesting is too deep");
+        // Moderate nesting is fine.
+        let nested = format!("{}1{}", "[".repeat(50), "]".repeat(50));
+        assert!(parse_values(&nested).is_ok());
     }
 }

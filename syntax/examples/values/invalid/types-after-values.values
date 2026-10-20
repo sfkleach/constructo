@@ -1,0 +1,3 @@
+// Only the first token decides the kind of file, so this is read as values and enum is not a value.
+Circle { radius: 3.0 };
+enum A = X;

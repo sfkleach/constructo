@@ -96,10 +96,16 @@ fn check(stdin: bool, no_prelude: bool, verbose: bool, files: &[PathBuf]) -> Exi
     }
     if verbose {
         // The prelude is not one of the user's inputs, so it is never reported.
-        for (source, outcome) in sources.iter().zip(&report.outcomes).skip(first_input) {
+        for ((source, outcome), kind) in sources
+            .iter()
+            .zip(&report.outcomes)
+            .zip(&report.kinds)
+            .skip(first_input)
+        {
+            let label = kind.map(|k| format!(" ({})", k.label())).unwrap_or_default();
             match outcome {
-                Outcome::Ok => println!("OK: {}", source.name),
-                Outcome::Failed => println!("FAILED: {}", source.name),
+                Outcome::Ok => println!("OK: {}{}", source.name, label),
+                Outcome::Failed => println!("FAILED: {}{}", source.name, label),
                 Outcome::NotChecked => {}
             }
         }
