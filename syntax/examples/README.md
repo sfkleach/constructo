@@ -2,6 +2,8 @@
 
 - `types/valid`, `values/valid`: must parse.
 - `types/invalid`, `values/invalid`: must be rejected by the parser.
+- A file is a types file if its first token is `enum` (or it has no tokens), and a values file otherwise.
+  Values are separated by semi-colons.
 - `types/parses-but-invalid`: grammatical, but must be rejected by the
   post-parse validity check (duplicates, unknown names, wrong arity). The examples
   are checked with the standard prelude loaded, which declares `Bool` and `Option`;

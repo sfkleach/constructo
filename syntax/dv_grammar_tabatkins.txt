@@ -1,7 +1,18 @@
 // Data-values Grammar
 Diagram(
     Comment('Data_Values'),
-    ZeroOrMore(NonTerminal('Value'))
+    Optional(
+        Sequence(
+            NonTerminal('Value'),
+            ZeroOrMore(
+                Sequence(
+                    Terminal(';'),
+                    NonTerminal('Value')
+                )
+            ),
+            Optional(Terminal(';'))
+        )
+    )
 )
 
 // Value

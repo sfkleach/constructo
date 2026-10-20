@@ -11,6 +11,7 @@ set -euo pipefail
 
 CONSTRUCTO="${1:?usage: functest.sh <binary> [mode]}"
 EXAMPLES="$(dirname "$0")/../syntax/examples/types"
+VALUES="$(dirname "$0")/../syntax/examples/values"
 
 PASS=0
 FAIL=0
@@ -51,12 +52,35 @@ for f in "$EXAMPLES"/parses-but-invalid/*.types; do
 done
 echo ""
 
+echo "--- valid values ---"
+for f in "$VALUES"/valid/*.values; do
+    expect_exit "values/valid/$(basename "$f")" 0 check "$f"
+done
+echo ""
+
+echo "--- invalid values ---"
+for f in "$VALUES"/invalid/*.values; do
+    expect_exit "values/invalid/$(basename "$f")" 1 check "$f"
+done
+echo ""
+
+echo "--- mixed types and values ---"
+expect_exit "types and values together" 0 check "$EXAMPLES/valid/shapes.types" "$VALUES/valid/tagged.values"
+expect_exit "values are not yet checked against types" 0 \
+    check "$EXAMPLES/valid/message.types" "$VALUES/valid/untagged.values"
+expect_exit "a values syntax error after types exits 1" 1 \
+    check "$EXAMPLES/valid/shapes.types" "$VALUES/invalid/missing-separator.values"
+expect_exit "a values file needs no types file" 0 check "$VALUES/valid/single-value.values"
+expect_exit "stdin may hold values" 0 check --stdin < "$VALUES/valid/single-value.values"
+echo ""
+
 echo "--- prelude ---"
 expect_exit "prelude supplies Option" 0 check "$EXAMPLES/valid/mutual.types"
 expect_exit "--no-prelude hides Option" 1 check --no-prelude "$EXAMPLES/valid/mutual.types"
 expect_exit "prelude supplies Bool" 0 check "$EXAMPLES/valid/uses-bool.types"
 expect_exit "prelude names cannot be redeclared" 1 check "$EXAMPLES/parses-but-invalid/redeclares-bool.types"
-expect_exit "--no-prelude allows redeclaring Bool" 0 check --no-prelude "$EXAMPLES/parses-but-invalid/redeclares-bool.types"
+expect_exit "--no-prelude allows redeclaring Bool" 0 \
+    check --no-prelude "$EXAMPLES/parses-but-invalid/redeclares-bool.types"
 expect_exit "--no-prelude with a self-contained file" 0 check --no-prelude "$EXAMPLES/valid/shapes.types"
 echo ""
 
@@ -66,9 +90,12 @@ expect_exit "no arguments is a usage error" 2 check
 expect_exit "multiple valid files share a namespace" 0 check "$EXAMPLES/valid/shapes.types" "$EXAMPLES/valid/list.types"
 
 # An earlier syntax error wins over a later unreadable input, but an earlier unreadable input is still a usage error.
-expect_exit "syntax error before a missing file exits 1" 1 check "$EXAMPLES/invalid/missing-semicolon.types" "$EXAMPLES/valid/no-such-file.types"
-expect_exit "missing file before a syntax error exits 2" 2 check "$EXAMPLES/valid/no-such-file.types" "$EXAMPLES/invalid/missing-semicolon.types"
-expect_exit "syntax error stops before stdin is read" 1 check --stdin "$EXAMPLES/invalid/missing-semicolon.types" < /dev/null
+expect_exit "syntax error before a missing file exits 1" 1 \
+    check "$EXAMPLES/invalid/missing-semicolon.types" "$EXAMPLES/valid/no-such-file.types"
+expect_exit "missing file before a syntax error exits 2" 2 \
+    check "$EXAMPLES/valid/no-such-file.types" "$EXAMPLES/invalid/missing-semicolon.types"
+expect_exit "syntax error stops before stdin is read" 1 \
+    check --stdin "$EXAMPLES/invalid/missing-semicolon.types" < /dev/null
 
 stdin_exit() {
     local name="$1" expected="$2" input="$3"; shift 3
@@ -108,6 +135,19 @@ if [[ "$loud" != *"<prelude>"* ]]; then
 else
     fail "-v does not report the prelude (got '$loud')"
 fi
+loud="$("$CONSTRUCTO" check -v "$EXAMPLES/valid/shapes.types" "$VALUES/valid/tagged.values" 2>&1)"
+if [[ "$loud" == *"OK: $EXAMPLES/valid/shapes.types (data-types)"* \
+    && "$loud" == *"OK: $VALUES/valid/tagged.values (data-values)"* ]]; then
+    pass "-v shows the kind of each file"
+else
+    fail "-v shows the kind of each file (got '$loud')"
+fi
+loud="$("$CONSTRUCTO" check -v "$VALUES/invalid/missing-separator.values" 2>&1 || true)"
+if [[ "$loud" == *"missing-separator.values, line 2, col 3)"* && "$loud" == *"FAILED: "*"(data-values)"* ]]; then
+    pass "-v names the file, location and kind of a values error"
+else
+    fail "-v names the file, location and kind of a values error (got '$loud')"
+fi
 loud="$("$CONSTRUCTO" check -v "$EXAMPLES/valid/shapes.types" "$EXAMPLES/valid/list.types" 2>&1)"
 if [[ "$loud" == *"OK: checked 2 file(s)"* ]]; then
     pass "-v counts several files"
@@ -120,13 +160,16 @@ if [[ "$loud" == *"OK: <stdin>"* ]]; then
 else
     fail "-v names stdin as <stdin> (got '$loud')"
 fi
-loud="$("$CONSTRUCTO" check -v "$EXAMPLES/parses-but-invalid/duplicate-variant.types" "$EXAMPLES/valid/shapes.types" 2>/dev/null || true)"
-if [[ "$loud" == *"FAILED: "*duplicate-variant.types* && "$loud" == *"OK: "*shapes.types* && "$loud" != *"checked"* ]]; then
+loud="$("$CONSTRUCTO" check -v "$EXAMPLES/parses-but-invalid/duplicate-variant.types" \
+    "$EXAMPLES/valid/shapes.types" 2>/dev/null || true)"
+if [[ "$loud" == *"FAILED: "*duplicate-variant.types* && "$loud" == *"OK: "*shapes.types* \
+    && "$loud" != *"checked"* ]]; then
     pass "-v marks failed files and gives no final OK"
 else
     fail "-v marks failed files and gives no final OK (got '$loud')"
 fi
-err="$("$CONSTRUCTO" check -v "$EXAMPLES/valid/shapes.types" "$EXAMPLES/invalid/missing-semicolon.types" "$EXAMPLES/invalid/no-variants.types" 2>&1 || true)"
+err="$("$CONSTRUCTO" check -v "$EXAMPLES/valid/shapes.types" "$EXAMPLES/invalid/missing-semicolon.types" \
+    "$EXAMPLES/invalid/no-variants.types" 2>&1 || true)"
 if [[ "$err" == *"in enum Shape"* && "$err" != *"no-variants"* ]]; then
     pass "stops at the first syntax error and names the enum"
 else

@@ -1,0 +1,4 @@
+// A semi-colon ends a value, so a constructor does not take the record that follows it as its body.
+Quit;
+{ x: 1 };
+Quit { x: 1 }
