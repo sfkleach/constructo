@@ -1,0 +1,8 @@
+// The types that the examples in this directory are checked against.
+enum Shape =
+  Circle { radius: Float },
+  Box { width: Float, height: Float },
+  Dot,
+  Pair(Nat, Int);
+enum List<T> = Nil, Cons { head: T, tail: List<T> };
+enum Config = Config { name: String, owner: Option<String>, limits: { cpu: Nat, mem: Nat }, tags: [String] };

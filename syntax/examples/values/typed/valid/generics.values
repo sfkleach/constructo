@@ -1,0 +1,4 @@
+// One type parameter has one type throughout a value, and numbers join to the wider type.
+Cons { head: 1, tail: Cons { head: 2.5, tail: Nil } };
+Cons { head: "a", tail: Nil };
+Some(Cons { head: True, tail: Nil });

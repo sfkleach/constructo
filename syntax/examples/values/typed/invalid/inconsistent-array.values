@@ -1,0 +1,2 @@
+// An untagged record has no declared type, but it must be consistent.
+[{ a: 1 }, { b: 2 }];

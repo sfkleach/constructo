@@ -6,10 +6,12 @@ pub mod ast;
 pub mod diagnostics;
 pub mod lexer;
 pub mod parser;
+pub mod typecheck;
 pub mod validate;
 
 use diagnostics::Diagnostic;
 use parser::{parse_file, Parsed};
+use typecheck::{check_value, Env};
 use validate::{validate, ParsedFile};
 
 pub use parser::SourceKind;
@@ -53,6 +55,9 @@ pub struct Report {
     pub outcomes: Vec<Outcome>,
     /// The kind of each source, or `None` for a source that was not reached because checking stopped earlier.
     pub kinds: Vec<Option<SourceKind>>,
+    /// Whether the values were checked against the types, which is not so if that was disabled or if the types had
+    /// errors.
+    pub type_checked: bool,
 }
 
 impl Report {
@@ -74,7 +79,33 @@ fn syntax_diagnostic(source: &Source, e: parser::SyntaxError) -> Diagnostic {
 /// This lets a caller that reads its inputs one at a time stop reading at the first syntax error, before any later
 /// input could fail for some unrelated reason.
 pub fn syntax_error(source: &Source) -> Option<Diagnostic> {
-    parser::parse(&source.text).err().map(|e| syntax_diagnostic(source, e))
+    parse_file(&source.text).1.err().map(|e| syntax_diagnostic(source, e))
+}
+
+/// The options that change how sources are checked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CheckOptions {
+    /// Check values against the types, rather than only for being well-formed.
+    pub type_check: bool,
+    /// Let a Nat fit where an Int or Float is expected, and an Int where a Float is expected.
+    pub widening: bool,
+    /// Carry on with the next top-level value after a type error, instead of stopping.
+    pub continue_after_error: bool,
+}
+
+impl Default for CheckOptions {
+    fn default() -> Self {
+        CheckOptions {
+            type_check: true,
+            widening: true,
+            continue_after_error: false,
+        }
+    }
+}
+
+/// Checks a set of sources with the default options. See `check_sources_with`.
+pub fn check_sources(sources: &[Source]) -> Report {
+    check_sources_with(sources, &CheckOptions::default())
 }
 
 /// Checks a set of sources, each of which is either a types file or a values file.
@@ -83,24 +114,19 @@ pub fn syntax_error(source: &Source) -> Option<Diagnostic> {
 /// first syntax error, which is the only diagnostic reported. The post-parse checks then only run once every source has
 /// parsed, because a file that fails to parse may have contained the declarations that other files refer to, and
 /// checking without them would report spurious unknown names. The types files share one namespace and the post-parse
-/// checks report every error they find. A values file is only checked for being well-formed: it is not yet checked
-/// against the types.
-pub fn check_sources(sources: &[Source]) -> Report {
+/// checks report every error they find.
+///
+/// Unless disabled, the values are then checked against the types. A values file sees only the types files that come
+/// before it. That step is skipped if the types have errors, since the declarations cannot be relied on. The first type
+/// error stops the run, unless `continue_after_error` is set, in which case there is one error per top-level value.
+pub fn check_sources_with(sources: &[Source], options: &CheckOptions) -> Report {
     let mut kinds = vec![None; sources.len()];
-    // Each parsed types file is kept with the index of its source, because values files take no part in validation.
-    let mut types_files = Vec::new();
+    let mut parsed_sources = Vec::new();
     for (index, source) in sources.iter().enumerate() {
         let (kind, parsed) = parse_file(&source.text);
         kinds[index] = Some(kind);
         match parsed {
-            Ok(Parsed::Types(decls)) => types_files.push((
-                index,
-                ParsedFile {
-                    name: source.name.clone(),
-                    decls,
-                },
-            )),
-            Ok(Parsed::Values(_)) => {}
+            Ok(parsed) => parsed_sources.push(parsed),
             Err(e) => {
                 let mut outcomes = vec![Outcome::NotChecked; sources.len()];
                 outcomes[index] = Outcome::Failed;
@@ -112,21 +138,68 @@ pub fn check_sources(sources: &[Source]) -> Report {
                     diagnostics: vec![syntax_diagnostic(source, e)],
                     outcomes,
                     kinds,
+                    type_checked: false,
                 };
             }
         }
     }
     let mut outcomes = vec![Outcome::Ok; sources.len()];
     let mut diagnostics = Vec::new();
-    let (indexes, files): (Vec<usize>, Vec<ParsedFile>) = types_files.into_iter().unzip();
+    // Values files take no part in validation, so each parsed types file is kept with the index of its source.
+    let mut indexes = Vec::new();
+    let mut files = Vec::new();
+    for (index, parsed) in parsed_sources.iter().enumerate() {
+        if let Parsed::Types(decls) = parsed {
+            indexes.push(index);
+            files.push(ParsedFile {
+                name: sources[index].name.clone(),
+                decls: decls.clone(),
+            });
+        }
+    }
     for (file, diagnostic) in validate(&files) {
         outcomes[indexes[file]] = Outcome::Failed;
         diagnostics.push(diagnostic);
+    }
+    let type_checked = diagnostics.is_empty() && options.type_check;
+    if type_checked {
+        type_check_values(sources, &parsed_sources, options, &mut outcomes, &mut diagnostics);
     }
     Report {
         diagnostics,
         outcomes,
         kinds,
+        type_checked,
+    }
+}
+
+fn type_check_values(
+    sources: &[Source],
+    parsed_sources: &[Parsed],
+    options: &CheckOptions,
+    outcomes: &mut [Outcome],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut visible = Vec::new();
+    let mut stopped = false;
+    for (index, parsed) in parsed_sources.iter().enumerate() {
+        match parsed {
+            Parsed::Types(decls) => visible.extend(decls),
+            Parsed::Values(_) if stopped => outcomes[index] = Outcome::NotChecked,
+            Parsed::Values(values) => {
+                let env = Env::new(visible.iter().copied());
+                for value in values {
+                    if let Err(e) = check_value(&env, options.widening, value) {
+                        diagnostics.push(Diagnostic::new(&sources[index].name, e.pos, e.message));
+                        outcomes[index] = Outcome::Failed;
+                        if !options.continue_after_error {
+                            stopped = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -188,6 +261,15 @@ mod tests {
     }
 
     #[test]
+    fn syntax_error_accepts_a_well_formed_values_file() {
+        let source = Source {
+            name: "f".to_string(),
+            text: "Circle { radius: 3.0 }; Dot".to_string(),
+        };
+        assert_eq!(syntax_error(&source), None);
+    }
+
+    #[test]
     fn stops_at_the_first_syntax_error_and_names_the_enum() {
         let sources: Vec<Source> = ["enum A = X;", "enum B = Y", "enum C = ;"]
             .iter()
@@ -235,7 +317,7 @@ mod tests {
 
     #[test]
     fn checks_types_and_values_files_in_one_run() {
-        let report = check_sources(&sources(&["enum A = X;", "A; X { y: 1 };", "enum B = Y(A);"]));
+        let report = check_sources(&sources(&["enum A = X;", "X; X;", "enum B = Y(A);"]));
         assert!(report.is_ok());
         assert_eq!(report.outcomes, vec![Outcome::Ok; 3]);
         assert_eq!(
@@ -250,17 +332,69 @@ mod tests {
 
     #[test]
     fn a_values_file_is_checked_without_any_types() {
-        assert!(check_sources(&sources(&["Circle { radius: 3.0 }"])).is_ok());
+        let options = CheckOptions {
+            type_check: false,
+            ..CheckOptions::default()
+        };
+        assert!(check_sources_with(&sources(&["Circle { radius: 3.0 }"]), &options).is_ok());
     }
 
     #[test]
-    fn values_are_not_yet_checked_against_the_types() {
-        assert!(check_sources(&sources(&["enum A = X;", "Unrelated(1, 2)"])).is_ok());
+    fn values_are_checked_against_the_types_before_them() {
+        let report = check_sources(&sources(&["enum A = X;", "Unrelated(1, 2)"]));
+        assert_eq!(
+            report.diagnostics.iter().map(|d| d.to_string()).collect::<Vec<_>>(),
+            vec!["ERROR: Unknown constructor Unrelated (f1, line 1, col 1)"]
+        );
+        assert_eq!(report.outcomes, vec![Outcome::Ok, Outcome::Failed]);
+        // The types come after the values, so they are not in scope.
+        assert!(!check_sources(&sources(&["X", "enum A = X;"])).is_ok());
+        assert!(check_sources(&sources(&["enum A = X;", "X"])).is_ok());
+    }
+
+    #[test]
+    fn no_type_check_leaves_only_the_well_formed_check() {
+        let options = CheckOptions {
+            type_check: false,
+            ..CheckOptions::default()
+        };
+        assert!(check_sources_with(&sources(&["enum A = X;", "Unrelated(1, 2)"]), &options).is_ok());
+    }
+
+    #[test]
+    fn a_type_error_stops_the_run_unless_continuing() {
+        let texts = ["enum A = X;", "Y; Z; X", "W", "enum B = V;"];
+        let report = check_sources(&sources(&texts));
+        assert_eq!(report.diagnostics.len(), 1);
+        assert_eq!(
+            report.outcomes,
+            vec![Outcome::Ok, Outcome::Failed, Outcome::NotChecked, Outcome::Ok]
+        );
+        let options = CheckOptions {
+            continue_after_error: true,
+            ..CheckOptions::default()
+        };
+        let report = check_sources_with(&sources(&texts), &options);
+        assert_eq!(
+            report.diagnostics.iter().map(|d| d.to_string()).collect::<Vec<_>>(),
+            vec![
+                "ERROR: Unknown constructor Y (f1, line 1, col 1)",
+                "ERROR: Unknown constructor Z (f1, line 1, col 4)",
+                "ERROR: Unknown constructor W (f2, line 1, col 1)",
+            ]
+        );
+    }
+
+    #[test]
+    fn types_with_errors_suppress_the_type_check() {
+        let report = check_sources(&sources(&["enum A = X(Missing);", "Nope"]));
+        assert_eq!(report.diagnostics.len(), 1);
+        assert_eq!(report.outcomes, vec![Outcome::Failed, Outcome::Ok]);
     }
 
     #[test]
     fn reports_a_values_syntax_error_with_the_file_and_location() {
-        let report = check_sources(&sources(&["enum A = X;", "A;\nB { x: 1 y: 2 }", "enum C = Z;"]));
+        let report = check_sources(&sources(&["enum A = X;", "X;\nB { x: 1 y: 2 }", "enum C = Z;"]));
         assert_eq!(
             report.diagnostics.iter().map(|d| d.to_string()).collect::<Vec<_>>(),
             vec!["ERROR: Expected comma or '}' (f1, line 2, col 10)"]
