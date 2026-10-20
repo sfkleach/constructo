@@ -10,6 +10,7 @@ use crate::ast::{EnumDecl, Field, TaggedBody, Type, Value, ValueKind, Variant, V
 use crate::diagnostics::Pos;
 use std::collections::HashMap;
 use std::fmt;
+use std::rc::Rc;
 
 /// A failed type-check: where the offending term is, and what is wrong with it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,15 +63,18 @@ pub fn check_value(env: &Env, widening: bool, value: &Value) -> Result<()> {
     checker.check(value, &top)
 }
 
+/// A type. The compound types share their parts, so that cloning a type, and so substituting it for a type parameter,
+/// costs the same however large it is. Without that, a declaration such as `enum E<T> = Step(E<{ a: T, b: T }>)`
+/// would double the size of the argument at each level of nesting in a value.
 #[derive(Debug, Clone)]
 enum Ty {
     Nat,
     Int,
     Float,
     Str,
-    Array(Box<Ty>),
-    Enum(String, Vec<Ty>),
-    Record(Vec<(String, Ty)>),
+    Array(Rc<Ty>),
+    Enum(String, Rc<Vec<Ty>>),
+    Record(Rc<Vec<(String, Ty)>>),
     Var(usize),
 }
 
@@ -80,6 +84,9 @@ enum Slot {
     /// number can widen it, which is how the join of `[1, 2.5]` becomes `[Float]`.
     Bound(Ty, bool),
 }
+
+/// The longest description of a type that is put in a message, in characters.
+const SHOW_LIMIT: usize = 120;
 
 /// The widening order of the numeric types.
 fn rank(ty: &Ty) -> Option<u8> {
@@ -136,23 +143,59 @@ impl Checker<'_, '_> {
         }
     }
 
+    /// Describes a type for a message. The description is cut short, because sharing means that a type can be
+    /// exponentially larger when written out than it is in memory.
     fn show(&self, ty: &Ty) -> String {
+        let mut out = String::new();
+        self.show_into(ty, &mut out);
+        if out.chars().count() > SHOW_LIMIT {
+            out = out.chars().take(SHOW_LIMIT).collect();
+            out.push_str("...");
+        }
+        out
+    }
+
+    fn show_into(&self, ty: &Ty, out: &mut String) {
+        // Writing stops once there is more than the limit, so that a huge type is never fully traversed.
+        if out.len() > SHOW_LIMIT {
+            return;
+        }
         match self.shallow(ty) {
-            Ty::Nat => "Nat".to_string(),
-            Ty::Int => "Int".to_string(),
-            Ty::Float => "Float".to_string(),
-            Ty::Str => "String".to_string(),
-            Ty::Array(elem) => format!("[{}]", self.show(&elem)),
-            Ty::Enum(name, args) if args.is_empty() => name,
+            Ty::Nat => out.push_str("Nat"),
+            Ty::Int => out.push_str("Int"),
+            Ty::Float => out.push_str("Float"),
+            Ty::Str => out.push_str("String"),
+            Ty::Array(elem) => {
+                out.push('[');
+                self.show_into(&elem, out);
+                out.push(']');
+            }
             Ty::Enum(name, args) => {
-                let args: Vec<String> = args.iter().map(|a| self.show(a)).collect();
-                format!("{}<{}>", name, args.join(", "))
+                out.push_str(&name);
+                if !args.is_empty() {
+                    out.push('<');
+                    for (index, arg) in args.iter().enumerate() {
+                        if index > 0 {
+                            out.push_str(", ");
+                        }
+                        self.show_into(arg, out);
+                    }
+                    out.push('>');
+                }
             }
             Ty::Record(fields) => {
-                let fields: Vec<String> = fields.iter().map(|(n, t)| format!("{}: {}", n, self.show(t))).collect();
-                format!("{{ {} }}", fields.join(", "))
+                out.push_str("{ ");
+                for (index, (name, field)) in fields.iter().enumerate() {
+                    if index > 0 {
+                        out.push_str(", ");
+                    }
+                    out.push_str(name);
+                    out.push_str(": ");
+                    self.show_into(field, out);
+                }
+                out.push_str(" }");
             }
-            Ty::Var(_) => "_".to_string(),
+            Ty::Var(_) => out.push('_'),
         }
     }
 
@@ -180,7 +223,7 @@ impl Checker<'_, '_> {
                     Ty::Array(elem) => (**elem).clone(),
                     Ty::Var(_) => {
                         let elem = self.fresh();
-                        self.bind(&expected, Ty::Array(Box::new(elem.clone())), false);
+                        self.bind(&expected, Ty::Array(Rc::new(elem.clone())), false);
                         elem
                     }
                     _ => return self.mismatch(pos, &expected, "an array"),
@@ -198,7 +241,8 @@ impl Checker<'_, '_> {
                                 fields.push((member.name.clone(), self.fresh()));
                             }
                         }
-                        self.bind(&expected, Ty::Record(fields.clone()), false);
+                        let fields = Rc::new(fields);
+                        self.bind(&expected, Ty::Record(Rc::clone(&fields)), false);
                         fields
                     }
                     _ => return self.mismatch(pos, &expected, "a record"),
@@ -265,7 +309,8 @@ impl Checker<'_, '_> {
             Ty::Enum(name, args) if *name == decl.name => args.clone(),
             Ty::Var(_) => {
                 let args: Vec<Ty> = decl.params.iter().map(|_| self.fresh()).collect();
-                self.bind(expected, Ty::Enum(decl.name.clone(), args.clone()), false);
+                let args = Rc::new(args);
+                self.bind(expected, Ty::Enum(decl.name.clone(), Rc::clone(&args)), false);
                 args
             }
             _ => return self.mismatch(pos, expected, found),
@@ -355,12 +400,12 @@ fn instantiate(ty: &Type, decl: &EnumDecl, args: &[Ty]) -> Ty {
                 "String" => Ty::Str,
                 _ => Ty::Enum(
                     name.clone(),
-                    type_args.iter().map(|t| instantiate(t, decl, args)).collect(),
+                    Rc::new(type_args.iter().map(|t| instantiate(t, decl, args)).collect()),
                 ),
             }
         }
-        Type::Array(elem) => Ty::Array(Box::new(instantiate(elem, decl, args))),
-        Type::Record(fields) => Ty::Record(instantiate_fields(fields, decl, args)),
+        Type::Array(elem) => Ty::Array(Rc::new(instantiate(elem, decl, args))),
+        Type::Record(fields) => Ty::Record(Rc::new(instantiate_fields(fields, decl, args))),
     }
 }
 
@@ -559,6 +604,40 @@ mod tests {
         assert_eq!(
             errors(types, "Cfg { tags: {}, limits: { mem: 1, cpu: 2 } }", true),
             vec!["1:13 Expected [String] but found a record"]
+        );
+    }
+
+    // A type argument that grows at every level of a value, as in `E<{ a: T, b: T }>`, is exponentially large when
+    // written out. These tests would exhaust memory or time if substitution copied the type or if messages listed it.
+    const GROWING: &str = "enum E<T> = Stop, Step(E<{ a: T, b: T }>), Value(T);";
+
+    fn nested(depth: usize, innermost: &str) -> String {
+        format!("{}{}{}", "Step(".repeat(depth), innermost, ")".repeat(depth))
+    }
+
+    #[test]
+    fn a_type_argument_that_doubles_at_each_level_is_cheap() {
+        assert!(errors(GROWING, &nested(150, "Stop"), true).is_empty());
+    }
+
+    #[test]
+    fn a_message_about_a_huge_type_is_cut_short() {
+        let found = errors(GROWING, &nested(150, "Value(\"x\")"), true);
+        assert_eq!(found.len(), 1);
+        assert!(found[0].contains("Expected { a: { a: { a:"), "{}", found[0]);
+        assert!(found[0].contains("... but found String"), "{}", found[0]);
+        assert!(found[0].len() < 250, "{}", found[0].len());
+    }
+
+    #[test]
+    fn a_short_type_is_described_in_full() {
+        assert_eq!(
+            errors(
+                "enum P<T> = P { xs: [T], pair: { a: T, b: Option<T> } };",
+                "P { xs: [1], pair: 3 }",
+                true
+            ),
+            vec!["1:20 Expected { a: Nat, b: Option<Nat> } but found Nat"]
         );
     }
 }

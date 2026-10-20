@@ -38,6 +38,8 @@ Following the style in https://keepachangelog.com/en/1.0.0/
 
 ### Fixed
 
+- The type-check no longer takes exponential time and memory on a generic enum whose type argument grows at each level,
+  such as `enum E<T> = Stop, Step(E<{ a: T, b: T }>)`. Types share their parts, and a type is cut short in messages.
 - A values file followed by further arguments was mistaken for a syntax error, which stopped later files from being read.
 
 ### Changed

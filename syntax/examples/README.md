@@ -12,3 +12,4 @@
 - `values/valid`, `values/invalid` are only checked for being well-formed (`--no-type-check`).
 - `values/typed`: values that are checked against `values/typed/schema.types` (and the prelude). `valid/` must pass
   and `invalid/` must fail the type-check, though each invalid file is well-formed.
+  Each invalid file has a `// expect: <message>` line, and the functional test requires that exact error.

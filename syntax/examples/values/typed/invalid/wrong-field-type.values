@@ -1,1 +1,2 @@
+// expect: Expected Float but found String
 Circle { radius: "big" };

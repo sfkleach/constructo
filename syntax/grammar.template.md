@@ -17,7 +17,7 @@ enum Shape =
 and a values file could then contain:
 
 ```
-Circle { radius: 3.0 }
+Circle { radius: 3.0 };
 Box { width: 7.0, height: 1.0 }
 ```
 

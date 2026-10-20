@@ -74,8 +74,16 @@ done
 echo ""
 
 echo "--- ill-typed values ---"
+# Each file names its expected error in a "// expect: ..." line, so that it cannot fail for some other reason.
 for f in "$TYPED"/invalid/*.values; do
-    expect_exit "typed/invalid/$(basename "$f")" 1 check "$TYPED/schema.types" "$f"
+    expected="$(sed -n 's|^// expect: ||p' "$f")"
+    actual=0
+    err="$("$CONSTRUCTO" check "$TYPED/schema.types" "$f" 2>&1 >/dev/null)" || actual=$?
+    if [[ -n "$expected" && "$actual" -eq 1 && "$err" == "ERROR: $expected ("* ]]; then
+        pass "typed/invalid/$(basename "$f")"
+    else
+        fail "typed/invalid/$(basename "$f") (expected exit 1 with '$expected', got exit $actual and '$err')"
+    fi
     expect_exit "typed/invalid/$(basename "$f") with --no-type-check" 0 check --no-type-check "$f"
 done
 echo ""
@@ -85,9 +93,6 @@ expect_exit "types must come before the values that use them" 1 check "$TYPED/va
 expect_exit "values without any types fail the type-check" 1 check "$VALUES/valid/single-value.values"
 expect_exit "--no-widening rejects a Nat as a Float" 1 \
     check --no-widening "$TYPED/schema.types" "$TYPED/valid/shapes.values"
-expect_exit "--no-widening accepts exact numbers" 0 \
-    check --no-widening "$TYPED/schema.types" "$TYPED/invalid/mixed-list.values" --no-type-check
-expect_exit "null needs the prelude" 1 check --no-prelude "$TYPED/schema.types" "$TYPED/valid/config.values"
 two_errors="$("$CONSTRUCTO" check "$TYPED/schema.types" "$TYPED/invalid/missing-field.values" \
     "$TYPED/invalid/unknown-field.values" 2>&1 >/dev/null || true)"
 all_errors="$("$CONSTRUCTO" check --continue "$TYPED/schema.types" "$TYPED/invalid/missing-field.values" \
@@ -97,7 +102,7 @@ if [[ "$(wc -l <<< "$two_errors")" -eq 1 && "$(wc -l <<< "$all_errors")" -eq 2 ]
 else
     fail "a type error stops the run unless --continue is given (got '$two_errors' and '$all_errors')"
 fi
-if [[ "$two_errors" == "ERROR: Missing field height in Box ("*"missing-field.values, line 1, col 1)" ]]; then
+if [[ "$two_errors" == "ERROR: Missing field height in Box ("*"missing-field.values, line 2, col 1)" ]]; then
     pass "type error format"
 else
     fail "type error format (got '$two_errors')"
@@ -164,6 +169,20 @@ stdin_exit() {
 stdin_exit "valid stdin" 0 "enum A = X;"
 stdin_exit "invalid stdin" 1 "enum A = X"
 stdin_exit "stdin shares a namespace with files" 0 "enum A = X(Shape);" "$EXAMPLES/valid/shapes.types"
+stdin_exit "--no-widening accepts exact numbers" 0 'Pair(1, -2); Circle { radius: 3.0 }' \
+    --no-widening "$TYPED/schema.types"
+stdin_exit "--no-widening rejects a Nat as an Int" 1 'Pair(1, 2)' --no-widening "$TYPED/schema.types"
+stdin_exit "--no-widening rejects a join of numbers" 1 '[1, 2.5]' --no-widening
+stdin_exit "widening accepts a join of numbers" 0 '[1, 2.5]'
+# A bare null leaves no other possible error, unlike a types file that itself uses Option.
+stdin_exit "null is accepted with the prelude" 0 'null'
+stdin_exit "null needs the prelude" 1 'null' --no-prelude
+err="$(printf 'null\n' | "$CONSTRUCTO" check --stdin --no-prelude 2>&1 || true)"
+if [[ "$err" == "ERROR: Cannot use null because the type Option is not in scope (<stdin>, line 1, col 1)" ]]; then
+    pass "null without the prelude reports that Option is not in scope"
+else
+    fail "null without the prelude reports that Option is not in scope (got '$err')"
+fi
 
 out="$("$CONSTRUCTO" check "$EXAMPLES/invalid/missing-semicolon.types" 2>&1 >/dev/null || true)"
 if [[ "$out" == ERROR:*"missing-semicolon.types, line "*", col "* ]]; then

@@ -1,1 +1,2 @@
+// expect: Expected Nat but found null
 Pair(null, 1);

@@ -1,1 +1,2 @@
+// expect: Expected Nat but found String
 Cons { head: 1, tail: Cons { head: "a", tail: Nil } };
