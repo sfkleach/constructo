@@ -204,7 +204,7 @@ The error will focus on the constructor of the sub-term which doesn't type-check
 - New examples go in `syntax/examples/values/`, with `valid/` and `invalid/` as in Step 5. Each needs the types
   it relies on, so the functional tests must pass the types files first.
 
-## Step 99: Populate the CHANGELOG
+## Step 7: Populate the CHANGELOG
 
 Before finishing the task, populate `CHANGELOG.md` in the
 [Keep a Changelog](https://keepachangelog.com/) format, recording the changes
