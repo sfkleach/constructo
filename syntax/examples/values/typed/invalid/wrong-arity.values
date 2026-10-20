@@ -1,1 +1,2 @@
+// expect: Constructor Pair takes 2 value(s) but has 1
 Pair(1);

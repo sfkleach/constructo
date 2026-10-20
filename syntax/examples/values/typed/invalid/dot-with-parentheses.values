@@ -1,1 +1,2 @@
+// expect: Constructor Dot takes no fields
 Dot();

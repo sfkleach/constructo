@@ -1,1 +1,2 @@
+// expect: Unknown constructor Triangle
 Triangle { side: 1.0 };

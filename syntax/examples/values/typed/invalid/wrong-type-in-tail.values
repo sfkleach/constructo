@@ -1,1 +1,2 @@
+// expect: Expected List<Nat> but found Dot of type Shape
 Cons { head: 1, tail: Dot };
