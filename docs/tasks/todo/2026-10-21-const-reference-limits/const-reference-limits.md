@@ -2,9 +2,9 @@
 
 ## Overview
 
-Step 1 of the consts task (`docs/tasks/2026-10-20-consts/consts.md`) lets the definition of a `const` refer to another
-`const` only if `--allow-refs` is set. This task replaces that flag, first with a simple rule about "leaf" consts and
-later with a limit on the size of the serialised value.
+Step 1 of the consts task (`docs/tasks/done/2026-10-20-consts/consts.md`) lets the definition of a `const` refer to
+another `const` only if `--allow-refs` is set. This task replaces that flag, first with a simple rule about "leaf"
+consts and later with a limit on the size of the serialised value.
 
 The reason for restricting references is that a chain of references can make the expansion of a const very much larger
 than its text. A definition such as `const B = [A, A]; const C = [B, B]; ...` doubles in size at each level.
