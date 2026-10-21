@@ -163,6 +163,22 @@ if [[ "$err" == "ERROR: Expected T but found Nat ("*"line 2, col 32)" ]]; then
 else
     fail "the value of a generic const is checked against unknown parameter types (got '$err')"
 fi
+PBI="$EXAMPLES/parses-but-invalid"
+record_error() {
+    local file="$1" expected="$2" err
+    err="$("$CONSTRUCTO" check "$PBI/$file" 2>&1 >/dev/null || true)"
+    if [[ "$err" == "ERROR: $expected ("* ]]; then
+        pass "$file reports '$expected'"
+    else
+        fail "$file reports '$expected' (got '$err')"
+    fi
+}
+record_error record-const-extra-field.types "Unknown field b in record"
+record_error record-const-missing-field.types "Missing field b in record"
+record_error record-const-wrong-field-type.types "Expected Nat but found String"
+record_error record-const-tagged-value.types "Expected { x: Nat } but found Point of type Shape"
+record_error record-const-for-enum.types "Expected Shape but found a record"
+record_error record-type-duplicate-field.types "Duplicate field a"
 expect_exit "an ill-typed const passes --no-type-check" 0 \
     check --no-type-check "$EXAMPLES/parses-but-invalid/const-wrong-type.types"
 loud="$("$CONSTRUCTO" check -v "$EXAMPLES/valid/starts-with-const.types" 2>&1)"

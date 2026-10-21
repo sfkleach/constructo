@@ -205,6 +205,7 @@ impl Checker<'_, '_> {
                     out.push('>');
                 }
             }
+            Ty::Record(fields) if fields.is_empty() => out.push_str("{}"),
             Ty::Record(fields) => {
                 out.push_str("{ ");
                 for (index, (name, field)) in fields.iter().enumerate() {
@@ -676,7 +677,7 @@ mod tests {
 
     /// Checks the consts of a types file, and returns the error of each as `line:col message`.
     fn const_errors(text: &str) -> Vec<String> {
-        let file = parse(&format!("{} {}", PRELUDE_TYPES, text)).unwrap();
+        let file = parse(&format!("{}\n{}", PRELUDE_TYPES, text)).unwrap();
         let env = Env::new(&file.enums, &file.consts);
         file.consts
             .iter()
@@ -765,5 +766,83 @@ mod tests {
             ),
             vec!["1:20 Expected { a: Nat, b: Option<Nat> } but found Nat"]
         );
+    }
+
+    #[test]
+    fn a_record_type_is_closed_and_ignores_the_order_of_its_fields() {
+        let types = "const x: { a: Nat, b: String } = { b: \"s\", a: 1 };";
+        assert!(const_errors(types).is_empty());
+        assert_eq!(
+            const_errors("const x: { a: Nat } = { a: 1, b: 2 };"),
+            vec!["2:31 Unknown field b in record"]
+        );
+        assert_eq!(
+            const_errors("const x: { a: Nat, b: Nat } = { a: 1 };"),
+            vec!["2:31 Missing field b in record"]
+        );
+        assert_eq!(
+            const_errors("const x: { a: Nat } = { a: 1, a: 2 };"),
+            vec!["2:31 Duplicate field a"]
+        );
+    }
+
+    #[test]
+    fn record_types_nest_and_hold_arrays_and_generics() {
+        assert!(
+            const_errors("const x: { a: { b: [Nat] }, c: [{ d: Float }] } = { a: { b: [1, 2] }, c: [{ d: 1 }] };")
+                .is_empty()
+        );
+        assert!(const_errors("const x<T>: { v: Option<T>, w: [T] } = { v: null, w: [] };").is_empty());
+        assert_eq!(
+            const_errors("const x: { a: { b: Nat } } = { a: { b: \"s\" } };"),
+            vec!["2:40 Expected Nat but found String"]
+        );
+    }
+
+    #[test]
+    fn the_empty_record_is_a_type_and_a_value() {
+        assert!(const_errors("const x: {} = {}; const y: [{}] = [{}, {}];").is_empty());
+        assert_eq!(
+            const_errors("const x: {} = { a: 1 };"),
+            vec!["2:17 Unknown field a in record"]
+        );
+        assert_eq!(
+            const_errors("const x: { a: Nat } = {};"),
+            vec!["2:23 Missing field a in record"]
+        );
+    }
+
+    #[test]
+    fn tagged_and_untagged_records_never_convert() {
+        let types = "enum E = Foo { a: Nat }, Pong {}, Bare; ";
+        assert_eq!(
+            const_errors(&format!("{}const x: {{ a: Nat }} = Foo {{ a: 1 }};", types)),
+            vec!["2:63 Expected { a: Nat } but found Foo of type E"]
+        );
+        assert_eq!(
+            const_errors(&format!("{}const x: E = {{ a: 1 }};", types)),
+            vec!["2:54 Expected E but found a record"]
+        );
+        // The empty record is not a bare constructor or an empty tagged record either.
+        assert_eq!(
+            const_errors(&format!("{}const x: {{}} = Pong {{}};", types)),
+            vec!["2:55 Expected {} but found Pong of type E"]
+        );
+        assert_eq!(
+            const_errors(&format!("{}const x: {{}} = Bare;", types)),
+            vec!["2:55 Expected {} but found Bare of type E"]
+        );
+    }
+
+    #[test]
+    fn the_record_types_of_a_const_reference_are_compared_by_field() {
+        let types = "const a: { x: Nat, y: Float } = { x: 1, y: 2.5 }; ";
+        let ok = |def: &str| const_errors(&format!("{}{}", types, def)).is_empty();
+        assert!(ok("const b: { y: Float, x: Nat } = a;"));
+        // Numbers widen field by field.
+        assert!(ok("const b: { x: Int, y: Float } = a;"));
+        assert!(!ok("const b: { x: Nat } = a;"));
+        assert!(!ok("const b: { x: Nat, y: Float, z: Nat } = a;"));
+        assert!(!ok("const b: { x: String, y: Float } = a;"));
     }
 }

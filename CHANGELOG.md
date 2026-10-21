@@ -49,6 +49,9 @@ Following the style in https://keepachangelog.com/en/1.0.0/
   arguments, and its value is checked against the parameters as unknown types.
 - The standard prelude declares the consts `null`, `true` and `false`, which replace the `null` literal. A const
   definition may refer to them without `--allow-refs`. Under `--no-prelude` they are unknown.
+- The type of an untagged object is written like the object, with a type in place of each value, e.g.
+  `const x: { left: String, right: String } = { left: "hand", right: "heart" };`. A record type is closed, its fields
+  may be in any order, and it never converts to or from a tagged record. See decision 15.
 
 ### Changed
 

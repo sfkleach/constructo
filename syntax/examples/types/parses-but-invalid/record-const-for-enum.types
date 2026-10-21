@@ -1,0 +1,3 @@
+// And an untagged record is never a value of an enum.
+enum Shape = Point { x: Nat };
+const p: Shape = { x: 1 };
