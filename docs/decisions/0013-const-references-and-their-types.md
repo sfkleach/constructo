@@ -20,7 +20,8 @@ how circular definitions are handled, and what type a reference has.
   type error stops the run unless `--continue` is given.
 - A reference to a const from the prelude is always allowed (decision 14).
 - Consts are not evaluated, so there is no evaluation order: it is enough that the declared types agree.
-- In this step the type is required. Type parameters are not in scope in a const.
+- Type parameters are not in scope in a const, other than its own (decision 14). The type of a const may be left out
+  and inferred (decision 16), and a reference then has the inferred type.
 
 ## Consequences
 

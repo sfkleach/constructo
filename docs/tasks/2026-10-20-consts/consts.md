@@ -138,7 +138,29 @@ Note that `{}` is both a type expression and a value expression.
 ## Step 4: Make the type-expression part of a `const` definition optional
 
 In this step we allow the type expression to be skipped and the type is 
-inferred.
+inferred. Note that widening will not happen here so there's a difference 
+between `const x = 0;` and `const x: Int = 0`.
+
+### Refinements agreed during the step
+
+- The inferred type of a const is the type of its value as the type-checker works it out for a top-level value: `0` is
+  a Nat, `+0` is an Int, `0.0` is a Float, a tagged value has the type of its enum, and an untagged record has the
+  record type of its fields. Numbers in an array join as in values, so `[1, 2.5]` is `[Float]`; under `--no-widening`
+  there is no join. Only the type of the const itself is exact: a reference to `const x = 0;` is accepted where an Int
+  is expected, as it is for `const x: Nat = 0;`.
+- Type variables that the value leaves undetermined are generalised. `const e = [];` has the type `[T]` for any `T`, as
+  if it were written `const e<T>: [T] = [];`, and `const none = None;` and `const m = null;` have type `Option<T>`.
+  That is sound because values are immutable. Each reference instantiates the variables afresh, as in Step 2.
+- A const that omits its type may not declare type parameters, because they are scoped to the type expression. It is an
+  error, whose message says that type parameters need a type.
+- A const with an inferred type may refer to any other const, annotated or not, under the same rules as in Step 1.
+  The types are worked out in dependency order, so that the declaration order does not matter, and a circular definition
+  is still an error under `--allow-refs`.
+- Errors in the value of a const without a type are reported where the term is, as for a values file, e.g.
+  `const x = [1, "a"];` fails at `"a"`.
+- In verbose mode, each const of a file is listed with its type, e.g. `const x: Nat`, and the types that were inferred
+  are marked as such. Nothing extra is printed unless `-v` is given.
+
 
 ## Step 5: Update the grammar files
 

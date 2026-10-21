@@ -2,7 +2,7 @@
 //!
 //! All the parsed files are checked together as a single namespace.
 
-use crate::ast::{ConstDecl, EnumDecl, Field, TaggedBody, Type, TypeParam, Value, ValueKind, VariantBody};
+use crate::ast::{ConstDecl, EnumDecl, Field, Type, TypeParam, Value, VariantBody};
 use crate::diagnostics::{Diagnostic, Pos};
 use std::collections::HashMap;
 
@@ -154,9 +154,20 @@ impl<'a> Checker<'a> {
         let mut edges: HashMap<&str, Vec<(&str, Pos)>> = HashMap::new();
         for (file, parsed) in files.iter().enumerate() {
             for constant in &parsed.consts {
-                let mut params = self.check_params(file, &constant.params);
-                self.check_type(file, &constant.ty, &mut params);
-                self.report_unused_params(file, &params);
+                match &constant.ty {
+                    Some(ty) => {
+                        let mut params = self.check_params(file, &constant.params);
+                        self.check_type(file, ty, &mut params);
+                        self.report_unused_params(file, &params);
+                    }
+                    // The parameters are scoped to the type, and inference finds the generic type by itself.
+                    None => {
+                        if let Some(first) = constant.params.first() {
+                            let message = format!("Type parameters of const {} need a type", constant.name);
+                            self.report(file, first.pos, message, None);
+                        }
+                    }
+                }
                 let mut refs = Vec::new();
                 self.collect_refs(&constant.value, &mut refs);
                 if !self.allow_refs {
@@ -189,21 +200,9 @@ impl<'a> Checker<'a> {
 
     /// Finds the references to registered consts in a value.
     fn collect_refs(&self, value: &'a Value, refs: &mut Vec<(&'a str, Pos)>) {
-        match &value.kind {
-            ValueKind::Array(items) => items.iter().for_each(|item| self.collect_refs(item, refs)),
-            ValueKind::Record(members) => members.iter().for_each(|m| self.collect_refs(&m.value, refs)),
-            ValueKind::Tagged { name, body } => {
-                if self.consts.contains_key(name.as_str()) {
-                    refs.push((name, value.pos));
-                }
-                match body {
-                    Some(TaggedBody::Record(members)) => members.iter().for_each(|m| self.collect_refs(&m.value, refs)),
-                    Some(TaggedBody::Tuple(items)) => items.iter().for_each(|item| self.collect_refs(item, refs)),
-                    None => {}
-                }
-            }
-            ValueKind::Nat(_) | ValueKind::Int(_) | ValueKind::Float(_) | ValueKind::Str(_) => {}
-        }
+        let mut names = Vec::new();
+        value.names(&mut names);
+        refs.extend(names.into_iter().filter(|(name, _)| self.consts.contains_key(name)));
     }
 
     /// Reports each reference that closes a circle of consts. The search is a depth-first one with an explicit stack,
