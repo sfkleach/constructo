@@ -20,7 +20,7 @@ reserved word.
 - A const may share its name with an enum type, as a constructor may. For instance
   `enum Colour = Rgb(Nat, Nat, Nat); const Colour: Colour = Rgb(255, 0, 0);` is valid.
 - A const name may be of either case, so `limit` and `Limit` are both allowed. A lowercase name in a value can only be a
-  const, and takes no fields. `null` is a literal, so it is not accepted as a const name yet.
+  const, and takes no fields. `null`, `true` and `false` are consts of the prelude (decision 14).
 - `const` is a reserved word everywhere, so it cannot be a field name. That keeps the classification of a file a test of
   its first token: `enum` or `const` means a types file.
 - A bare uppercase name in a value is looked up as a constructor first and then as a const. The order is immaterial

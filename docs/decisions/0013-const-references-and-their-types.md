@@ -18,6 +18,7 @@ how circular definitions are handled, and what type a reference has.
 - The value of each const is checked against its declared type with the checker used for values files, over every
   enum in the run. That check is skipped under `--no-type-check`. The consts are checked before the values, and a
   type error stops the run unless `--continue` is given.
+- A reference to a const from the prelude is always allowed (decision 14).
 - Consts are not evaluated, so there is no evaluation order: it is enough that the declared types agree.
 - In this step the type is required. Type parameters are not in scope in a const.
 

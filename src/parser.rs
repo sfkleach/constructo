@@ -201,30 +201,33 @@ impl Parser {
         })
     }
 
-    /// `const name: Type = value;` The name may be an identifier of either case, other than `null`.
+    /// `const name<Params>: Type = value;` The name may be an identifier of either case.
     fn const_decl(&mut self) -> Result<ConstDecl> {
         self.expect(Tok::Const, "'const'")?;
         let pos = self.pos();
         let name = match self.peek() {
-            Tok::TypeName(name) => name.clone(),
-            Tok::Name(name) if name == "null" => {
-                return Err(SyntaxError {
-                    pos,
-                    message: "null is a literal and cannot be the name of a const".to_string(),
-                    context: None,
-                })
-            }
-            Tok::Name(name) => name.clone(),
+            Tok::TypeName(name) | Tok::Name(name) => name.clone(),
             _ => return self.error("const name"),
         };
         self.bump();
         self.context = Some(format!("const {}", name));
+        let params = if self.peek() == &Tok::Lt {
+            self.type_params()?
+        } else {
+            Vec::new()
+        };
         self.expect(Tok::Colon, "':'")?;
         let ty = self.ty()?;
         self.expect(Tok::Eq, "'='")?;
         let value = self.value()?;
         self.expect(Tok::Semi, "semi-colon")?;
-        Ok(ConstDecl { name, pos, ty, value })
+        Ok(ConstDecl {
+            name,
+            pos,
+            params,
+            ty,
+            value,
+        })
     }
 
     fn type_params(&mut self) -> Result<Vec<TypeParam>> {
@@ -385,7 +388,6 @@ impl Parser {
             Tok::Int(text) => self.literal(ValueKind::Int(text)),
             Tok::Float(text) => self.literal(ValueKind::Float(text)),
             Tok::Str(text) => self.literal(ValueKind::Str(text)),
-            Tok::Name(name) if name == "null" => self.literal(ValueKind::Null),
             // A lowercase name can only refer to a const, so it takes no body.
             Tok::Name(name) => {
                 self.bump();
@@ -549,7 +551,7 @@ mod tests {
             if name == "Circle" && m.len() == 1)
         );
         assert!(matches!(&values[1].kind, ValueKind::Tagged { body: None, .. }));
-        assert!(matches!(&values[3].kind, ValueKind::Null));
+        assert!(matches!(&values[3].kind, ValueKind::Tagged { name, body: None } if name == "null"));
         assert!(matches!(&values[5].kind, ValueKind::Int(t) if t == "+8"));
     }
 
@@ -633,10 +635,24 @@ mod tests {
         assert_eq!(err("const N: Nat = ;").2, "Expected value");
         assert_eq!(err("const 1: Nat = 1;").2, "Expected const name");
         assert_eq!(err("const enum: Nat = 1;").2, "Expected const name");
-        assert_eq!(
-            err("const null: Option<Nat> = None;").2,
-            "null is a literal and cannot be the name of a const"
-        );
+    }
+
+    #[test]
+    fn parses_generic_consts() {
+        let file = parse("const null<T>: Option<T> = None;\nconst pair<_A, B>: B = x;").unwrap();
+        assert_eq!(file.consts[0].params.len(), 1);
+        assert_eq!(file.consts[0].params[0].name, "T");
+        assert!(file.consts[1].params[1].name == "B" && file.consts[1].params[0].underscore);
+        assert_eq!(err("const n<>: Nat = 1;").2, "Expected type parameter name");
+        assert_eq!(err("const n<T: Nat = 1;").2, "Expected comma or '>'");
+        assert_eq!(err("const n<t>: Nat = 1;").2, "Expected type parameter name");
+    }
+
+    #[test]
+    fn null_is_an_ordinary_name() {
+        assert!(parse("const null<T>: Option<T> = None;").is_ok());
+        let values = parse_values("null").unwrap();
+        assert!(matches!(&values[0].kind, ValueKind::Tagged { name, body: None } if name == "null"));
     }
 
     #[test]

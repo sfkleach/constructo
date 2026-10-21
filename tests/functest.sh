@@ -150,6 +150,19 @@ if [[ "$err" == "ERROR: Reference to const Base in const Total requires --allow-
 else
     fail "the error for a const reference names the flag (got '$err')"
 fi
+expect_exit "generic consts are valid, and may use the prelude consts without --allow-refs" 0 \
+    check "$EXAMPLES/valid/generic-consts.types"
+expect_exit "a prelude const cannot be redefined" 1 check "$EXAMPLES/parses-but-invalid/redefines-null.types"
+expect_exit "--no-prelude allows redefining a prelude const" 0 \
+    check --no-prelude "$EXAMPLES/parses-but-invalid/redefines-null.types"
+expect_exit "values may use null, true and false" 0 \
+    check "$TYPED/schema.types" "$TYPED/valid/prelude-consts.values"
+err="$("$CONSTRUCTO" check "$EXAMPLES/parses-but-invalid/generic-const-wrong-value.types" 2>&1 >/dev/null || true)"
+if [[ "$err" == "ERROR: Expected T but found Nat ("*"line 2, col 32)" ]]; then
+    pass "the value of a generic const is checked against unknown parameter types"
+else
+    fail "the value of a generic const is checked against unknown parameter types (got '$err')"
+fi
 expect_exit "an ill-typed const passes --no-type-check" 0 \
     check --no-type-check "$EXAMPLES/parses-but-invalid/const-wrong-type.types"
 loud="$("$CONSTRUCTO" check -v "$EXAMPLES/valid/starts-with-const.types" 2>&1)"
@@ -201,15 +214,22 @@ stdin_exit "--no-widening accepts exact numbers" 0 'Pair(1, -2); Circle { radius
 stdin_exit "--no-widening rejects a Nat as an Int" 1 'Pair(1, 2)' --no-widening "$TYPED/schema.types"
 stdin_exit "--no-widening rejects a join of numbers" 1 '[1, 2.5]' --no-widening
 stdin_exit "widening accepts a join of numbers" 0 '[1, 2.5]'
-# A bare null leaves no other possible error, unlike a types file that itself uses Option.
+# The prelude consts are ordinary consts, so they are only known when the prelude is loaded.
 stdin_exit "null is accepted with the prelude" 0 'null'
+stdin_exit "true and false are accepted with the prelude" 0 '[true, false]; Some(null)'
 stdin_exit "null needs the prelude" 1 'null' --no-prelude
+stdin_exit "true needs the prelude" 1 'true' --no-prelude
 err="$(printf 'null\n' | "$CONSTRUCTO" check --stdin --no-prelude 2>&1 || true)"
-if [[ "$err" == "ERROR: Cannot use null because the type Option is not in scope (<stdin>, line 1, col 1)" ]]; then
-    pass "null without the prelude reports that Option is not in scope"
+if [[ "$err" == "ERROR: Unknown const null (<stdin>, line 1, col 1)" ]]; then
+    pass "null without the prelude reports an unknown const"
 else
-    fail "null without the prelude reports that Option is not in scope (got '$err')"
+    fail "null without the prelude reports an unknown const (got '$err')"
 fi
+stdin_exit "--no-prelude allows redefining null" 0 'const null: Nat = 0;' --no-prelude
+stdin_exit "a generic const can be declared and used" 0 \
+    'enum O<T> = N, S(T); const none<T>: O<T> = N; const a: O<Nat> = none; const b: O<String> = none;' --no-prelude --allow-refs
+stdin_exit "a generic const that is used without --allow-refs fails" 1 \
+    'enum O<T> = N, S(T); const none<T>: O<T> = N; const a: O<Nat> = none;' --no-prelude
 
 out="$("$CONSTRUCTO" check "$EXAMPLES/invalid/missing-semicolon.types" 2>&1 >/dev/null || true)"
 if [[ "$out" == ERROR:*"missing-semicolon.types, line "*", col "* ]]; then

@@ -1,2 +1,2 @@
-// expect: Expected Nat but found null
+// expect: Expected Nat but found const null of type Option<_>
 Pair(null, 1);

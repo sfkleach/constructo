@@ -9,6 +9,7 @@
   are checked with the standard prelude loaded, which declares `Bool` and `Option`;
   `redeclares-bool.types` is only valid under `--no-prelude`.
 
+- `types/valid/generic-consts.types` also shows consts that refer to `null`, `true` and `false` of the prelude.
 - `types/refs`: consts that refer to other consts. `chain.types` is valid with `--allow-refs` and invalid without it.
   `cycle.types` is invalid with or without it.
 - `values/valid`, `values/invalid` are only checked for being well-formed (`--no-type-check`).
