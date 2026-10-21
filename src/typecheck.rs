@@ -33,6 +33,19 @@ pub struct Env<'a> {
     enums: HashMap<&'a str, &'a EnumDecl>,
     constructors: HashMap<&'a str, (&'a EnumDecl, &'a Variant)>,
     consts: HashMap<&'a str, &'a ConstDecl>,
+    /// The types of the consts that were declared without one, once they have been inferred.
+    inferred: HashMap<&'a str, Scheme>,
+}
+
+/// The inferred type of a const: a type in which `Ty::Gen(i)` stands for the `i`th type that the value left open. Each
+/// reference to the const replaces them with fresh variables.
+#[derive(Debug, Clone)]
+pub struct Scheme {
+    ty: Ty,
+    /// The number of types that the value left open.
+    pub arity: usize,
+    /// The type as it is written in a message.
+    pub text: String,
 }
 
 impl<'a> Env<'a> {
@@ -42,6 +55,7 @@ impl<'a> Env<'a> {
             enums: HashMap::new(),
             constructors: HashMap::new(),
             consts: HashMap::new(),
+            inferred: HashMap::new(),
         };
         for constant in consts {
             env.consts.entry(constant.name.as_str()).or_insert(constant);
@@ -53,6 +67,17 @@ impl<'a> Env<'a> {
             }
         }
         env
+    }
+
+    /// Gives this scope the inferred types of another, which has the consts that this one has and possibly more.
+    pub fn with_inferred_from(mut self, other: &Env<'a>) -> Self {
+        self.inferred = other.inferred.clone();
+        self
+    }
+
+    /// The inferred type of a const, if it has been worked out.
+    pub fn inferred_type(&self, name: &str) -> Option<&Scheme> {
+        self.inferred.get(name)
     }
 }
 
@@ -68,8 +93,92 @@ pub fn check_value(env: &Env, widening: bool, value: &Value) -> Result<()> {
     checker.check(value, &top)
 }
 
+/// The default for the most nodes that the inferred type of a const may have. Types share their parts, so a short value
+/// can have a type that is exponentially large when written out, and generalising it would take as long.
+pub const DEFAULT_INFER_LIMIT: usize = 10_000;
+
+/// Checks the consts of a run, each given with the index of its source, and returns the errors ordered by source and
+/// position. A const without a declared type has its type inferred from its value, and the consts are taken in
+/// dependency order for that, so that the type of one const is known when another refers to it. The consts that are
+/// declared with a type are checked against it afterwards.
+///
+/// A const whose type cannot be inferred has an error reported once. The references to it are then left alone
+/// instead of reporting the same failure again.
+pub fn check_consts<'a>(
+    env: &mut Env<'a>,
+    widening: bool,
+    infer_limit: usize,
+    consts: &[(usize, &'a ConstDecl)],
+) -> Vec<(usize, TypeError)> {
+    let mut errors = Vec::new();
+    for &(source, constant) in &inference_order(env, consts) {
+        match infer_const(env, widening, infer_limit, constant) {
+            Ok(scheme) => {
+                env.inferred.insert(constant.name.as_str(), scheme);
+            }
+            Err(e) => errors.push((source, e)),
+        }
+    }
+    for &(source, constant) in consts {
+        if let Some(ty) = &constant.ty {
+            if let Err(e) = check_declared_const(env, widening, constant, ty) {
+                errors.push((source, e));
+            }
+        }
+    }
+    // The sort is stable, so errors at one position keep the order in which they were found.
+    errors.sort_by_key(|(source, e)| (*source, e.pos));
+    errors
+}
+
+/// The consts without a declared type, with each coming after the such consts that it refers to. The search is a
+/// depth-first one with an explicit stack, because a long chain of consts must not overflow the call stack. A circular
+/// definition has been reported already, and the order of a cycle does not matter here.
+fn inference_order<'a>(env: &Env<'a>, consts: &[(usize, &'a ConstDecl)]) -> Vec<(usize, &'a ConstDecl)> {
+    let undeclared: HashMap<&'a str, (usize, &'a ConstDecl)> = consts
+        .iter()
+        .filter(|(_, c)| c.ty.is_none() && env.consts.get(c.name.as_str()).is_some_and(|e| std::ptr::eq(*e, *c)))
+        .map(|&(source, c)| (c.name.as_str(), (source, c)))
+        .collect();
+    let dependencies = |constant: &'a ConstDecl| -> Vec<&'a str> {
+        let mut names = Vec::new();
+        constant.value.names(&mut names);
+        names
+            .into_iter()
+            .map(|(name, _)| name)
+            .filter(|name| undeclared.contains_key(name))
+            .collect()
+    };
+    let mut order = Vec::new();
+    let mut started: Vec<&'a str> = Vec::new();
+    for &(_, constant) in consts {
+        if !undeclared.contains_key(constant.name.as_str()) || started.contains(&constant.name.as_str()) {
+            continue;
+        }
+        started.push(&constant.name);
+        // Each entry is a const and the dependencies of it that are still to be visited.
+        let mut stack = vec![(constant, dependencies(constant))];
+        while let Some((current, pending)) = stack.last_mut() {
+            match pending.pop() {
+                Some(name) if !started.contains(&name) => {
+                    started.push(name);
+                    let (_, next) = undeclared[name];
+                    stack.push((next, dependencies(next)));
+                }
+                Some(_) => {}
+                None => {
+                    let (source, _) = undeclared[current.name.as_str()];
+                    order.push((source, *current));
+                    stack.pop();
+                }
+            }
+        }
+    }
+    order
+}
+
 /// Checks the value of a const against the type that the const declares.
-pub fn check_const(env: &Env, widening: bool, constant: &ConstDecl) -> Result<()> {
+fn check_declared_const(env: &Env, widening: bool, constant: &ConstDecl, ty: &Type) -> Result<()> {
     let mut checker = Checker {
         env,
         widening,
@@ -77,8 +186,36 @@ pub fn check_const(env: &Env, widening: bool, constant: &ConstDecl) -> Result<()
     };
     // The type parameters are unknown types here, because the value has to be valid whatever they turn out to be.
     let args: Vec<Ty> = constant.params.iter().map(|p| Ty::Param(p.name.clone())).collect();
-    let declared = instantiate(&constant.ty, &constant.params, &args);
+    let declared = instantiate(ty, &constant.params, &args);
     checker.check(&constant.value, &declared)
+}
+
+/// Works out the type of a const from its value. Whatever the value leaves open is generalised.
+fn infer_const(env: &Env, widening: bool, infer_limit: usize, constant: &ConstDecl) -> Result<Scheme> {
+    let mut checker = Checker {
+        env,
+        widening,
+        slots: Vec::new(),
+    };
+    let top = checker.fresh();
+    checker.check(&constant.value, &top)?;
+    let mut open = Vec::new();
+    let mut budget = infer_limit;
+    let too_large = || TypeError {
+        pos: constant.pos,
+        message: format!(
+            "The type of const {} has more than {} nodes, which is too large to infer; give it a type or raise \
+             --infer-limit",
+            constant.name, infer_limit
+        ),
+    };
+    let ty = checker.generalise(&top, &mut open, &mut budget).ok_or_else(too_large)?;
+    let text = checker.show(&ty);
+    Ok(Scheme {
+        ty,
+        arity: open.len(),
+        text,
+    })
 }
 
 /// A type. The compound types share their parts, so that cloning a type, and so substituting it for a type parameter,
@@ -96,6 +233,8 @@ enum Ty {
     Var(usize),
     /// A type parameter of the const being checked, which stands for some unknown type.
     Param(String),
+    /// A type that the value of a const left open, in the inferred type of it.
+    Gen(usize),
 }
 
 enum Slot {
@@ -103,6 +242,30 @@ enum Slot {
     /// A variable bound to a type. A variable that was bound by a number literal is flexible: a later, wider
     /// number can widen it, which is how the join of `[1, 2.5]` becomes `[Float]`.
     Bound(Ty, bool),
+}
+
+/// The name by which an open type is shown: `T`, `U`, `V` and so on.
+pub fn gen_name(index: usize) -> String {
+    match "TUVWXYZ".chars().nth(index) {
+        Some(letter) => letter.to_string(),
+        None => format!("T{}", index),
+    }
+}
+
+/// Replaces the open types of an inferred type with the given types.
+fn fill(ty: &Ty, args: &[Ty]) -> Ty {
+    match ty {
+        Ty::Gen(index) => args[*index].clone(),
+        Ty::Array(element) => Ty::Array(Rc::new(fill(element, args))),
+        Ty::Enum(name, enum_args) => Ty::Enum(name.clone(), Rc::new(enum_args.iter().map(|t| fill(t, args)).collect())),
+        Ty::Record(fields) => Ty::Record(Rc::new(
+            fields
+                .iter()
+                .map(|(name, field)| (name.clone(), fill(field, args)))
+                .collect(),
+        )),
+        other => other.clone(),
+    }
 }
 
 /// The longest description of a type that is put in a message, in characters.
@@ -149,6 +312,34 @@ impl Checker<'_, '_> {
             }
         }
         ty
+    }
+
+    /// Resolves every variable in a type. A variable that is still free becomes an open type, numbered in the order in
+    /// which the free variables are met and recorded in `open`. Returns `None` if the type has more than `budget` nodes.
+    fn generalise(&self, ty: &Ty, open: &mut Vec<usize>, budget: &mut usize) -> Option<Ty> {
+        *budget = budget.checked_sub(1)?;
+        Some(match self.shallow(ty) {
+            Ty::Var(id) => {
+                let index = open.iter().position(|v| *v == id).unwrap_or_else(|| {
+                    open.push(id);
+                    open.len() - 1
+                });
+                Ty::Gen(index)
+            }
+            Ty::Array(element) => Ty::Array(Rc::new(self.generalise(&element, open, budget)?)),
+            Ty::Enum(name, args) => {
+                let args: Option<Vec<Ty>> = args.iter().map(|t| self.generalise(t, open, budget)).collect();
+                Ty::Enum(name, Rc::new(args?))
+            }
+            Ty::Record(fields) => {
+                let fields: Option<Vec<(String, Ty)>> = fields
+                    .iter()
+                    .map(|(name, field)| Some((name.clone(), self.generalise(field, open, budget)?)))
+                    .collect();
+                Ty::Record(Rc::new(fields?))
+            }
+            other => other,
+        })
     }
 
     /// The variable, if it is bound by a number literal and so may still be widened.
@@ -220,6 +411,7 @@ impl Checker<'_, '_> {
             }
             Ty::Var(_) => out.push('_'),
             Ty::Param(name) => out.push_str(&name),
+            Ty::Gen(index) => out.push_str(&gen_name(index)),
         }
     }
 
@@ -315,11 +507,23 @@ impl Checker<'_, '_> {
         }
     }
 
-    /// Checks a reference to a const, which has the type that the const declares.
+    /// Checks a reference to a const, which has the type that the const declares or that was inferred for it.
     fn check_const_ref(&mut self, pos: Pos, constant: &ConstDecl, original: &Ty) -> Result<()> {
         // Each reference gets its own copy of the type parameters, so that uses of one const may differ.
-        let args: Vec<Ty> = constant.params.iter().map(|_| self.fresh()).collect();
-        let declared = instantiate(&constant.ty, &constant.params, &args);
+        let declared = match &constant.ty {
+            Some(ty) => {
+                let args: Vec<Ty> = constant.params.iter().map(|_| self.fresh()).collect();
+                instantiate(ty, &constant.params, &args)
+            }
+            None => match self.env.inferred.get(constant.name.as_str()) {
+                Some(scheme) => {
+                    let args: Vec<Ty> = (0..scheme.arity).map(|_| self.fresh()).collect();
+                    fill(&scheme.ty, &args)
+                }
+                // The type could not be inferred, which has been reported, so there is nothing to check against.
+                None => return Ok(()),
+            },
+        };
         let found = format!("const {} of type {}", constant.name, self.show(&declared));
         self.conforms(pos, &declared, original, &found)
     }
@@ -678,11 +882,28 @@ mod tests {
     /// Checks the consts of a types file, and returns the error of each as `line:col message`.
     fn const_errors(text: &str) -> Vec<String> {
         let file = parse(&format!("{}\n{}", PRELUDE_TYPES, text)).unwrap();
-        let env = Env::new(&file.enums, &file.consts);
+        let mut env = Env::new(&file.enums, &file.consts);
+        let consts: Vec<(usize, &ConstDecl)> = file.consts.iter().map(|c| (0, c)).collect();
+        check_consts(&mut env, true, DEFAULT_INFER_LIMIT, &consts)
+            .into_iter()
+            .map(|(_, e)| format!("{}:{} {}", e.pos.line, e.pos.col, e.message))
+            .collect()
+    }
+
+    /// Infers the consts of a types file and returns each as `name: type`, for those whose type could be inferred.
+    fn inferred(text: &str, widening: bool) -> Vec<String> {
+        let file = parse(&format!("{}\n{}", PRELUDE_TYPES, text)).unwrap();
+        let mut env = Env::new(&file.enums, &file.consts);
+        let consts: Vec<(usize, &ConstDecl)> = file.consts.iter().map(|c| (0, c)).collect();
+        let errors = check_consts(&mut env, widening, DEFAULT_INFER_LIMIT, &consts);
+        assert!(errors.is_empty(), "{:?}", errors);
         file.consts
             .iter()
-            .filter_map(|c| check_const(&env, true, c).err())
-            .map(|e| format!("{}:{} {}", e.pos.line, e.pos.col, e.message))
+            .filter(|c| c.ty.is_none())
+            .map(|c| {
+                let scheme = env.inferred_type(&c.name).expect("the type was inferred");
+                format!("{}/{}: {}", c.name, scheme.arity, scheme.text)
+            })
             .collect()
     }
 
@@ -844,5 +1065,164 @@ mod tests {
         assert!(!ok("const b: { x: Nat } = a;"));
         assert!(!ok("const b: { x: Nat, y: Float, z: Nat } = a;"));
         assert!(!ok("const b: { x: String, y: Float } = a;"));
+    }
+
+    #[test]
+    fn infers_the_type_of_a_value() {
+        let types = "enum Shape = Circle { r: Float }, Dot;\n";
+        let text = format!(
+            "{}const a = 0;\nconst b = +0;\nconst c = 0.5;\nconst d = \"s\";\nconst e = Dot;\nconst f = Circle {{ r: 1 }};\n\
+             const g = {{ x: 1, y: [\"s\"] }};\nconst h = [Some(1), None];",
+            types
+        );
+        assert_eq!(
+            inferred(&text, true),
+            vec![
+                "a/0: Nat",
+                "b/0: Int",
+                "c/0: Float",
+                "d/0: String",
+                "e/0: Shape",
+                "f/0: Shape",
+                "g/0: { x: Nat, y: [String] }",
+                "h/0: [Option<Nat>]",
+            ]
+        );
+    }
+
+    #[test]
+    fn numbers_in_an_array_join_unless_widening_is_off() {
+        assert_eq!(
+            inferred("const a = [1, 2.5];\nconst b = [1, +2];", true),
+            vec!["a/0: [Float]", "b/0: [Int]"]
+        );
+        assert_eq!(const_errors("const a = [1, 2.5];").len(), 0);
+        let file = parse(&format!("{}\nconst a = [1, 2.5];", PRELUDE_TYPES)).unwrap();
+        let mut env = Env::new(&file.enums, &file.consts);
+        let consts: Vec<(usize, &ConstDecl)> = file.consts.iter().map(|c| (0, c)).collect();
+        let errors = check_consts(&mut env, false, DEFAULT_INFER_LIMIT, &consts);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].1.message, "Expected Nat but found Float");
+    }
+
+    #[test]
+    fn what_the_value_leaves_open_is_generalised() {
+        assert_eq!(
+            inferred(
+                "const e = [];\nconst n = None;\nconst m = null;\nconst p = { a: [], b: None, c: [] };",
+                true
+            ),
+            vec![
+                "e/1: [T]",
+                "n/1: Option<T>",
+                "m/1: Option<T>",
+                "p/3: { a: [T], b: Option<U>, c: [V] }"
+            ]
+        );
+        assert_eq!(
+            inferred("const q = { a: Some(null) };", true),
+            vec!["q/1: { a: Option<Option<T>> }"]
+        );
+    }
+
+    #[test]
+    fn each_reference_to_a_generalised_const_has_its_own_type() {
+        let text = "const e = [];\nconst x: { a: [Nat], b: [String] } = { a: e, b: e };\nconst y = [e, [1]];";
+        let file = parse(&format!("{}\n{}", PRELUDE_TYPES, text)).unwrap();
+        let mut env = Env::new(&file.enums, &file.consts);
+        let consts: Vec<(usize, &ConstDecl)> = file.consts.iter().map(|c| (0, c)).collect();
+        // The references are not between declared types, so the test of the references is done on the values.
+        assert!(check_consts(&mut env, true, DEFAULT_INFER_LIMIT, &consts).is_empty());
+        assert_eq!(env.inferred_type("y").unwrap().text, "[[Nat]]");
+        let value = &parse_values("[e, [\"s\"]]; Some(e); [e, e]").unwrap();
+        for v in value {
+            assert!(check_value(&env, true, v).is_ok());
+        }
+        let bad = &parse_values("[[1], [\"s\"]]").unwrap()[0];
+        assert!(check_value(&env, true, bad).is_err());
+    }
+
+    #[test]
+    fn a_reference_has_the_inferred_type_with_widening() {
+        let file = parse(&format!("{}\nconst n = 1;", PRELUDE_TYPES)).unwrap();
+        let mut env = Env::new(&file.enums, &file.consts);
+        let consts: Vec<(usize, &ConstDecl)> = file.consts.iter().map(|c| (0, c)).collect();
+        assert!(check_consts(&mut env, true, DEFAULT_INFER_LIMIT, &consts).is_empty());
+        for ok in ["[n, +2]", "[n, 1.5]", "Some(n)"] {
+            assert!(check_value(&env, true, &parse_values(ok).unwrap()[0]).is_ok(), "{}", ok);
+        }
+        let error = check_value(&env, true, &parse_values("[n, \"s\"]").unwrap()[0]).unwrap_err();
+        assert_eq!(error.message, "Expected Nat but found String");
+        // The type is Nat, not whatever the value could also have been.
+        let error = check_value(&env, false, &parse_values("[n, +2]").unwrap()[0]).unwrap_err();
+        assert_eq!(error.message, "Expected Nat but found Int");
+    }
+
+    #[test]
+    fn consts_are_inferred_in_dependency_order() {
+        let text = "const c = [b, b];\nconst b = Some(a);\nconst a = \"s\";";
+        assert_eq!(
+            inferred(text, true),
+            vec!["c/0: [Option<String>]", "b/0: Option<String>", "a/0: String"]
+        );
+        // A declared const can come between two inferred ones.
+        let text = "const c = d;\nconst d: Option<Nat> = e;\nconst e = null;";
+        assert_eq!(inferred(text, true), vec!["c/0: Option<Nat>", "e/1: Option<T>"]);
+    }
+
+    #[test]
+    fn a_failed_inference_is_reported_once() {
+        let errors = const_errors("const a = [1, \"s\"];\nconst b = a;\nconst c = [b, b];");
+        assert_eq!(errors, vec!["2:15 Expected Nat but found String"]);
+        let errors = const_errors("const a = Missing;\nconst b: Nat = a;");
+        assert_eq!(errors, vec!["2:11 Unknown constructor Missing"]);
+    }
+
+    #[test]
+    fn a_huge_inferred_type_is_refused() {
+        // Each const holds two copies of the one before, so the size of its type doubles.
+        let mut text = "const x0 = { v: 1 };\n".to_string();
+        for i in 1..40 {
+            text.push_str(&format!("const x{} = {{ a: x{}, b: x{} }};\n", i, i - 1, i - 1));
+        }
+        let errors = const_errors(&text);
+        // Once a const has failed the ones that refer to it are not checked against it, so the growth starts again.
+        assert!(
+            errors[0].contains("const x12 has more than 10000 nodes"),
+            "{:?}",
+            errors
+        );
+        assert!(
+            errors
+                .iter()
+                .all(|e| e.ends_with("give it a type or raise --infer-limit")),
+            "{:?}",
+            errors
+        );
+        assert!(errors.len() < 10, "{:?}", errors);
+    }
+
+    #[test]
+    fn the_inference_limit_can_be_changed() {
+        let text = "const small = [];\nconst big = { a: [], b: [], c: [], d: [] };";
+        let file = parse(&format!("{}\n{}", PRELUDE_TYPES, text)).unwrap();
+        let consts: Vec<(usize, &ConstDecl)> = file.consts.iter().map(|c| (0, c)).collect();
+        let run = |limit: usize| {
+            let mut env = Env::new(&file.enums, &file.consts);
+            let errors = check_consts(&mut env, true, limit, &consts);
+            errors.into_iter().map(|(_, e)| e.message).collect::<Vec<_>>()
+        };
+        assert!(run(DEFAULT_INFER_LIMIT).is_empty());
+        // The type of big has nine nodes: the record and four arrays with an open type in each.
+        assert!(run(9).is_empty());
+        let errors = run(8);
+        assert_eq!(errors.len(), 1);
+        assert!(
+            errors[0].starts_with("The type of const big has more than 8 nodes"),
+            "{:?}",
+            errors
+        );
+        // Nothing can be inferred with a limit of nothing, not even a single number.
+        assert_eq!(run(0).len(), 2);
     }
 }

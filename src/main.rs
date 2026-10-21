@@ -1,5 +1,7 @@
 use clap::{Parser, Subcommand};
-use constructo::{check_sources_with, prelude_source, syntax_error, CheckOptions, Outcome, Source, SourceKind};
+use constructo::{
+    check_sources_with, prelude_source, syntax_error, CheckOptions, Outcome, Source, SourceKind, DEFAULT_INFER_LIMIT,
+};
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -44,6 +46,10 @@ enum Command {
         #[arg(long)]
         allow_refs: bool,
 
+        /// The most nodes that the type inferred for a const may have
+        #[arg(long, value_name = "N", default_value_t = DEFAULT_INFER_LIMIT)]
+        infer_limit: usize,
+
         /// Print a message when the check succeeds
         #[arg(long, short)]
         verbose: bool,
@@ -64,6 +70,7 @@ fn main() -> ExitCode {
             no_widening,
             continue_after_error,
             allow_refs,
+            infer_limit,
             verbose,
             files,
         } => {
@@ -72,6 +79,7 @@ fn main() -> ExitCode {
                 widening: !no_widening,
                 continue_after_error,
                 allow_refs,
+                infer_limit,
             };
             check(stdin, no_prelude, verbose, &options, &files)
         }
@@ -124,10 +132,11 @@ fn check(stdin: bool, no_prelude: bool, verbose: bool, options: &CheckOptions, f
     }
     if verbose {
         // The prelude is not one of the user's inputs, so it is never reported.
-        for ((source, outcome), kind) in sources
+        for (index, ((source, outcome), kind)) in sources
             .iter()
             .zip(&report.outcomes)
             .zip(&report.kinds)
+            .enumerate()
             .skip(first_input)
         {
             let label = kind.map(|k| format!(" ({})", k.label())).unwrap_or_default();
@@ -135,7 +144,14 @@ fn check(stdin: bool, no_prelude: bool, verbose: bool, options: &CheckOptions, f
                 Outcome::Ok if report.type_checked && *kind == Some(SourceKind::Values) => {
                     println!("OK: {} (data-values, type-checked)", source.name)
                 }
-                Outcome::Ok => println!("OK: {}{}", source.name, label),
+                Outcome::Ok => {
+                    println!("OK: {}{}", source.name, label);
+                    // The consts are listed with their types, and the types that were inferred are marked.
+                    for info in report.consts.iter().filter(|info| info.source == index) {
+                        let how = if info.inferred { " (inferred)" } else { "" };
+                        println!("  const {}: {}{}", info.name, info.ty, how);
+                    }
+                }
                 Outcome::Failed => println!("FAILED: {}{}", source.name, label),
                 Outcome::NotChecked => {}
             }

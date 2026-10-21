@@ -9,12 +9,14 @@ pub mod parser;
 pub mod typecheck;
 pub mod validate;
 
+use ast::{ConstDecl, TypesFile};
 use diagnostics::Diagnostic;
 use parser::{parse_file, Parsed};
-use typecheck::{check_const, check_value, Env};
+use typecheck::{check_consts, check_value, Env};
 use validate::{validate, ParsedFile};
 
 pub use parser::SourceKind;
+pub use typecheck::DEFAULT_INFER_LIMIT;
 
 /// The standard prelude: declarations that are available to every types file unless the prelude is disabled.
 pub const PRELUDE: &str = "enum Bool = True, False;
@@ -63,6 +65,19 @@ pub struct Report {
     /// Whether the values were checked against the types, which is not so if that was disabled or if the types had
     /// errors.
     pub type_checked: bool,
+    /// The type of each const, when the values were type-checked, with the index of the source it was declared in.
+    pub consts: Vec<ConstInfo>,
+}
+
+/// A const and its type, for the report on what was checked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConstInfo {
+    pub source: usize,
+    /// The name, followed by the type parameters if there are any, e.g. `none<T>`.
+    pub name: String,
+    pub ty: String,
+    /// True if the type was inferred from the value, and false if the const declared it.
+    pub inferred: bool,
 }
 
 impl Report {
@@ -98,6 +113,9 @@ pub struct CheckOptions {
     pub continue_after_error: bool,
     /// Let the definition of a const refer to other consts.
     pub allow_refs: bool,
+    /// The most nodes that the type inferred for a const may have, so that a value with an exponentially large type is
+    /// refused instead of taking all the time and memory there is.
+    pub infer_limit: usize,
 }
 
 impl Default for CheckOptions {
@@ -107,6 +125,7 @@ impl Default for CheckOptions {
             widening: true,
             continue_after_error: false,
             allow_refs: false,
+            infer_limit: DEFAULT_INFER_LIMIT,
         }
     }
 }
@@ -147,6 +166,7 @@ pub fn check_sources_with(sources: &[Source], options: &CheckOptions) -> Report 
                     outcomes,
                     kinds,
                     type_checked: false,
+                    consts: Vec::new(),
                 };
             }
         }
@@ -172,49 +192,58 @@ pub fn check_sources_with(sources: &[Source], options: &CheckOptions) -> Report 
         diagnostics.push(diagnostic);
     }
     let type_checked = diagnostics.is_empty() && options.type_check;
+    let mut consts = Vec::new();
     if type_checked {
-        type_check_values(sources, &parsed_sources, options, &mut outcomes, &mut diagnostics);
+        consts = type_check_values(sources, &parsed_sources, options, &mut outcomes, &mut diagnostics);
     }
     Report {
         diagnostics,
         outcomes,
         kinds,
         type_checked,
+        consts,
     }
 }
 
+/// Type-checks the consts and then the values, and describes the type of each const.
 fn type_check_values(
     sources: &[Source],
     parsed_sources: &[Parsed],
     options: &CheckOptions,
     outcomes: &mut [Outcome],
     diagnostics: &mut Vec<Diagnostic>,
-) {
-    let mut stopped = false;
+) -> Vec<ConstInfo> {
     // The declarations of a types file are all in scope in the whole of it, whatever their order, and in every types
     // file, so the consts are checked against all of them.
-    let everything = parsed_sources.iter().filter_map(|parsed| match parsed {
-        Parsed::Types(file) => Some(file),
-        Parsed::Values(_) => None,
-    });
-    let env = Env::new(
-        everything.clone().flat_map(|file| &file.enums),
-        everything.flat_map(|file| &file.consts),
+    let types_files: Vec<(usize, &TypesFile)> = parsed_sources
+        .iter()
+        .enumerate()
+        .filter_map(|(index, parsed)| match parsed {
+            Parsed::Types(file) => Some((index, file)),
+            Parsed::Values(_) => None,
+        })
+        .collect();
+    let mut everything = Env::new(
+        types_files.iter().flat_map(|(_, file)| &file.enums),
+        types_files.iter().flat_map(|(_, file)| &file.consts),
     );
-    'consts: for (index, parsed) in parsed_sources.iter().enumerate() {
-        if let Parsed::Types(file) = parsed {
-            for constant in &file.consts {
-                if let Err(e) = check_const(&env, options.widening, constant) {
-                    diagnostics.push(Diagnostic::new(&sources[index].name, e.pos, e.message));
-                    outcomes[index] = Outcome::Failed;
-                    if !options.continue_after_error {
-                        stopped = true;
-                        break 'consts;
-                    }
-                }
-            }
+    let all_consts: Vec<(usize, &ConstDecl)> = types_files
+        .iter()
+        .flat_map(|&(index, file)| file.consts.iter().map(move |c| (index, c)))
+        .collect();
+    let errors = check_consts(&mut everything, options.widening, options.infer_limit, &all_consts);
+    // The first type error stops the run, unless it was asked to carry on.
+    let mut stopped = false;
+    for (index, e) in errors {
+        diagnostics.push(Diagnostic::new(&sources[index].name, e.pos, e.message));
+        outcomes[index] = Outcome::Failed;
+        if !options.continue_after_error {
+            stopped = true;
+            break;
         }
     }
+    let infos = describe_consts(&everything, &all_consts);
+
     // A values file sees only the types files that come before it.
     let mut visible_enums = Vec::new();
     let mut visible_consts = Vec::new();
@@ -226,7 +255,8 @@ fn type_check_values(
             }
             Parsed::Values(_) if stopped => outcomes[index] = Outcome::NotChecked,
             Parsed::Values(values) => {
-                let env = Env::new(visible_enums.iter().copied(), visible_consts.iter().copied());
+                let env = Env::new(visible_enums.iter().copied(), visible_consts.iter().copied())
+                    .with_inferred_from(&everything);
                 for value in values {
                     if let Err(e) = check_value(&env, options.widening, value) {
                         diagnostics.push(Diagnostic::new(&sources[index].name, e.pos, e.message));
@@ -240,6 +270,39 @@ fn type_check_values(
             }
         }
     }
+    infos
+}
+
+/// Describes the type of each const that has one: the declared types, and the inferred ones that could be worked out.
+fn describe_consts(env: &Env, consts: &[(usize, &ConstDecl)]) -> Vec<ConstInfo> {
+    let mut infos = Vec::new();
+    for &(source, constant) in consts {
+        let (ty, parameters, inferred) = match &constant.ty {
+            Some(ty) => {
+                let names: Vec<&str> = constant.params.iter().map(|p| p.name.as_str()).collect();
+                (ty.to_string(), names.join(", "), false)
+            }
+            None => match env.inferred_type(&constant.name) {
+                Some(scheme) => {
+                    let names: Vec<String> = (0..scheme.arity).map(typecheck::gen_name).collect();
+                    (scheme.text.clone(), names.join(", "), true)
+                }
+                None => continue,
+            },
+        };
+        let name = if parameters.is_empty() {
+            constant.name.clone()
+        } else {
+            format!("{}<{}>", constant.name, parameters)
+        };
+        infos.push(ConstInfo {
+            source,
+            name,
+            ty,
+            inferred,
+        });
+    }
+    infos
 }
 
 #[cfg(test)]

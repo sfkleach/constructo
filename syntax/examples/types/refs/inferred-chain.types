@@ -1,0 +1,5 @@
+// Inferred types follow the references, whatever the order of the definitions.
+const grid = [row, row];
+const row = [cell, cell];
+const cell = { alive: false, age: 0 };
+const maybe_grid = Some(grid);

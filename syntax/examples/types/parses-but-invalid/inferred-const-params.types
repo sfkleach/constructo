@@ -1,0 +1,2 @@
+// The type parameters are scoped to a type, so a const that has none cannot have them.
+const none<T> = None;

@@ -216,9 +216,14 @@ impl Parser {
         } else {
             Vec::new()
         };
-        self.expect(Tok::Colon, "':'")?;
-        let ty = self.ty()?;
-        self.expect(Tok::Eq, "'='")?;
+        // The type is optional, and is inferred from the value if it is left out.
+        let ty = if self.peek() == &Tok::Colon {
+            self.bump();
+            Some(self.ty()?)
+        } else {
+            None
+        };
+        self.expect(Tok::Eq, if ty.is_some() { "'='" } else { "':' or '='" })?;
         let value = self.value()?;
         self.expect(Tok::Semi, "semi-colon")?;
         Ok(ConstDecl {
@@ -623,13 +628,13 @@ mod tests {
             file.consts.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
             ["A", "b", "C"]
         );
-        assert!(matches!(&file.consts[1].ty, Type::Array(_)));
+        assert!(matches!(&file.consts[1].ty, Some(Type::Array(_))));
         assert!(matches!(&file.consts[2].value.kind, ValueKind::Record(m) if m.len() == 1));
     }
 
     #[test]
     fn reports_const_syntax_errors() {
-        assert_eq!(err("const N = 1;"), (1, 9, "Expected ':'".to_string()));
+        assert_eq!(err("const N Nat = 1;"), (1, 9, "Expected ':' or '='".to_string()));
         assert_eq!(err("const N: Nat 1;").2, "Expected '='");
         assert_eq!(err("const N: Nat = 1").2, "Expected semi-colon");
         assert_eq!(err("const N: Nat = ;").2, "Expected value");
@@ -646,6 +651,24 @@ mod tests {
         assert_eq!(err("const n<>: Nat = 1;").2, "Expected type parameter name");
         assert_eq!(err("const n<T: Nat = 1;").2, "Expected comma or '>'");
         assert_eq!(err("const n<t>: Nat = 1;").2, "Expected type parameter name");
+    }
+
+    #[test]
+    fn the_type_of_a_const_is_optional() {
+        let file = parse("const N = 1;\nconst e = [];\nconst T: Nat = 2;").unwrap();
+        assert!(file.consts[0].ty.is_none() && file.consts[1].ty.is_none());
+        assert!(file.consts[2].ty.is_some());
+        assert_eq!(err("const N = ;").2, "Expected value");
+        assert_eq!(err("const N: = 1;").2, "Expected type");
+        // The parameters are read before the type is known to be missing, which is reported after the parse.
+        assert_eq!(parse("const N<T> = 1;").unwrap().consts[0].params.len(), 1);
+    }
+
+    #[test]
+    fn displays_types_as_they_are_written() {
+        let file = parse("const x: { a: [Option<Nat>], b: {}, c: Map<String, [Int]> } = y;").unwrap();
+        let ty = file.consts[0].ty.as_ref().unwrap();
+        assert_eq!(ty.to_string(), "{ a: [Option<Nat>], b: {}, c: Map<String, [Int]> }");
     }
 
     #[test]

@@ -1,0 +1,3 @@
+// With --allow-refs: the type of count is Nat, and a Nat is not a String.
+const count = 10;
+const label: String = count;

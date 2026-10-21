@@ -41,14 +41,18 @@ Following the style in https://keepachangelog.com/en/1.0.0/
 - `const name: Type = value;` definitions in types files, which may be interleaved with enums and come in any order.
   A file whose first token is `enum` or `const` is a types file, and `const` is a reserved word. Consts share the
   constructor namespace, may have a name of either case, and cannot be named after a basic type. The value of a
-  const is checked against its declared type, and a values file can refer to a const by name. The type is required
-  for now.
+  const is checked against its declared type, and a values file can refer to a const by name.
 - `constructo check --allow-refs` lets the definition of a const refer to other consts. Without it such a reference is
   an error, and with it a circular definition is.
 - Consts may have type parameters, as in `const none<T>: Option<T> = None;`. Each use of one gets its own type
   arguments, and its value is checked against the parameters as unknown types.
 - The standard prelude declares the consts `null`, `true` and `false`, which replace the `null` literal. A const
   definition may refer to them without `--allow-refs`. Under `--no-prelude` they are unknown.
+- The type of a const may be left out and is then inferred from its value: `const count = 10;` is a Nat, and
+  `const nothing = [];` is `[T]` for any `T`. Only the type of the const is exact, and a reference still widens.
+  A const without a type may not have type parameters. In verbose mode the consts of a file are listed with their
+  types, marking the inferred ones. A type of more than 10,000 nodes is refused, and `--infer-limit=N` changes that
+  limit. See decision 16.
 - The type of an untagged object is written like the object, with a type in place of each value, e.g.
   `const x: { left: String, right: String } = { left: "hand", right: "heart" };`. A record type is closed, its fields
   may be in any order, and it never converts to or from a tagged record. See decision 15.

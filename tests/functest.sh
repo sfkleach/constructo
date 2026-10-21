@@ -179,6 +179,58 @@ record_error record-const-wrong-field-type.types "Expected Nat but found String"
 record_error record-const-tagged-value.types "Expected { x: Nat } but found Point of type Shape"
 record_error record-const-for-enum.types "Expected Shape but found a record"
 record_error record-type-duplicate-field.types "Duplicate field a"
+expect_exit "consts without a type are inferred" 0 check "$EXAMPLES/valid/inferred-consts.types"
+expect_exit "inferred consts may refer to one another with --allow-refs" 0 \
+    check --allow-refs "$REFS/inferred-chain.types"
+expect_exit "inferred consts need --allow-refs to refer to one another" 1 check "$REFS/inferred-chain.types"
+err="$("$CONSTRUCTO" check --allow-refs "$REFS/inferred-wrong-use.types" 2>&1 >/dev/null || true)"
+if [[ "$err" == "ERROR: Expected String but found const count of type Nat ("*"line 3, col 23)" ]]; then
+    pass "a reference has the inferred type of its const"
+else
+    fail "a reference has the inferred type of its const (got '$err')"
+fi
+err="$("$CONSTRUCTO" check "$PBI/inferred-const-params.types" 2>&1 >/dev/null || true)"
+if [[ "$err" == "ERROR: Type parameters of const none need a type ("*"line 2, col 12)" ]]; then
+    pass "type parameters need a type"
+else
+    fail "type parameters need a type (got '$err')"
+fi
+loud="$("$CONSTRUCTO" check -v "$EXAMPLES/valid/inferred-consts.types" 2>&1)"
+if [[ "$loud" == *"  const count: Nat (inferred)"* && "$loud" == *"  const mixed: [Float] (inferred)"* \
+    && "$loud" == *"  const nothing<T>: [T] (inferred)"* && "$loud" == *"  const missing<T>: Option<T> (inferred)"* ]]; then
+    pass "-v lists the consts with their inferred types"
+else
+    fail "-v lists the consts with their inferred types (got '$loud')"
+fi
+loud="$("$CONSTRUCTO" check -v "$EXAMPLES/valid/consts.types" 2>&1)"
+if [[ "$loud" == *"  const Name: String"$'\n'* && "$loud" != *"Name: String (inferred)"* ]]; then
+    pass "-v lists a declared type without marking it"
+else
+    fail "-v lists a declared type without marking it (got '$loud')"
+fi
+loud="$("$CONSTRUCTO" check -v --no-type-check "$EXAMPLES/valid/inferred-consts.types" 2>&1)"
+if [[ "$loud" != *"  const "* ]]; then
+    pass "-v lists no consts when the types are not checked"
+else
+    fail "-v lists no consts when the types are not checked (got '$loud')"
+fi
+# Each const of the chain holds two copies of the one before it, so the size of its type doubles.
+chain="$(mktemp)"
+trap 'rm -f "$chain"' EXIT
+{
+    echo "const x0 = { v: 1 };"
+    for i in $(seq 1 20); do echo "const x$i = { a: x$(( i - 1 )), b: x$(( i - 1 )) };"; done
+} > "$chain"
+expect_exit "a huge inferred type is refused" 1 check --allow-refs "$chain"
+expect_exit "--infer-limit raises the limit" 0 check --allow-refs --infer-limit=5000000 "$chain"
+expect_exit "--infer-limit=N takes a space as well" 0 check --allow-refs --infer-limit 5000000 "$chain"
+err="$("$CONSTRUCTO" check --allow-refs --infer-limit=100 "$chain" 2>&1 >/dev/null || true)"
+if [[ "$err" == "ERROR: The type of const "*" has more than 100 nodes, which is too large to infer; give it a type or raise --infer-limit ("* ]]; then
+    pass "the error for a large type names the limit and the option"
+else
+    fail "the error for a large type names the limit and the option (got '$err')"
+fi
+expect_exit "--infer-limit needs a number" 2 check --infer-limit=many "$chain"
 expect_exit "an ill-typed const passes --no-type-check" 0 \
     check --no-type-check "$EXAMPLES/parses-but-invalid/const-wrong-type.types"
 loud="$("$CONSTRUCTO" check -v "$EXAMPLES/valid/starts-with-const.types" 2>&1)"

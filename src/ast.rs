@@ -1,6 +1,7 @@
 //! The syntax trees for data-type declarations and data values.
 
 use crate::diagnostics::Pos;
+use std::fmt;
 
 /// The declarations of a types file.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -9,13 +10,14 @@ pub struct TypesFile {
     pub consts: Vec<ConstDecl>,
 }
 
-/// `const name<Params>: Type = value;`
+/// `const name<Params>: Type = value;`, in which the parameters and the type may be left out together.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConstDecl {
     pub name: String,
     pub pos: Pos,
     pub params: Vec<TypeParam>,
-    pub ty: Type,
+    /// The declared type, or `None` if it is to be inferred from the value.
+    pub ty: Option<Type>,
     pub value: Value,
 }
 
@@ -102,4 +104,48 @@ pub struct Member {
     pub name: String,
     pub pos: Pos,
     pub value: Value,
+}
+
+impl fmt::Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Type::Ref { name, args, .. } => {
+                write!(f, "{}", name)?;
+                if !args.is_empty() {
+                    let args: Vec<String> = args.iter().map(|t| t.to_string()).collect();
+                    write!(f, "<{}>", args.join(", "))?;
+                }
+                Ok(())
+            }
+            Type::Array(element) => write!(f, "[{}]", element),
+            Type::Record(fields) if fields.is_empty() => write!(f, "{{}}"),
+            Type::Record(fields) => {
+                let fields: Vec<String> = fields
+                    .iter()
+                    .map(|field| format!("{}: {}", field.name, field.ty))
+                    .collect();
+                write!(f, "{{ {} }}", fields.join(", "))
+            }
+        }
+    }
+}
+
+impl Value {
+    /// Collects the names that the value uses on their own or as the tag of a body, with their positions. Any of them
+    /// may refer to a const, which is for the caller to decide.
+    pub fn names<'a>(&'a self, out: &mut Vec<(&'a str, Pos)>) {
+        match &self.kind {
+            ValueKind::Array(items) => items.iter().for_each(|item| item.names(out)),
+            ValueKind::Record(members) => members.iter().for_each(|m| m.value.names(out)),
+            ValueKind::Tagged { name, body } => {
+                out.push((name, self.pos));
+                match body {
+                    Some(TaggedBody::Record(members)) => members.iter().for_each(|m| m.value.names(out)),
+                    Some(TaggedBody::Tuple(items)) => items.iter().for_each(|item| item.names(out)),
+                    None => {}
+                }
+            }
+            ValueKind::Nat(_) | ValueKind::Int(_) | ValueKind::Float(_) | ValueKind::Str(_) => {}
+        }
+    }
 }

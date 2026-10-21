@@ -1,0 +1,17 @@
+// The type of a const may be left out, and is then the type of its value.
+const count = 10;
+const ratio = 0.5;
+const name = "constructo";
+const origin = { x: 0, y: 0 };
+const primes = [2, 3, 5, 7];
+const mixed = [1, 2.5];
+
+// A tagged value has the type of its enum.
+enum Mode = Fast, Slow, Custom { level: Nat };
+const default_mode = Slow;
+const custom = Custom { level: 3 };
+
+// What the value leaves open is generalised, so these have the types [T] and Option<T>.
+const nothing = [];
+const none = None;
+const missing = null;

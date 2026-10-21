@@ -11,6 +11,8 @@
 
 - `types/valid/record-consts.types` and the `record-*` examples show the type of an untagged record.
 - `types/valid/generic-consts.types` also shows consts that refer to `null`, `true` and `false` of the prelude.
+- `types/valid/inferred-consts.types` has consts without a type. `types/refs/inferred-*.types` have inferred consts that
+  refer to one another.
 - `types/refs`: consts that refer to other consts. `chain.types` is valid with `--allow-refs` and invalid without it.
   `cycle.types` is invalid with or without it.
 - `values/valid`, `values/invalid` are only checked for being well-formed (`--no-type-check`).
