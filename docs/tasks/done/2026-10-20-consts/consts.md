@@ -176,22 +176,29 @@ grammars to be consistent with the new syntax.
 
 ### Refinements agreed during the step
 
-- The data-types grammar gains `ConstDecl`, and a types file is a sequence of `EnumDecl` or `ConstDecl`. A file whose
-  first token is `enum` or `const` is a types file.
-- `ConstDecl` is drawn as `const Name [ [<TypeParams>] : Type ] = Value ;`. The parameter list is the quantifier of the
-  type of the const and goes together with the annotation, so the diagram cannot show `<T>` without a `: Type`. The
-  parser reads that form and validation rejects it, so the diagram is slightly stricter than the parser. The prose
-  says so.
-- `Value` in a `ConstDecl` is a cross-reference to the data-values grammar and is not redrawn. The prose of the
-  data-types section says where it is defined, and `grammar.template.md` explains why it is undefined in that list.
-- `Name` for a const is an identifier of either case, other than the reserved words `enum` and `const`.
-- The data-values grammar loses the `null` literal and gains `ConstRef`: a name that starts with a lowercase letter or
-  underscore, with no body. An uppercase name is a `Tagged` value, which may have no body, and the checker decides
-  whether it is a constructor or a const. `Tagged` keeps its optional record or tuple body. The prose says that a bare
-  uppercase name is a constructor or a const, that a lowercase name is always a const, and that `null`, `true` and
+- The data-types grammar gains `ConstDecl`, and a types file is a sequence of
+  `EnumDecl` or `ConstDecl`. A file whose first token is `enum` or `const` is a
+  types file.
+- `ConstDecl` is drawn as `const Name [ [<TypeParams>] : Type ] = Value ;`. The
+  parameter list is the quantifier of the type of the const and goes together
+  with the annotation, so the diagram cannot show `<T>` without a `: Type`. The
+  parser reads that form and validation rejects it, so the diagram is slightly
+  stricter than the parser. The prose says so.
+- `Value` in a `ConstDecl` is a cross-reference to the data-values grammar and
+  is not redrawn. The prose of the data-types section says where it is defined,
+  and `grammar.template.md` explains why it is undefined in that list.
+- `Name` for a const is an identifier of either case, other than the reserved
+  words `enum` and `const`.
+- The data-values grammar loses the `null` literal and gains `ConstRef`: a name
+  that starts with a lowercase letter or underscore, with no body. An uppercase
+  name is a `Tagged` value, which may have no body, and the checker decides
+  whether it is a constructor or a const. `Tagged` keeps its optional record or
+  tuple body. The prose says that a bare uppercase name is a constructor or a
+  const, that a lowercase name is always a const, and that `null`, `true` and
   `false` are consts of the prelude.
-- The derived files are regenerated with `just grammar-md`: the PDFs and SVGs, which go through git-lfs, and
-  `grammar.md`. The template's introduction and its description of a types file mention consts.
+- The derived files are regenerated with `just grammar-md`: the PDFs and SVGs,
+  which go through git-lfs, and `grammar.md`. The template's introduction and
+  its description of a types file mention consts.
 
 
 ## Step 6: Update the CHANGELOG
@@ -200,9 +207,11 @@ Bring the CHANGELOG up to date.
 
 ### Refinements agreed during the step
 
-- The entries were written as each step was done, so they are tidied and recategorised. The entries for the consts
-  are one group under Added, with sub-bullets for the references, the type parameters, the inference and the record
-  types, and with references to decisions 12 to 16.
-- The effects on what already existed go under Changed: the classification of a file by `enum` or `const`, `null` as a
-  const of the prelude and the new message for it, a lowercase name being a value, and `const` being reserved.
+- The entries were written as each step was done, so they are tidied and
+  recategorised. The entries for the consts are one group under Added, with
+  sub-bullets for the references, the type parameters, the inference and the
+  record types, and with references to decisions 12 to 16.
+- The effects on what already existed go under Changed: the classification of a
+  file by `enum` or `const`, `null` as a const of the prelude and the new
+  message for it, a lowercase name being a value, and `const` being reserved.
 - The entry for the type-check no longer describes `null` as special.
