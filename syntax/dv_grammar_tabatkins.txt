@@ -20,11 +20,11 @@ Diagram(
     Comment('Value'),
     Choice(0,
         NonTerminal('Tagged'),
+        NonTerminal('ConstRef'),
         NonTerminal('Record'),
         NonTerminal('Array'),
         NonTerminal('Number'),
-        NonTerminal('String'),
-        Terminal('null')
+        NonTerminal('String')
     )
 )
 
@@ -40,6 +40,12 @@ Diagram(
             )
         )
     )
+)
+
+// ConstRef
+Diagram(
+    Comment('ConstRef'),
+    NonTerminal('field-name')
 )
 
 // Record
@@ -195,7 +201,8 @@ Diagram(
     Comment('field-name'),
     Sequence(
         NonTerminal('[a-z_]'),
-        ZeroOrMore(NonTerminal('[A-Za-z0-9_]'))
+        ZeroOrMore(NonTerminal('[A-Za-z0-9_]')),
+        Comment('not enum or const')
     )
 )
 
