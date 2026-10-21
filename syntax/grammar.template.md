@@ -3,8 +3,8 @@
 # Constructo grammar
 
 Constructo has two notations that are used together. A **data-types** file declares a schema using Rust-style
-`enum` declarations, and a **data-values** file holds data written in a JSON-like notation extended with named
-constructors. The values are checked against the types.
+`enum` declarations, and named values using `const` declarations. A **data-values** file holds data written in a
+JSON-like notation extended with named constructors. The values are checked against the types.
 
 For example, a types file might declare:
 
@@ -14,11 +14,18 @@ enum Shape =
   Box { width: Float, height: Float };
 ```
 
+and might name a value:
+
+```
+const unit_circle = Circle { radius: 1.0 };
+```
+
 and a values file could then contain:
 
 ```
 Circle { radius: 3.0 };
-Box { width: 7.0, height: 1.0 }
+Box { width: 7.0, height: 1.0 };
+unit_circle
 ```
 
 The two grammars are given below as railroad diagrams. Both use `//` line comments, and the same `TypeName`
@@ -28,8 +35,20 @@ files for each grammar are in [examples/](examples/).
 
 ## Data-types grammar
 
-A types file is a sequence of `enum` declarations. Each declaration has optional type parameters and one or more
-variants, which are bare constructors, records or tuples.
+A types file is a sequence of `enum` and `const` declarations, in any order. A file whose first token is `enum` or
+`const` is a types file.
+
+An `enum` declaration has optional type parameters and one or more variants, which are bare constructors, records or
+tuples.
+
+A `const` declaration gives a name to a value. Its type is the `Type` after the colon, and it may be left out, in which
+case the type of the value is used. The type parameters, as in `const none<T>: Option<T> = None;`, say that the const
+has that type for every `T`. They belong to the type, so they can only be given together with it. The grammar shows
+this, although the parser reads a parameter list without a type and the checker then rejects it. The type parameters
+are in scope in the type only.
+
+The `Value` of a const is the one defined in the [data-values grammar](#data-values-grammar). A const name may have
+either case. The names `enum` and `const` are reserved, and cannot be used as the name of a const or a field.
 
 The rules are:
 
@@ -42,7 +61,12 @@ The diagrams are also available as a [PDF](dt_grammar.pdf).
 ## Data-values grammar
 
 A values file is a sequence of values: numbers, strings, arrays, records, tuples and constructors, written in the
-untagged or tagged forms shown above.
+untagged or tagged forms shown above. A value may also be the name of a const.
+
+A bare name is a `Tagged` value if it starts with an uppercase letter and a `ConstRef` if it starts with a lowercase
+letter or underscore. A `Tagged` value with no body is a constructor, or a const of that name, and the checker decides
+which. A `ConstRef` is always a const and takes no body. The standard prelude declares the consts `null`, `true` and
+`false`, so these are ordinary names and not special literals.
 
 The rules are:
 

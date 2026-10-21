@@ -1,7 +1,12 @@
 // Data-types Grammar
 Diagram(
     Comment('Data_Types'),
-    ZeroOrMore(NonTerminal('EnumDecl'))
+    ZeroOrMore(
+        Choice(0,
+            NonTerminal('EnumDecl'),
+            NonTerminal('ConstDecl')
+        )
+    )
 )
 
 // EnumDecl
@@ -20,6 +25,25 @@ Diagram(
             )
         ),
         Optional(Terminal(',')),
+        Terminal(';')
+    )
+)
+
+// ConstDecl
+Diagram(
+    Comment('ConstDecl'),
+    Sequence(
+        Terminal('const'),
+        NonTerminal('ConstName'),
+        Optional(
+            Sequence(
+                Optional(NonTerminal('TypeParams')),
+                Terminal(':'),
+                NonTerminal('Type')
+            )
+        ),
+        Terminal('='),
+        NonTerminal('Value'),
         Terminal(';')
     )
 )
@@ -165,12 +189,23 @@ Diagram(
     )
 )
 
+// ConstName
+Diagram(
+    Comment('ConstName'),
+    Sequence(
+        NonTerminal('[A-Za-z_]'),
+        ZeroOrMore(NonTerminal('[A-Za-z0-9_]')),
+        Comment('not enum or const')
+    )
+)
+
 // field-name
 Diagram(
     Comment('field-name'),
     Sequence(
         NonTerminal('[a-z_]'),
-        ZeroOrMore(NonTerminal('[A-Za-z0-9_]'))
+        ZeroOrMore(NonTerminal('[A-Za-z0-9_]')),
+        Comment('not enum or const')
     )
 )
 
