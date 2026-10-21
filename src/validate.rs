@@ -2,7 +2,7 @@
 //!
 //! All the parsed files are checked together as a single namespace.
 
-use crate::ast::{ConstDecl, EnumDecl, Field, TaggedBody, Type, Value, ValueKind, VariantBody};
+use crate::ast::{ConstDecl, EnumDecl, Field, TaggedBody, Type, TypeParam, Value, ValueKind, VariantBody};
 use crate::diagnostics::{Diagnostic, Pos};
 use std::collections::HashMap;
 
@@ -18,6 +18,8 @@ pub struct ParsedFile {
     pub name: String,
     pub decls: Vec<EnumDecl>,
     pub consts: Vec<ConstDecl>,
+    /// True for the standard prelude, whose consts may be referred to from the definition of any const.
+    pub prelude: bool,
 }
 
 /// Where a name was first declared: the index of the file and the position within it.
@@ -152,11 +154,17 @@ impl<'a> Checker<'a> {
         let mut edges: HashMap<&str, Vec<(&str, Pos)>> = HashMap::new();
         for (file, parsed) in files.iter().enumerate() {
             for constant in &parsed.consts {
-                self.check_type(file, &constant.ty, &mut Vec::new());
+                let mut params = self.check_params(file, &constant.params);
+                self.check_type(file, &constant.ty, &mut params);
+                self.report_unused_params(file, &params);
                 let mut refs = Vec::new();
                 self.collect_refs(&constant.value, &mut refs);
                 if !self.allow_refs {
                     for &(target, pos) in &refs {
+                        // The consts of the prelude refer to nothing, so they can take no part in a cycle.
+                        if files[self.consts[target].0].prelude {
+                            continue;
+                        }
                         let message = format!(
                             "Reference to const {} in const {} requires --allow-refs",
                             target, constant.name
@@ -194,7 +202,7 @@ impl<'a> Checker<'a> {
                     None => {}
                 }
             }
-            ValueKind::Null | ValueKind::Nat(_) | ValueKind::Int(_) | ValueKind::Float(_) | ValueKind::Str(_) => {}
+            ValueKind::Nat(_) | ValueKind::Int(_) | ValueKind::Float(_) | ValueKind::Str(_) => {}
         }
     }
 
@@ -248,9 +256,10 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_decl(&mut self, file: usize, decl: &'a EnumDecl) {
+    /// Checks the type parameters of a declaration, and returns them ready to have their uses counted.
+    fn check_params(&mut self, file: usize, declared: &'a [TypeParam]) -> Vec<Param<'a>> {
         let mut params: Vec<Param<'a>> = Vec::new();
-        for param in &decl.params {
+        for param in declared {
             let name = param.name.as_str();
             if params.iter().any(|p| p.name == name) {
                 self.report(file, param.pos, format!("Duplicate type parameter {}", name), None);
@@ -278,6 +287,19 @@ impl<'a> Checker<'a> {
                 used: false,
             });
         }
+        params
+    }
+
+    fn report_unused_params(&mut self, file: usize, params: &[Param<'a>]) {
+        for param in params {
+            if !param.used && !param.underscore {
+                self.report(file, param.pos, format!("Unused type parameter {}", param.name), None);
+            }
+        }
+    }
+
+    fn check_decl(&mut self, file: usize, decl: &'a EnumDecl) {
+        let mut params = self.check_params(file, &decl.params);
         for variant in &decl.variants {
             match &variant.body {
                 VariantBody::Unit => {}
@@ -289,11 +311,7 @@ impl<'a> Checker<'a> {
                 }
             }
         }
-        for param in &params {
-            if !param.used && !param.underscore {
-                self.report(file, param.pos, format!("Unused type parameter {}", param.name), None);
-            }
-        }
+        self.report_unused_params(file, &params);
     }
 
     fn check_fields(&mut self, file: usize, fields: &'a [Field], params: &mut Vec<Param<'a>>) {

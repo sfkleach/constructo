@@ -45,6 +45,10 @@ Following the style in https://keepachangelog.com/en/1.0.0/
   for now.
 - `constructo check --allow-refs` lets the definition of a const refer to other consts. Without it such a reference is
   an error, and with it a circular definition is.
+- Consts may have type parameters, as in `const none<T>: Option<T> = None;`. Each use of one gets its own type
+  arguments, and its value is checked against the parameters as unknown types.
+- The standard prelude declares the consts `null`, `true` and `false`, which replace the `null` literal. A const
+  definition may refer to them without `--allow-refs`. Under `--no-prelude` they are unknown.
 
 ### Changed
 

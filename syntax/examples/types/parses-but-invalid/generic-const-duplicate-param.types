@@ -1,0 +1,1 @@
+const none<T, T>: Option<T> = None;

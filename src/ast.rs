@@ -9,11 +9,12 @@ pub struct TypesFile {
     pub consts: Vec<ConstDecl>,
 }
 
-/// `const name: Type = value;`
+/// `const name<Params>: Type = value;`
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConstDecl {
     pub name: String,
     pub pos: Pos,
+    pub params: Vec<TypeParam>,
     pub ty: Type,
     pub value: Value,
 }
@@ -74,7 +75,6 @@ pub struct Value {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ValueKind {
-    Null,
     /// The literals keep their text, so that checking them against a type can decide how to interpret them.
     Nat(String),
     Int(String),

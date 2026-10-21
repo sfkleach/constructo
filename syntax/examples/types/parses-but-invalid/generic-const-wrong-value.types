@@ -1,0 +1,2 @@
+// The value has to suit every type that T might be.
+const one<T>: Option<T> = Some(1);

@@ -17,7 +17,8 @@
 - Join: where unification meets two numeric types, widening applies and the result is the wider type. So `[1, 2.5]`
   has type `[Float]` and `[1, +2]` has type `[Int]`. With `--no-widening` there is no join and these are errors.
 - Untagged top-level values are checked for internal consistency only, since they name no type.
-- `null` is `None` of `Option<T>`, handled specially as a stopgap. The planned replacement is a `const` declaration,
+- `null` is `None` of `Option<T>`, handled specially as a stopgap. (Superseded by decision 14: it is now a const of
+  the prelude.) The planned replacement is a `const` declaration,
   `const NAME: TYPE = VALUE` with the type optional, and the prelude will then include `const null = None;`. Until
   then, without the prelude (`--no-prelude`) and without a user-defined `Option`, a `null` is reported as an error
   that names the cause.

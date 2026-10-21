@@ -1,0 +1,2 @@
+// The consts of the prelude cannot be redefined.
+const null: Nat = 0;

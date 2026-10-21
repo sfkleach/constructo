@@ -1,0 +1,9 @@
+// A const may have type parameters, which each reference to it instantiates afresh.
+const none<T>: Option<T> = None;
+const empty<T>: [T] = [];
+const pair<A, _B>: { first: Option<A>, rest: [A] } = { first: None, rest: [] };
+
+// The prelude consts null, true and false may be used in the definition of another const.
+const NoName: Option<String> = null;
+const Verbose: Bool = true;
+const Flags: [Bool] = [true, false, true];

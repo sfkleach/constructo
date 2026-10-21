@@ -17,7 +17,12 @@ use validate::{validate, ParsedFile};
 pub use parser::SourceKind;
 
 /// The standard prelude: declarations that are available to every types file unless the prelude is disabled.
-pub const PRELUDE: &str = "enum Bool = True, False;\nenum Option<T> = None, Some(T);\n";
+pub const PRELUDE: &str = "enum Bool = True, False;
+enum Option<T> = None, Some(T);
+const null<T>: Option<T> = None;
+const true: Bool = True;
+const false: Bool = False;
+";
 
 /// The name under which the prelude appears in diagnostics.
 pub const PRELUDE_NAME: &str = "<prelude>";
@@ -158,6 +163,7 @@ pub fn check_sources_with(sources: &[Source], options: &CheckOptions) -> Report 
                 name: sources[index].name.clone(),
                 decls: file.enums.clone(),
                 consts: file.consts.clone(),
+                prelude: sources[index].name == PRELUDE_NAME,
             });
         }
     }
@@ -682,5 +688,99 @@ mod tests {
             messages(&report),
             vec!["ERROR: Expected semi-colon (f0, line 2, col 18); in const M"]
         );
+    }
+
+    fn with_prelude(texts: &[&str]) -> Report {
+        let mut all = vec![prelude_source()];
+        all.extend(sources(texts));
+        check_sources(&all)
+    }
+
+    #[test]
+    fn the_prelude_provides_null_true_and_false() {
+        let report = with_prelude(&["null; true; [false, true]; [null, Some(1)]; Some(null)"]);
+        assert_eq!(messages(&report), Vec::<String>::new());
+        let report = with_prelude(&["Some(true); Some(null); [None, null, Some(false)]"]);
+        assert_eq!(messages(&report), Vec::<String>::new());
+        assert_eq!(with_prelude(&["[true, 1]"]).diagnostics.len(), 1);
+        assert_eq!(with_prelude(&["[Some(true), Some(1)]"]).diagnostics.len(), 1);
+    }
+
+    #[test]
+    fn without_the_prelude_null_true_and_false_are_unknown() {
+        let report = check_sources(&sources(&["null"]));
+        assert_eq!(messages(&report), vec!["ERROR: Unknown const null (f0, line 1, col 1)"]);
+        assert_eq!(check_sources(&sources(&["true"])).diagnostics.len(), 1);
+    }
+
+    #[test]
+    fn the_prelude_names_cannot_be_redefined() {
+        let report = with_prelude(&["const null: Nat = 1;\nconst true: Nat = 1;"]);
+        assert_eq!(
+            messages(&report),
+            vec![
+                "ERROR: Duplicate const null (f0, line 1, col 7); first declared at <prelude>, line 3, col 7",
+                "ERROR: Duplicate const true (f0, line 2, col 7); first declared at <prelude>, line 4, col 7",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_const_may_refer_to_a_prelude_const_without_allow_refs() {
+        let text = "const Flag: Bool = true;\nconst Missing: Option<String> = null;\nconst Some2: [Option<Nat>] = [null, Some(1)];";
+        assert_eq!(messages(&with_prelude(&[text])), Vec::<String>::new());
+        // Other consts still need the option, even when a prelude const is referred to as well.
+        let report = with_prelude(&["const A: Nat = 1;\nconst B: [Nat] = [A];\nconst C: Option<Nat> = null;"]);
+        assert_eq!(
+            messages(&report),
+            vec!["ERROR: Reference to const A in const B requires --allow-refs (f0, line 2, col 19)"]
+        );
+        // And the reference is checked against the type of the prelude const.
+        let report = with_prelude(&["const N: Nat = null;"]);
+        assert_eq!(
+            messages(&report),
+            vec!["ERROR: Expected Nat but found const null of type Option<_> (f0, line 1, col 16)"]
+        );
+    }
+
+    #[test]
+    fn checks_the_type_parameters_of_a_const() {
+        let report = check_sources(&sources(&[
+            "enum B = Y;\nconst a<T, T>: [T] = [];\nconst b<U>: Nat = 1;\nconst c<_U>: Nat = 1;\nconst d<B>: [B] = [];\nconst e<Int>: [Int] = [];",
+        ]));
+        assert_eq!(
+            messages(&report),
+            vec![
+                "ERROR: Duplicate type parameter T (f0, line 2, col 12)",
+                "ERROR: Unused type parameter U (f0, line 3, col 9)",
+                "ERROR: Type parameter B clashes with a declared type (f0, line 5, col 9)",
+                "ERROR: Type parameter Int clashes with a basic type (f0, line 6, col 9)",
+            ]
+        );
+        // The parameters of a const are in scope in its type only.
+        assert_eq!(
+            check_sources(&sources(&["const a<T>: [T] = [];\nconst b: T = 1;"]))
+                .diagnostics
+                .len(),
+            1
+        );
+        assert_eq!(
+            check_sources(&sources(&["const a<T>: [T] = [];\nenum E = X(T);"]))
+                .diagnostics
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_generic_const_is_checked_for_every_type() {
+        let text = "enum Option<T> = None, Some(T);\nconst bad<T>: Option<T> = Some(1);";
+        assert_eq!(
+            messages(&check_sources(&sources(&[text]))),
+            vec!["ERROR: Expected T but found Nat (f0, line 2, col 32)"]
+        );
+        let text = "enum Option<T> = None, Some(T);\nconst none<T>: Option<T> = None;\nconst a: Option<Nat> = none;\nconst b: Option<String> = none;";
+        // Referring to one const from another needs --allow-refs, as for any other const.
+        assert_eq!(messages(&with_refs(&[text])), Vec::<String>::new());
     }
 }

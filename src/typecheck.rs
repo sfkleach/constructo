@@ -75,8 +75,9 @@ pub fn check_const(env: &Env, widening: bool, constant: &ConstDecl) -> Result<()
         widening,
         slots: Vec::new(),
     };
-    // A const has no type parameters, so its declared type is already closed.
-    let declared = instantiate(&constant.ty, &[], &[]);
+    // The type parameters are unknown types here, because the value has to be valid whatever they turn out to be.
+    let args: Vec<Ty> = constant.params.iter().map(|p| Ty::Param(p.name.clone())).collect();
+    let declared = instantiate(&constant.ty, &constant.params, &args);
     checker.check(&constant.value, &declared)
 }
 
@@ -93,6 +94,8 @@ enum Ty {
     Enum(String, Rc<Vec<Ty>>),
     Record(Rc<Vec<(String, Ty)>>),
     Var(usize),
+    /// A type parameter of the const being checked, which stands for some unknown type.
+    Param(String),
 }
 
 enum Slot {
@@ -137,13 +140,15 @@ impl Checker<'_, '_> {
 
     /// Resolves the outermost variable, if there is one, to the type it is bound to. A free variable stays a variable.
     fn shallow(&self, ty: &Ty) -> Ty {
-        match ty {
-            Ty::Var(id) => match &self.slots[*id] {
-                Slot::Bound(bound, _) => bound.clone(),
-                Slot::Free => Ty::Var(*id),
-            },
-            other => other.clone(),
+        let mut ty = ty.clone();
+        // A variable can be bound to another variable, as when a reference to a generic const is checked.
+        while let Ty::Var(id) = &ty {
+            match &self.slots[*id] {
+                Slot::Bound(bound, _) => ty = bound.clone(),
+                Slot::Free => break,
+            }
         }
+        ty
     }
 
     /// The variable, if it is bound by a number literal and so may still be widened.
@@ -213,6 +218,7 @@ impl Checker<'_, '_> {
                 out.push_str(" }");
             }
             Ty::Var(_) => out.push('_'),
+            Ty::Param(name) => out.push_str(&name),
         }
     }
 
@@ -266,18 +272,6 @@ impl Checker<'_, '_> {
                 };
                 self.check_members(pos, "record", members, &fields)
             }
-            ValueKind::Null => {
-                let found = self.env.enums.get("Option").and_then(|decl| {
-                    decl.variants
-                        .iter()
-                        .find(|v| v.name == "None")
-                        .map(|variant| (*decl, variant))
-                });
-                match found {
-                    Some((decl, variant)) => self.check_variant(pos, decl, variant, None, &expected, "null"),
-                    None => error(pos, "Cannot use null because the type Option is not in scope"),
-                }
-            }
             ValueKind::Tagged { name, body } => match self.env.constructors.get(name.as_str()) {
                 Some(&(decl, variant)) => {
                     let found = format!("{} of type {}", name, decl.name);
@@ -322,16 +316,24 @@ impl Checker<'_, '_> {
 
     /// Checks a reference to a const, which has the type that the const declares.
     fn check_const_ref(&mut self, pos: Pos, constant: &ConstDecl, original: &Ty) -> Result<()> {
-        let declared = instantiate(&constant.ty, &[], &[]);
+        // Each reference gets its own copy of the type parameters, so that uses of one const may differ.
+        let args: Vec<Ty> = constant.params.iter().map(|_| self.fresh()).collect();
+        let declared = instantiate(&constant.ty, &constant.params, &args);
         let found = format!("const {} of type {}", constant.name, self.show(&declared));
         self.conforms(pos, &declared, original, &found)
     }
 
-    /// Checks that a value of the closed type `declared` can be used where `original` is expected. This is the same
-    /// relation as for a literal: numbers widen, and a variable that is still free takes the declared type.
+    /// Checks that a value of the type `declared` can be used where `original` is expected. This is the same relation
+    /// as for a literal: numbers widen, and a variable that is still free takes the declared type. The declared type
+    /// has the fresh variables of the const's type parameters in it, which are bound to whatever is expected.
     fn conforms(&mut self, pos: Pos, declared: &Ty, original: &Ty, found: &str) -> Result<()> {
+        let declared = &self.shallow(declared);
         let expected = self.shallow(original);
         match (declared, &expected) {
+            (Ty::Var(_), _) => {
+                self.bind(declared, expected.clone(), false);
+                Ok(())
+            }
             (Ty::Nat | Ty::Int | Ty::Float, _) => {
                 let lit = rank(declared).expect("a numeric type has a rank");
                 self.check_number(pos, lit, original, &expected, found)
@@ -341,6 +343,7 @@ impl Checker<'_, '_> {
                 Ok(())
             }
             (Ty::Str, Ty::Str) => Ok(()),
+            (Ty::Param(from), Ty::Param(to)) if from == to => Ok(()),
             (Ty::Array(from), Ty::Array(to)) => self.conforms(pos, from, to, found),
             (Ty::Enum(from_name, from_args), Ty::Enum(to_name, to_args))
                 if from_name == to_name && from_args.len() == to_args.len() =>
@@ -491,7 +494,7 @@ mod tests {
 
     /// Checks each value of `values` against `types`, and returns the error of each value as `line:col message`.
     fn errors(types: &str, values: &str, widening: bool) -> Vec<String> {
-        let file = parse(&format!("enum Option<T> = None, Some(T); {}", types)).unwrap();
+        let file = parse(&format!("{} {}", PRELUDE_TYPES, types)).unwrap();
         let env = Env::new(&file.enums, &file.consts);
         parse_values(values)
             .unwrap()
@@ -500,6 +503,8 @@ mod tests {
             .map(|e| format!("{}:{} {}", e.pos.line, e.pos.col, e.message))
             .collect()
     }
+
+    const PRELUDE_TYPES: &str = "enum Option<T> = None, Some(T); const null<T>: Option<T> = None;";
 
     const SHAPES: &str = "enum Shape = Circle { r: Float }, Box { w: Float, h: Float }, Dot, Pair(Nat, Int), Unit();";
 
@@ -629,32 +634,84 @@ mod tests {
     }
 
     #[test]
-    fn null_is_none_of_option() {
+    fn null_is_a_generic_const_of_option() {
         let types = "enum Config = Config { owner: Option<String> };";
         assert!(errors(
             types,
-            "Config { owner: null }; Config { owner: Some(\"me\") }; null",
+            "Config { owner: null }; Config { owner: Some(\"me\") }; null; [null, Some(1)]",
             true
         )
         .is_empty());
         assert_eq!(
             errors(types, "Config { owner: Some(null) }", true),
-            vec!["1:22 Expected String but found null"]
+            vec!["1:22 Expected String but found const null of type Option<_>"]
         );
         assert_eq!(
             errors("enum A = A(Nat);", "A(null)", true),
-            vec!["1:3 Expected Nat but found null"]
+            vec!["1:3 Expected Nat but found const null of type Option<_>"]
         );
     }
 
     #[test]
-    fn null_needs_option_in_scope() {
+    fn each_reference_to_a_generic_const_has_its_own_type() {
+        let types = "enum P = P(Option<Nat>, Option<String>);";
+        assert!(errors(types, "P(null, null); P(null, Some(\"s\"))", true).is_empty());
+        // Within one value the uses of a type variable must still agree.
+        assert_eq!(
+            errors("", "[Some(1), null, Some(\"s\")]", true),
+            vec!["1:22 Expected Nat but found String"]
+        );
+    }
+
+    #[test]
+    fn null_needs_the_const_in_scope() {
         let file = parse("enum A = A;").unwrap();
         let env = Env::new(&file.enums, &file.consts);
         let value = &parse_values("null").unwrap()[0];
         assert_eq!(
             check_value(&env, true, value).unwrap_err().message,
-            "Cannot use null because the type Option is not in scope"
+            "Unknown const null"
+        );
+    }
+
+    /// Checks the consts of a types file, and returns the error of each as `line:col message`.
+    fn const_errors(text: &str) -> Vec<String> {
+        let file = parse(&format!("{} {}", PRELUDE_TYPES, text)).unwrap();
+        let env = Env::new(&file.enums, &file.consts);
+        file.consts
+            .iter()
+            .filter_map(|c| check_const(&env, true, c).err())
+            .map(|e| format!("{}:{} {}", e.pos.line, e.pos.col, e.message))
+            .collect()
+    }
+
+    #[test]
+    fn the_value_of_a_generic_const_must_suit_every_type() {
+        assert!(const_errors("const none<T>: Option<T> = None; const nil<T>: [T] = [];").is_empty());
+        assert!(const_errors("const pair<A, B>: { a: Option<A>, b: [B] } = { a: null, b: [] };").is_empty());
+        // The parameter is an unknown type, so no particular value can be of it.
+        let errors = const_errors("const bad<T>: Option<T> = Some(1);");
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].ends_with("Expected T but found Nat"), "{:?}", errors);
+        assert_eq!(const_errors("const bad<T>: T = \"s\";").len(), 1);
+        assert_eq!(const_errors("const bad<T>: [T] = [1];").len(), 1);
+    }
+
+    #[test]
+    fn a_generic_const_may_be_defined_by_another() {
+        assert!(const_errors("const a<T>: Option<T> = null; const b<U>: Option<U> = a;").is_empty());
+        assert_eq!(
+            const_errors("const a<T>: Option<T> = null; const b<U>: Option<Nat> = a;").len(),
+            0
+        );
+        assert_eq!(
+            const_errors("const a<T>: [T] = []; const b<U>: Option<U> = a;").len(),
+            1
+        );
+        // A parameter of the second const is not the same type as one chosen for the first.
+        assert_eq!(
+            const_errors("const a: Option<Nat> = null; const b<U>: Option<U> = a;").len(),
+            1
         );
     }
 
