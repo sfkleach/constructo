@@ -1,0 +1,2 @@
+// A record type is closed: the value has exactly the fields of the type.
+const x: { a: Nat } = { a: 1, b: 2 };

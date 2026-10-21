@@ -1,0 +1,13 @@
+// The type of an untagged object is written like the object, with a type where each value goes.
+const x: { left: String, right: String } = { left: "hand", right: "heart" };
+
+// The fields may be given in any order, and the record type may be nested or inside other types.
+const reordered: { b: Nat, a: Nat } = { a: 1, b: 2 };
+const nested: { point: { x: Int, y: Int }, tags: [String] } = { point: { x: 0, y: -1 }, tags: ["a"] };
+const rows: [{ id: Nat, name: String }] = [{ id: 1, name: "one" }, { id: 2, name: "two" }];
+
+// The empty record is both a type and a value.
+const unit: {} = {};
+
+// A record type may be generic like any other type of a const.
+const nothing<T>: { value: Option<T>, history: [T] } = { value: null, history: [] };
