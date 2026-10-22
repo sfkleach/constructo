@@ -8,7 +8,7 @@
 
 use crate::ast::{ConstDecl, EnumDecl, Field, TaggedBody, Type, TypeParam, Value, ValueKind, Variant, VariantBody};
 use crate::diagnostics::Pos;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::rc::Rc;
 
@@ -507,6 +507,35 @@ impl Checker<'_, '_> {
         }
     }
 
+    /// Whether the variable occurs in the type. Binding a variable to a type that contains it would make the type
+    /// infinite and make `shallow` loop. The parts of a type are shared, so each is visited once however many times it
+    /// is used.
+    fn occurs(&self, id: usize, ty: &Ty) -> bool {
+        self.occurs_in(id, ty, &mut HashSet::new())
+    }
+
+    fn occurs_in(&self, id: usize, ty: &Ty, visited: &mut HashSet<*const ()>) -> bool {
+        match self.shallow(ty) {
+            Ty::Var(other) => other == id,
+            Ty::Array(element) => visited.insert(Rc::as_ptr(&element).cast()) && self.occurs_in(id, &element, visited),
+            Ty::Enum(_, args) => {
+                visited.insert(Rc::as_ptr(&args).cast()) && args.iter().any(|arg| self.occurs_in(id, arg, visited))
+            }
+            Ty::Record(fields) => {
+                visited.insert(Rc::as_ptr(&fields).cast())
+                    && fields.iter().any(|(_, field)| self.occurs_in(id, field, visited))
+            }
+            Ty::Nat | Ty::Int | Ty::Float | Ty::Str | Ty::Param(_) | Ty::Gen(_) => false,
+        }
+    }
+
+    fn infinite<T>(&self, pos: Pos, found: &str) -> Result<T> {
+        error(
+            pos,
+            format!("Cannot use {}, which would make a type that contains itself", found),
+        )
+    }
+
     /// Checks a reference to a const, which has the type that the const declares or that was inferred for it.
     fn check_const_ref(&mut self, pos: Pos, constant: &ConstDecl, original: &Ty) -> Result<()> {
         // Each reference gets its own copy of the type parameters, so that uses of one const may differ.
@@ -535,7 +564,13 @@ impl Checker<'_, '_> {
         let declared = &self.shallow(declared);
         let expected = self.shallow(original);
         match (declared, &expected) {
-            (Ty::Var(_), _) => {
+            // Two references to one generic const can leave the same variable on both sides, as when the parameter
+            // is used twice in the type. It is unified with itself already, and binding it would make a cycle.
+            (Ty::Var(a), Ty::Var(b)) if a == b => Ok(()),
+            (Ty::Var(id), _) => {
+                if self.occurs(*id, &expected) {
+                    return self.infinite(pos, found);
+                }
                 self.bind(declared, expected.clone(), false);
                 Ok(())
             }
@@ -543,7 +578,10 @@ impl Checker<'_, '_> {
                 let lit = rank(declared).expect("a numeric type has a rank");
                 self.check_number(pos, lit, original, &expected, found)
             }
-            (_, Ty::Var(_)) => {
+            (_, Ty::Var(id)) => {
+                if self.occurs(*id, declared) {
+                    return self.infinite(pos, found);
+                }
                 self.bind(&expected, declared.clone(), false);
                 Ok(())
             }
@@ -1224,5 +1262,51 @@ mod tests {
         );
         // Nothing can be inferred with a limit of nothing, not even a single number.
         assert_eq!(run(0).len(), 2);
+    }
+
+    #[test]
+    fn a_parameter_used_twice_in_a_type_is_unified_with_itself() {
+        // Each reference to p gets its own T, and the two Ts are made equal by the first field and then compared
+        // again for the second, which used to bind the variable to itself and loop for ever.
+        let text = "const p<T>: { a: [T], b: [T] } = { a: [], b: [] };\nconst ps = [p, p];";
+        assert_eq!(inferred(text, true), vec!["ps/1: [{ a: [T], b: [T] }]"]);
+        let text = "const p<T>: { a: [T], b: [T], c: [[T]] } = { a: [], b: [], c: [] };\nconst ps = [p, p, p];";
+        assert_eq!(inferred(text, true), vec!["ps/1: [{ a: [T], b: [T], c: [[T]] }]"]);
+        // A conflict is still found when the repeated parameter is used with two types.
+        let errors = const_errors(
+            "const p<T>: { a: [T], b: [T] } = { a: [], b: [] };\nconst q: [{ a: [Nat], b: [String] }] = [p];",
+        );
+        assert_eq!(errors.len(), 1, "{:?}", errors);
+    }
+
+    #[test]
+    fn a_variable_is_not_bound_to_a_type_that_contains_it() {
+        let env = Env::new([], []);
+        let mut checker = Checker {
+            env: &env,
+            widening: true,
+            slots: Vec::new(),
+        };
+        let pos = Pos { line: 1, col: 1 };
+        let v = checker.fresh();
+        let list = Ty::Array(Rc::new(v.clone()));
+        // The same variable on both sides is already unified.
+        assert!(checker.conforms(pos, &v, &v, "const x").is_ok());
+        // A variable cannot be a list of itself, whichever side it is on.
+        let error = checker.conforms(pos, &list, &v, "const x").unwrap_err();
+        assert!(
+            error.message.contains("a type that contains itself"),
+            "{}",
+            error.message
+        );
+        assert!(checker.conforms(pos, &v, &list, "const x").is_err());
+        // The check looks through variables that are bound, and through records and enums.
+        let w = checker.fresh();
+        checker.bind(&w, Ty::Enum("E".to_string(), Rc::new(vec![v.clone()])), false);
+        let nested = Ty::Record(Rc::new(vec![("f".to_string(), w)]));
+        assert!(checker.conforms(pos, &nested, &v, "const x").is_err());
+        // Nothing was bound by the failures, so the variable is still free and can take a type without it.
+        assert!(checker.conforms(pos, &Ty::Nat, &v, "const x").is_ok());
+        assert_eq!(checker.show(&v), "Nat");
     }
 }

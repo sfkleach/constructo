@@ -231,6 +231,14 @@ else
     fail "the error for a large type names the limit and the option (got '$err')"
 fi
 expect_exit "--infer-limit needs a number" 2 check --infer-limit=many "$chain"
+# A hang would stop the whole run, so this one is given a time limit.
+actual=0
+timeout 20 "$CONSTRUCTO" check --allow-refs "$REFS/repeated-parameter.types" >/dev/null 2>&1 || actual=$?
+if [[ "$actual" -eq 0 ]]; then
+    pass "a parameter that is used twice in a type can be referred to twice"
+else
+    fail "a parameter that is used twice in a type can be referred to twice (exit $actual; 124 is a timeout)"
+fi
 expect_exit "an ill-typed const passes --no-type-check" 0 \
     check --no-type-check "$EXAMPLES/parses-but-invalid/const-wrong-type.types"
 loud="$("$CONSTRUCTO" check -v "$EXAMPLES/valid/starts-with-const.types" 2>&1)"
