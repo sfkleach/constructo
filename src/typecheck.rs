@@ -150,18 +150,17 @@ fn inference_order<'a>(env: &Env<'a>, consts: &[(usize, &'a ConstDecl)]) -> Vec<
             .collect()
     };
     let mut order = Vec::new();
-    let mut started: Vec<&'a str> = Vec::new();
+    // A set, because a list would be searched in full for every const and every reference.
+    let mut started: HashSet<&'a str> = HashSet::new();
     for &(_, constant) in consts {
-        if !undeclared.contains_key(constant.name.as_str()) || started.contains(&constant.name.as_str()) {
+        if !undeclared.contains_key(constant.name.as_str()) || !started.insert(constant.name.as_str()) {
             continue;
         }
-        started.push(&constant.name);
         // Each entry is a const and the dependencies of it that are still to be visited.
         let mut stack = vec![(constant, dependencies(constant))];
         while let Some((current, pending)) = stack.last_mut() {
             match pending.pop() {
-                Some(name) if !started.contains(&name) => {
-                    started.push(name);
+                Some(name) if started.insert(name) => {
                     let (_, next) = undeclared[name];
                     stack.push((next, dependencies(next)));
                 }
@@ -1308,5 +1307,47 @@ mod tests {
         // Nothing was bound by the failures, so the variable is still free and can take a type without it.
         assert!(checker.conforms(pos, &Ty::Nat, &v, "const x").is_ok());
         assert_eq!(checker.show(&v), "Nat");
+    }
+
+    /// The time that a check of many consts may take. It takes a fraction of a second, but it took minutes when the
+    /// consts that had been visited were kept in a list that was searched in full each time.
+    const MANY_CONSTS_LIMIT: std::time::Duration = std::time::Duration::from_secs(10);
+
+    #[test]
+    fn many_independent_consts_without_a_type_are_inferred_quickly() {
+        let text: String = (0..100_000).map(|i| format!("const c{} = {};\n", i, i)).collect();
+        let started = std::time::Instant::now();
+        let found = inferred(&text, true);
+        assert!(started.elapsed() < MANY_CONSTS_LIMIT, "{:?}", started.elapsed());
+        assert_eq!(found.len(), 100_000);
+        assert_eq!(found[99_999], "c99999/0: Nat");
+    }
+
+    #[test]
+    fn a_long_chain_of_consts_without_a_type_is_inferred_in_dependency_order_quickly() {
+        // Each const is declared before the one that it refers to, so the whole chain is visited from the first.
+        let mut text: String = (1..100_000)
+            .rev()
+            .map(|i| format!("const c{} = c{};\n", i, i - 1))
+            .collect();
+        text.push_str("const c0 = \"s\";\n");
+        let started = std::time::Instant::now();
+        let found = inferred(&text, true);
+        assert!(started.elapsed() < MANY_CONSTS_LIMIT, "{:?}", started.elapsed());
+        assert_eq!(found.len(), 100_000);
+        assert!(found.iter().all(|f| f.ends_with(": String")));
+    }
+
+    #[test]
+    fn the_order_of_inference_visits_each_const_after_those_it_refers_to() {
+        let file = parse("const c = [b, a];\nconst b = a;\nconst a = 1;\nconst d = c;\nconst e: Nat = a;").unwrap();
+        let env = Env::new(&file.enums, &file.consts);
+        let consts: Vec<(usize, &ConstDecl)> = file.consts.iter().map(|c| (0, c)).collect();
+        let order: Vec<&str> = inference_order(&env, &consts)
+            .iter()
+            .map(|(_, c)| c.name.as_str())
+            .collect();
+        // The declared const e is left out, and a comes first because the others depend on it.
+        assert_eq!(order, vec!["a", "b", "c", "d"]);
     }
 }
