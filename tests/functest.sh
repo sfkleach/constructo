@@ -239,6 +239,20 @@ if [[ "$actual" -eq 0 ]]; then
 else
     fail "a parameter that is used twice in a type can be referred to twice (exit $actual; 124 is a timeout)"
 fi
+# Only the first type error is reported, but every file that has one has failed.
+loud="$("$CONSTRUCTO" check -v "$PBI/const-wrong-type.types" "$PBI/record-const-missing-field.types" 2>/dev/null || true)"
+if [[ "$loud" == *"FAILED: "*"const-wrong-type.types"* && "$loud" == *"FAILED: "*"record-const-missing-field.types"* \
+    && "$loud" != *"OK:"* && "$loud" != *"  const "* ]]; then
+    pass "-v marks every file with a const error as failed, though only the first error is reported"
+else
+    fail "-v marks every file with a const error as failed, though only the first error is reported (got '$loud')"
+fi
+err="$("$CONSTRUCTO" check "$PBI/const-wrong-type.types" "$PBI/record-const-missing-field.types" 2>&1 >/dev/null || true)"
+if [[ "$(wc -l <<< "$err")" -eq 1 ]]; then
+    pass "only the first const error is reported without --continue"
+else
+    fail "only the first const error is reported without --continue (got '$err')"
+fi
 expect_exit "an ill-typed const passes --no-type-check" 0 \
     check --no-type-check "$EXAMPLES/parses-but-invalid/const-wrong-type.types"
 loud="$("$CONSTRUCTO" check -v "$EXAMPLES/valid/starts-with-const.types" 2>&1)"

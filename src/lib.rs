@@ -232,14 +232,14 @@ fn type_check_values(
         .flat_map(|&(index, file)| file.consts.iter().map(move |c| (index, c)))
         .collect();
     let errors = check_consts(&mut everything, options.widening, options.infer_limit, &all_consts);
-    // The first type error stops the run, unless it was asked to carry on.
+    // The first type error stops the run, unless it was asked to carry on. Every file with an error has failed even if
+    // its error is not reported, because the errors have all been found already.
     let mut stopped = false;
     for (index, e) in errors {
-        diagnostics.push(Diagnostic::new(&sources[index].name, e.pos, e.message));
         outcomes[index] = Outcome::Failed;
-        if !options.continue_after_error {
-            stopped = true;
-            break;
+        if !stopped {
+            diagnostics.push(Diagnostic::new(&sources[index].name, e.pos, e.message));
+            stopped = !options.continue_after_error;
         }
     }
     let infos = describe_consts(&everything, &all_consts);
@@ -845,5 +845,32 @@ mod tests {
         let text = "enum Option<T> = None, Some(T);\nconst none<T>: Option<T> = None;\nconst a: Option<Nat> = none;\nconst b: Option<String> = none;";
         // Referring to one const from another needs --allow-refs, as for any other const.
         assert_eq!(messages(&with_refs(&[text])), Vec::<String>::new());
+    }
+
+    #[test]
+    fn every_file_with_a_const_error_has_failed_even_when_only_the_first_error_is_reported() {
+        let bad = |name: &str| format!("const {}: Nat = \"bad\";", name);
+        let texts = [bad("a"), "enum E = X;".to_string(), bad("b"), "1".to_string()];
+        let texts: Vec<&str> = texts.iter().map(String::as_str).collect();
+        let report = check_sources(&sources(&texts));
+        assert_eq!(
+            messages(&report),
+            vec!["ERROR: Expected Nat but found String (f0, line 1, col 16)"]
+        );
+        assert_eq!(
+            report.outcomes,
+            vec![Outcome::Failed, Outcome::Ok, Outcome::Failed, Outcome::NotChecked]
+        );
+        // With --continue the error of each file is reported as well.
+        let options = CheckOptions {
+            continue_after_error: true,
+            ..CheckOptions::default()
+        };
+        let report = check_sources_with(&sources(&texts), &options);
+        assert_eq!(report.diagnostics.len(), 2);
+        assert_eq!(
+            report.outcomes,
+            vec![Outcome::Failed, Outcome::Ok, Outcome::Failed, Outcome::Ok]
+        );
     }
 }
