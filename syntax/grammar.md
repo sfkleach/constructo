@@ -29,9 +29,9 @@ unit_circle
 ```
 
 The two grammars are given below as railroad diagrams. Both use `//` line comments, and the same `TypeName`
-(uppercase initial) and `field-name` (lowercase or underscore initial) identifiers. A `param-name` has the same shape
-as a `field-name`. The sources of the diagrams are `dt_grammar_tabatkins.txt` and `dv_grammar_tabatkins.txt`, and the
-diagrams are built with `just build`. Example files for each grammar are in [examples/](examples/).
+(uppercase initial) and `field-name` (lowercase or underscore initial) identifiers. The sources of the diagrams are
+`dt_grammar_tabatkins.txt` and `dv_grammar_tabatkins.txt`, and the diagrams are built with `just build`. Example
+files for each grammar are in [examples/](examples/).
 
 ## Data-types grammar
 
@@ -53,7 +53,7 @@ either case. The names `enum` and `const` are reserved, and cannot be used as th
 The rules are:
 
 `Data_Types`, `EnumDecl`, `ConstDecl`, `TypeParams`, `TypeParam`, `Variant`, `RecordBody`, `Field`, `TupleBody`,
-`Type`, `TypeRef`, `ArrayType`, `TypeName`, `ConstName`, `field-name`, `Comment`, `Parameter`.
+`NamedParameter`, `Type`, `TypeRef`, `ArrayType`, `TypeName`, `ConstName`, `field-name`, `Comment`.
 
 ![Data-types grammar](dt_grammar.svg)
 
@@ -71,8 +71,8 @@ which. A `ConstRef` is always a const and takes no body. The standard prelude de
 
 The rules are:
 
-`Data_Values`, `Value`, `Tagged`, `ConstRef`, `Record`, `Member`, `Tuple`, `Array`, `Number`, `Nat`, `Int`, `Float`,
-`String`, `TypeName`, `field-name`, `Comment`, `Argument`.
+`Data_Values`, `Value`, `Tagged`, `ConstRef`, `Record`, `Member`, `Tuple`, `NamedArgument`, `Array`, `Number`, `Nat`,
+`Int`, `Float`, `String`, `TypeName`, `field-name`, `Comment`.
 
 ![Data-values grammar](dv_grammar.svg)
 

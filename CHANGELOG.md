@@ -75,7 +75,8 @@ Following the style in https://keepachangelog.com/en/1.0.0/
     constructor of an enum with the defaults of its fields. Unnamed parameters must still be supplied. It is an error
     if the default is recursive (`Type List<T> has no default value`), if its type is not known, or if it has more
     nodes than `--default-limit=N` allows (10,000 by default; the library option is `CheckOptions::default_limit`).
-  - The grammar files, the diagrams and `syntax/grammar.md` describe `Parameter` and `Argument`.
+  - The grammar files, the diagrams and `syntax/grammar.md` describe `NamedParameter` and `NamedArgument`, and
+    show that named ones come after unnamed ones.
 
 ### Changed
 
