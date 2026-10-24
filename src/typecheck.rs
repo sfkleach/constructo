@@ -718,7 +718,7 @@ impl Checker<'_, '_> {
     fn check_default(&self, pos: Pos, parameter: &str, ty: &Ty) -> Result<()> {
         let limit = self.env.default_limit;
         let mut remaining = limit;
-        match self.default_nodes(ty, &mut Vec::new(), &mut remaining) {
+        match self.default_nodes(ty, &mut remaining) {
             Ok(()) => Ok(()),
             Err(NoDefault::Unknown) => {
                 let message = format!(
@@ -741,54 +741,63 @@ impl Checker<'_, '_> {
         }
     }
 
-    /// Counts the nodes of the default value of a type, taking them off `remaining`. The `path` has the enums that
-    /// are being expanded, to catch a type that contains itself.
-    fn default_nodes(
-        &self,
-        ty: &Ty,
-        path: &mut Vec<String>,
-        remaining: &mut usize,
-    ) -> std::result::Result<(), NoDefault> {
-        let ty = self.shallow(ty);
-        if matches!(ty, Ty::Var(_) | Ty::Param(_) | Ty::Gen(_)) {
-            return Err(NoDefault::Unknown);
+    /// Counts the nodes of the default value of a type, taking them off `remaining`. The traversal is depth-first and
+    /// uses an explicit stack, because a chain of declarations that each start with the next one is only as deep as
+    /// the number of declarations, which the parser's nesting limit does not bound.
+    fn default_nodes(&self, ty: &Ty, remaining: &mut usize) -> std::result::Result<(), NoDefault> {
+        enum Step {
+            Visit(Ty),
+            /// The end of the expansion of an enum, which takes its name off the path.
+            Leave(String),
         }
-        if *remaining == 0 {
-            return Err(NoDefault::TooLarge);
-        }
-        *remaining -= 1;
-        match &ty {
-            Ty::Record(fields) => {
-                for (_, field) in fields.iter() {
-                    self.default_nodes(field, path, remaining)?;
+        // The enums that are being expanded, to catch a type that contains itself.
+        let mut path: HashSet<String> = HashSet::new();
+        let mut stack = vec![Step::Visit(ty.clone())];
+        while let Some(step) = stack.pop() {
+            let ty = match step {
+                Step::Leave(name) => {
+                    path.remove(&name);
+                    continue;
                 }
-                Ok(())
+                Step::Visit(ty) => self.shallow(&ty),
+            };
+            if matches!(ty, Ty::Var(_) | Ty::Param(_) | Ty::Gen(_)) {
+                return Err(NoDefault::Unknown);
             }
-            Ty::Enum(name, args) => {
-                if path.contains(name) {
-                    return Err(NoDefault::Recursive(ty.clone()));
-                }
-                let decl = self.env.enums[name.as_str()];
-                // Validation does not insist that an enum has a constructor, and one that has none has no default.
-                let Some(first) = decl.variants.first() else {
-                    return Err(NoDefault::Recursive(ty.clone()));
-                };
-                path.push(name.clone());
-                let types: Vec<&Type> = match &first.body {
-                    VariantBody::Unit => Vec::new(),
-                    VariantBody::Record(fields) => fields.iter().map(|f| &f.ty).collect(),
-                    VariantBody::Tuple(parameters) => parameters.iter().map(|p| &p.ty).collect(),
-                };
-                for declared in types {
-                    let field = instantiate(declared, &decl.params, args);
-                    self.default_nodes(&field, path, remaining)?;
-                }
-                path.pop();
-                Ok(())
+            if *remaining == 0 {
+                return Err(NoDefault::TooLarge);
             }
-            // The primitive types and the arrays have a default with no parts.
-            _ => Ok(()),
+            *remaining -= 1;
+            // The parts are pushed in reverse, so that they are taken in order.
+            match &ty {
+                Ty::Record(fields) => {
+                    stack.extend(fields.iter().rev().map(|(_, field)| Step::Visit(field.clone())));
+                }
+                Ty::Enum(name, args) => {
+                    if path.contains(name) {
+                        return Err(NoDefault::Recursive(ty.clone()));
+                    }
+                    let decl = self.env.enums[name.as_str()];
+                    // Validation does not insist that an enum has a constructor, and one that has none has no default.
+                    let Some(first) = decl.variants.first() else {
+                        return Err(NoDefault::Recursive(ty.clone()));
+                    };
+                    path.insert(name.clone());
+                    stack.push(Step::Leave(name.clone()));
+                    let types: Vec<&Type> = match &first.body {
+                        VariantBody::Unit => Vec::new(),
+                        VariantBody::Record(fields) => fields.iter().map(|f| &f.ty).collect(),
+                        VariantBody::Tuple(parameters) => parameters.iter().map(|p| &p.ty).collect(),
+                    };
+                    for declared in types.into_iter().rev() {
+                        stack.push(Step::Visit(instantiate(declared, &decl.params, args)));
+                    }
+                }
+                // The primitive types and the arrays have a default with no parts.
+                _ => {}
+            }
         }
+        Ok(())
     }
 }
 
@@ -1041,6 +1050,25 @@ mod tests {
             errors(mutual, "Holder()", true),
             vec!["1:1 Type A has no default value"]
         );
+    }
+
+    #[test]
+    fn a_long_chain_of_first_constructors_does_not_overflow_the_stack() {
+        // Each declaration is shallow, but the default of the last one goes through all of them.
+        let mut types = String::from("enum E0 = E0; ");
+        for n in 1..=50_000 {
+            types.push_str(&format!("enum E{n} = E{n}(a: E{p}); ", n = n, p = n - 1));
+        }
+        types.push_str("enum Holder = Holder(x: E50000);");
+        let file = parse(&types).unwrap();
+        let check = |limit: usize| {
+            let env = Env::new(&file.enums, &file.consts).with_default_limit(limit);
+            check_value(&env, true, &parse_values("Holder()").unwrap()[0])
+                .err()
+                .map(|e| e.message)
+        };
+        assert_eq!(check(1_000_000), None);
+        assert!(check(DEFAULT_VALUE_LIMIT).unwrap().contains("is too large"));
     }
 
     #[test]

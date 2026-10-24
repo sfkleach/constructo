@@ -286,6 +286,16 @@ trap 'rm -f "$chain" "$doubling" "$doubled_values"' EXIT
 echo "Holder();" > "$doubled_values"
 expect_exit "a huge default is refused" 1 check "$doubling" "$doubled_values"
 expect_exit "--default-limit raises the limit" 0 check --default-limit=5000000 "$doubling" "$doubled_values"
+# A chain of declarations that each start with the next must not overflow the stack, whatever the limit.
+long_chain="$(mktemp)"
+trap 'rm -f "$chain" "$doubling" "$doubled_values" "$long_chain"' EXIT
+{
+    echo "enum E0 = E0;"
+    for i in $(seq 1 50000); do echo "enum E$i = E$i(a: E$(( i - 1 )));"; done
+    echo "enum Holder = Holder(x: E50000);"
+} > "$long_chain"
+expect_exit "a long chain of defaults is refused, not a crash" 1 check "$long_chain" "$doubled_values"
+expect_exit "a long chain of defaults is accepted within the limit" 0 check --default-limit=1000000 "$long_chain" "$doubled_values"
 echo ""
 
 echo "--- prelude ---"
