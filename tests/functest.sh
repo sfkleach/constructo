@@ -263,6 +263,51 @@ else
 fi
 echo ""
 
+echo "--- omitted arguments ---"
+expect_exit "--default-limit can refuse a default" 1 check --default-limit=2 "$TYPED/schema.types" "$TYPED/valid/omitted-arguments.values"
+expect_exit "--default-limit=N takes a space as well" 1 check --default-limit 2 "$TYPED/schema.types" "$TYPED/valid/omitted-arguments.values"
+expect_exit "--default-limit needs a number" 2 check --default-limit=many "$TYPED/schema.types" "$TYPED/valid/omitted-arguments.values"
+err="$("$CONSTRUCTO" check --default-limit=2 "$TYPED/schema.types" "$TYPED/valid/omitted-arguments.values" 2>&1 >/dev/null || true)"
+if [[ "$err" == "ERROR: The default value of { cpu: Nat, mem: Nat } has more than 2 nodes, which is too large; give argument limits or raise --default-limit ("* ]]; then
+    pass "the error for a large default names the limit and the option"
+else
+    fail "the error for a large default names the limit and the option (got '$err')"
+fi
+# Each type holds two copies of the one before it, so the size of its default doubles.
+doubling="$(mktemp)"
+trap 'rm -f "$chain" "$doubling"' EXIT
+{
+    echo "enum E0 = E0;"
+    for i in $(seq 1 20); do echo "enum E$i = E$i(a: E$(( i - 1 )), b: E$(( i - 1 )));"; done
+    echo "enum Holder = Holder(x: E20);"
+} > "$doubling"
+doubled_values="$(mktemp)"
+trap 'rm -f "$chain" "$doubling" "$doubled_values"' EXIT
+echo "Holder();" > "$doubled_values"
+expect_exit "a huge default is refused" 1 check "$doubling" "$doubled_values"
+expect_exit "--default-limit raises the limit" 0 check --default-limit=5000000 "$doubling" "$doubled_values"
+# A chain of declarations that each start with the next must not overflow the stack, whatever the limit.
+long_chain="$(mktemp)"
+trap 'rm -f "$chain" "$doubling" "$doubled_values" "$long_chain"' EXIT
+{
+    echo "enum E0 = E0;"
+    for i in $(seq 1 50000); do echo "enum E$i = E$i(a: E$(( i - 1 )));"; done
+    echo "enum Holder = Holder(x: E50000);"
+} > "$long_chain"
+# The default of a type may need an enum that is declared after the values file, which cannot name it itself.
+forward_types="$(mktemp)"
+forward_later="$(mktemp)"
+forward_values="$(mktemp)"
+trap 'rm -f "$chain" "$doubling" "$doubled_values" "$long_chain" "$forward_types" "$forward_later" "$forward_values"' EXIT
+echo "enum Holder = Holder(x: Later);" > "$forward_types"
+echo "enum Later = Ready;" > "$forward_later"
+echo "Holder();" > "$forward_values"
+expect_exit "the default may use an enum that is declared after the values" 0 \
+    check "$forward_types" "$forward_values" "$forward_later"
+expect_exit "a long chain of defaults is refused, not a crash" 1 check "$long_chain" "$doubled_values"
+expect_exit "a long chain of defaults is accepted within the limit" 0 check --default-limit=1000000 "$long_chain" "$doubled_values"
+echo ""
+
 echo "--- prelude ---"
 expect_exit "prelude supplies Option" 0 check "$EXAMPLES/valid/mutual.types"
 expect_exit "--no-prelude hides Option" 1 check --no-prelude "$EXAMPLES/valid/mutual.types"

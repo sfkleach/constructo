@@ -1,0 +1,2 @@
+// expect: Expected Nat for argument hOffset but found String
+Image("a.jpg", "A", hOffset: "far", vOffset: 2, alignment: "left");

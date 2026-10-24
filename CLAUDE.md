@@ -29,6 +29,8 @@ The goal is to build robust, well-designed software, not to avoid technical disa
   command is clearly indicated.
 - Do not create artefacts within the repository folder structure
 - EXCEPT in folders starting with an underscore, such as  `_build/`.
+- Tasks live in `docs/tasks/todo/` until work on them starts. Before starting work on a task, move its folder up to
+  `docs/tasks/`, and when it is finished move it to `docs/tasks/done/`. Update any links to the task when moving it.
 - Design decisions should be documents in the `docs/decisions/` folder using
   the established template. However you do not need to precisely follow the template.
 - In some cases there were not multiple options considered so the pros-and-cons

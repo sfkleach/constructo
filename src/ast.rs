@@ -50,8 +50,16 @@ pub enum VariantBody {
     /// A bare constructor such as `Quit`.
     Unit,
     Record(Vec<Field>),
-    /// A tuple such as `Write(String)`, possibly empty as in `Ping()`.
-    Tuple(Vec<Type>),
+    /// A tuple such as `Write(String)` or `Image(String, hOffset: Nat)`, possibly empty as in `Ping()`.
+    Tuple(Vec<Parameter>),
+}
+
+/// A parameter of a tuple constructor. Unnamed parameters come first and can only be bound by position.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Parameter {
+    pub name: Option<String>,
+    pub pos: Pos,
+    pub ty: Type,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -95,8 +103,16 @@ pub enum ValueKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaggedBody {
     Record(Vec<Member>),
-    /// A tuple, possibly empty as in `Ping()`.
-    Tuple(Vec<Value>),
+    /// A tuple, possibly empty as in `Ping()`. Positional arguments come before any named ones.
+    Tuple(Vec<Argument>),
+}
+
+/// An argument of a tuple constructor, which is either positional or given by the name of a parameter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Argument {
+    pub name: Option<String>,
+    pub pos: Pos,
+    pub value: Value,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -141,7 +157,7 @@ impl Value {
                 out.push((name, self.pos));
                 match body {
                     Some(TaggedBody::Record(members)) => members.iter().for_each(|m| m.value.names(out)),
-                    Some(TaggedBody::Tuple(items)) => items.iter().for_each(|item| item.names(out)),
+                    Some(TaggedBody::Tuple(items)) => items.iter().for_each(|item| item.value.names(out)),
                     None => {}
                 }
             }

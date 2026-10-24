@@ -53,7 +53,7 @@ either case. The names `enum` and `const` are reserved, and cannot be used as th
 The rules are:
 
 `Data_Types`, `EnumDecl`, `ConstDecl`, `TypeParams`, `TypeParam`, `Variant`, `RecordBody`, `Field`, `TupleBody`,
-`Type`, `TypeRef`, `ArrayType`, `TypeName`, `ConstName`, `field-name`, `Comment`.
+`NamedParameter`, `Type`, `TypeRef`, `ArrayType`, `TypeName`, `ConstName`, `field-name`, `Comment`.
 
 ![Data-types grammar](dt_grammar.svg)
 
@@ -71,8 +71,8 @@ which. A `ConstRef` is always a const and takes no body. The standard prelude de
 
 The rules are:
 
-`Data_Values`, `Value`, `Tagged`, `ConstRef`, `Record`, `Member`, `Tuple`, `Array`, `Number`, `Nat`, `Int`, `Float`,
-`String`, `TypeName`, `field-name`, `Comment`.
+`Data_Values`, `Value`, `Tagged`, `ConstRef`, `Record`, `Member`, `Tuple`, `NamedArgument`, `Array`, `Number`, `Nat`,
+`Int`, `Float`, `String`, `TypeName`, `field-name`, `Comment`.
 
 ![Data-values grammar](dv_grammar.svg)
 

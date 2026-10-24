@@ -16,10 +16,10 @@ use typecheck::{check_consts, check_value, Env};
 use validate::{validate, ParsedFile};
 
 pub use parser::SourceKind;
-pub use typecheck::DEFAULT_INFER_LIMIT;
+pub use typecheck::{DEFAULT_INFER_LIMIT, DEFAULT_VALUE_LIMIT};
 
 /// The standard prelude: declarations that are available to every types file unless the prelude is disabled.
-pub const PRELUDE: &str = "enum Bool = True, False;
+pub const PRELUDE: &str = "enum Bool = False, True;
 enum Option<T> = None, Some(T);
 const null<T>: Option<T> = None;
 const true: Bool = True;
@@ -116,6 +116,9 @@ pub struct CheckOptions {
     /// The most nodes that the type inferred for a const may have, so that a value with an exponentially large type is
     /// refused instead of taking all the time and memory there is.
     pub infer_limit: usize,
+    /// The most nodes that the default value of an omitted argument may have, so that a default that is huge when
+    /// written out is refused.
+    pub default_limit: usize,
 }
 
 impl Default for CheckOptions {
@@ -126,6 +129,7 @@ impl Default for CheckOptions {
             continue_after_error: false,
             allow_refs: false,
             infer_limit: DEFAULT_INFER_LIMIT,
+            default_limit: DEFAULT_VALUE_LIMIT,
         }
     }
 }
@@ -226,7 +230,8 @@ fn type_check_values(
     let mut everything = Env::new(
         types_files.iter().flat_map(|(_, file)| &file.enums),
         types_files.iter().flat_map(|(_, file)| &file.consts),
-    );
+    )
+    .with_default_limit(options.default_limit);
     let all_consts: Vec<(usize, &ConstDecl)> = types_files
         .iter()
         .flat_map(|&(index, file)| file.consts.iter().map(move |c| (index, c)))
@@ -343,7 +348,7 @@ mod tests {
             errors,
             vec![
                 "ERROR: Duplicate type Bool (user, line 1, col 6); first declared at <prelude>, line 1, col 6",
-                "ERROR: Duplicate constructor True (user, line 1, col 18); first declared at <prelude>, line 1, col 13",
+                "ERROR: Duplicate constructor True (user, line 1, col 18); first declared at <prelude>, line 1, col 20",
             ]
         );
     }
@@ -439,6 +444,16 @@ mod tests {
             ..CheckOptions::default()
         };
         assert!(check_sources_with(&sources(&["Circle { radius: 3.0 }"]), &options).is_ok());
+    }
+
+    #[test]
+    fn the_default_of_a_type_can_use_an_enum_that_is_declared_later() {
+        let report = check_sources(&sources(&[
+            "enum Holder = Holder(x: Later);",
+            "Holder()",
+            "enum Later = Ready;",
+        ]));
+        assert!(report.is_ok(), "{:?}", report.diagnostics);
     }
 
     #[test]

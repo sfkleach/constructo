@@ -1,0 +1,2 @@
+// The named parameter alignment is left out, so it takes the default of String.
+Image("a.jpg", "A", hOffset: 1, vOffset: 2);

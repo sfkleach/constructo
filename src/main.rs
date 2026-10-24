@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 use constructo::{
     check_sources_with, prelude_source, syntax_error, CheckOptions, Outcome, Source, SourceKind, DEFAULT_INFER_LIMIT,
+    DEFAULT_VALUE_LIMIT,
 };
 use std::io::Read;
 use std::path::PathBuf;
@@ -50,6 +51,10 @@ enum Command {
         #[arg(long, value_name = "N", default_value_t = DEFAULT_INFER_LIMIT)]
         infer_limit: usize,
 
+        /// The most nodes that the default value of an omitted argument may have
+        #[arg(long, value_name = "N", default_value_t = DEFAULT_VALUE_LIMIT)]
+        default_limit: usize,
+
         /// Print a message when the check succeeds
         #[arg(long, short)]
         verbose: bool,
@@ -71,6 +76,7 @@ fn main() -> ExitCode {
             continue_after_error,
             allow_refs,
             infer_limit,
+            default_limit,
             verbose,
             files,
         } => {
@@ -80,6 +86,7 @@ fn main() -> ExitCode {
                 continue_after_error,
                 allow_refs,
                 infer_limit,
+                default_limit,
             };
             check(stdin, no_prelude, verbose, &options, &files)
         }

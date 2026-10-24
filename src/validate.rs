@@ -303,9 +303,19 @@ impl<'a> Checker<'a> {
             match &variant.body {
                 VariantBody::Unit => {}
                 VariantBody::Record(fields) => self.check_fields(file, fields, &mut params),
-                VariantBody::Tuple(types) => {
-                    for ty in types {
-                        self.check_type(file, ty, &mut params);
+                VariantBody::Tuple(parameters) => {
+                    let mut seen: HashMap<&str, Pos> = HashMap::new();
+                    for parameter in parameters {
+                        if let Some(name) = parameter.name.as_deref() {
+                            if let Some(&first) = seen.get(name) {
+                                let site = Site { file, pos: first };
+                                let message = format!("Duplicate parameter {}", name);
+                                self.report(file, parameter.pos, message, Some(site));
+                            } else {
+                                seen.insert(name, parameter.pos);
+                            }
+                        }
+                        self.check_type(file, &parameter.ty, &mut params);
                     }
                 }
             }
@@ -393,6 +403,15 @@ mod tests {
         assert_eq!(
             errors(&["enum E = Dev, Staging, Dev;"]),
             vec!["ERROR: Duplicate constructor Dev (f0, line 1, col 24); first declared at line 1, col 10"]
+        );
+    }
+
+    #[test]
+    fn parameter_names_are_per_constructor() {
+        assert!(errors(&["enum E = A(x: Nat), B(x: Nat), C(Nat, x: Nat);"]).is_empty());
+        assert_eq!(
+            errors(&["enum E = A(Nat, x: Nat, x: Nat);"]),
+            vec!["ERROR: Duplicate parameter x (f0, line 1, col 25); first declared at line 1, col 17"]
         );
     }
 

@@ -1,0 +1,2 @@
+// expect: Argument hOffset is given more than once in Image
+Image("a.jpg", "A", 1, 2, "left", hOffset: 3);

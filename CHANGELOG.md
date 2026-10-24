@@ -16,7 +16,7 @@ Following the style in https://keepachangelog.com/en/1.0.0/
 - Diagnostics have the form `ERROR: <message> (<file>, line L, col C)`, with `<stdin>` for standard input. A duplicate
   also says where the name was first declared. The exit code is 0 for success, 1 if the inputs contain errors and 2
   for usage or I/O problems.
-- The standard prelude (`enum Bool = True, False;` and `enum Option<T> = None, Some(T);`, and the consts below) is
+- The standard prelude (`enum Bool = False, True;` and `enum Option<T> = None, Some(T);`, and the consts below) is
   loaded by default by `constructo check`; `--no-prelude` disables it. The library exposes it as `PRELUDE` and
   `prelude_source()`.
 - `constructo check` is silent on success. `--verbose` (`-v`) reports each input as `OK: <name>` or
@@ -61,6 +61,22 @@ Following the style in https://keepachangelog.com/en/1.0.0/
   - The grammar files, the diagrams and `syntax/grammar.md` describe consts, and `ConstRef` in the data-values grammar.
 - The standard prelude declares the consts `null`, `true` and `false`, as `const null<T>: Option<T> = None;`,
   `const true: Bool = True;` and `const false: Bool = False;`. Under `--no-prelude` they are unknown.
+- Named parameters and arguments for tuple constructors.
+  - A parameter may be given a name, as in `enum Image = Image(String, String, hOffset: Nat, alignment: String);`.
+    Unnamed parameters come first and can only be bound by position. Named parameters can be bound by position or
+    by name, and names are per constructor.
+  - An argument list has its positional arguments first, followed by named arguments in any order, as in
+    `Image("a.jpg", "A", alignment: "left", hOffset: 100)`. A parameter can be bound only once, and an unknown name
+    is an error. Names affect only the matching of arguments to parameters,
+    not the types. A mismatch for a named parameter says which argument it is
+    for.
+  - A named argument may be left out, and then takes the default value of its type: `0` for `Nat` and `Int`, `0.0`
+    for `Float`, `""` for `String`, `[]` for an array, the defaults of the fields for a record, and the first
+    constructor of an enum with the defaults of its fields. Unnamed parameters must still be supplied. It is an error
+    if the default is recursive (`Type List<T> has no default value`), if its type is not known, or if it has more
+    nodes than `--default-limit=N` allows (10,000 by default; the library option is `CheckOptions::default_limit`).
+  - The grammar files, the diagrams and `syntax/grammar.md` describe `NamedParameter` and `NamedArgument`, and
+    show that named ones come after unnamed ones.
 
 ### Changed
 

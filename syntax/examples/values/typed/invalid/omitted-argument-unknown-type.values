@@ -1,0 +1,2 @@
+// expect: Cannot work out the default value of argument content: its type is not known
+Cell("x");

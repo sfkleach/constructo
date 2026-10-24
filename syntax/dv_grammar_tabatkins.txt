@@ -86,17 +86,52 @@ Diagram(
         Terminal('('),
         Optional(
             Sequence(
-                NonTerminal('Value'),
-                ZeroOrMore(
+                Choice(0,
                     Sequence(
-                        Terminal(','),
-                        NonTerminal('Value')
+                        NonTerminal('Value'),
+                        ZeroOrMore(
+                            Sequence(
+                                Terminal(','),
+                                NonTerminal('Value')
+                            )
+                        ),
+                        Optional(
+                            Sequence(
+                                Terminal(','),
+                                NonTerminal('NamedArgument'),
+                                ZeroOrMore(
+                                    Sequence(
+                                        Terminal(','),
+                                        NonTerminal('NamedArgument')
+                                    )
+                                )
+                            )
+                        )
+                    ),
+                    Sequence(
+                        NonTerminal('NamedArgument'),
+                        ZeroOrMore(
+                            Sequence(
+                                Terminal(','),
+                                NonTerminal('NamedArgument')
+                            )
+                        )
                     )
                 ),
                 Optional(Terminal(','))
             )
         ),
         Terminal(')')
+    )
+)
+
+// NamedArgument
+Diagram(
+    Comment('NamedArgument'),
+    Sequence(
+        NonTerminal('field-name'),
+        Terminal(':'),
+        NonTerminal('Value')
     )
 )
 
