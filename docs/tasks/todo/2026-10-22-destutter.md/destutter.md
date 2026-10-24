@@ -3,7 +3,7 @@
 NOTE: This is a thought-experiment at this stage. Destuttering needs the 
 ability to textually infer names but this creates the problem that we cannot
 elaborate a Constructo document without a "stylesheet", meaning that the 
-doocument is not self-contained. 
+document is not self-contained. 
 
 - The embedded option is a way of handling it but adds a clunkiness to the syntax.
 - Another idea would be to add an option that illustrates the style
@@ -93,7 +93,7 @@ Widget {
 And that would be equivalent to:
 
 ```
-Widget {```
+Widget {
     debug: "on",
     WINDOW: Window {
         title: "Sample Konfabulator Widget",

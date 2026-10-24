@@ -11,7 +11,7 @@ lot, we want to be able to write (say) `0?`, equivalent to `Some(0)`.
 Implement a postfix operator `?` in the data-values grammar, which is a 
 syntactic shorthand for the `Some(...)` constructor.
 
-# Step 2: `?` as postfix `Option` generic type-constructor
+## Step 2: `?` as postfix `Option` generic type-constructor
 
 Implement a postfix operator `?` in the data-types grammar, which is a 
 syntactic shorthand for the `Option<...>` type constructor.

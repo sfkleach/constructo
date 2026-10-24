@@ -34,7 +34,7 @@ example.
 }
 ```
 
-This is how I would expect it would be in Constructo. First the data-value. Notie
+This is how I would expect it would be in Constructo. First the data-value. Notice
 that we don't need the data-type to write Constructo. The data-types are there to 
 help us detect mistakes and to document the form:
 
