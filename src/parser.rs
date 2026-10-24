@@ -3,7 +3,8 @@
 //! The parser stops at the first syntax error: there is no error recovery.
 
 use crate::ast::{
-    ConstDecl, EnumDecl, Field, Member, TaggedBody, Type, TypeParam, TypesFile, Value, ValueKind, Variant, VariantBody,
+    Argument, ConstDecl, EnumDecl, Field, Member, Parameter, TaggedBody, Type, TypeParam, TypesFile, Value, ValueKind,
+    Variant, VariantBody,
 };
 use crate::diagnostics::Pos;
 use crate::lexer::{lex, Tok, Token};
@@ -309,11 +310,31 @@ impl Parser {
         Ok(fields)
     }
 
-    fn tuple_body(&mut self) -> Result<Vec<Type>> {
+    /// Parses the parameters of a tuple constructor. A parameter may be preceded by its name, but once one has been
+    /// named all the later ones must be too.
+    fn tuple_body(&mut self) -> Result<Vec<Parameter>> {
         self.expect(Tok::LParen, "'('")?;
-        let mut types = Vec::new();
+        let mut params: Vec<Parameter> = Vec::new();
         while self.peek() != &Tok::RParen {
-            types.push(self.ty()?);
+            let pos = self.pos();
+            let name = match self.peek() {
+                Tok::Name(name) => {
+                    let name = name.clone();
+                    self.bump();
+                    self.expect(Tok::Colon, "':'")?;
+                    Some(name)
+                }
+                _ => None,
+            };
+            if name.is_none() && params.last().is_some_and(|p| p.name.is_some()) {
+                return Err(SyntaxError {
+                    pos,
+                    message: "Unnamed parameter after a named parameter".to_string(),
+                    context: self.context.clone(),
+                });
+            }
+            let ty = self.ty()?;
+            params.push(Parameter { name, pos, ty });
             match self.peek() {
                 Tok::Comma => self.bump(),
                 Tok::RParen => {}
@@ -321,7 +342,7 @@ impl Parser {
             }
         }
         self.expect(Tok::RParen, "')'")?;
-        Ok(types)
+        Ok(params)
     }
 
     fn ty(&mut self) -> Result<Type> {
@@ -443,9 +464,39 @@ impl Parser {
         Ok(members)
     }
 
-    fn tuple(&mut self) -> Result<Vec<Value>> {
+    /// Parses the arguments of a tuple constructor. A lowercase name followed by a colon names the parameter that the
+    /// argument is for. Positional arguments may not follow named ones.
+    fn tuple(&mut self) -> Result<Vec<Argument>> {
         self.expect(Tok::LParen, "'('")?;
-        self.value_list(Tok::RParen, "')'")
+        let mut args: Vec<Argument> = Vec::new();
+        while self.peek() != &Tok::RParen {
+            let pos = self.pos();
+            let name = match (self.peek(), self.tokens.get(self.index + 1).map(|t| &t.tok)) {
+                (Tok::Name(name), Some(Tok::Colon)) => {
+                    let name = name.clone();
+                    self.bump();
+                    self.bump();
+                    Some(name)
+                }
+                _ => None,
+            };
+            if name.is_none() && args.last().is_some_and(|a| a.name.is_some()) {
+                return Err(SyntaxError {
+                    pos,
+                    message: "Positional argument after a named argument".to_string(),
+                    context: self.context.clone(),
+                });
+            }
+            let value = self.value()?;
+            args.push(Argument { name, pos, value });
+            match self.peek() {
+                Tok::Comma => self.bump(),
+                Tok::RParen => {}
+                _ => return self.error("comma or ')'"),
+            }
+        }
+        self.expect(Tok::RParen, "')'")?;
+        Ok(args)
     }
 
     fn array(&mut self) -> Result<Vec<Value>> {
@@ -493,6 +544,49 @@ mod tests {
         assert_eq!(parse("// Nothing here.\n").unwrap(), TypesFile::default());
         assert!(parse("enum A = X(Int,), Y {a: Int,},;").is_ok());
         assert!(parse("enum A = Ping(), Pong {};").is_ok());
+    }
+
+    #[test]
+    fn parses_named_parameters_after_unnamed_ones() {
+        let decls = parse("enum A = X(Int, a: Int, b: [Int],);").unwrap().enums;
+        let VariantBody::Tuple(params) = &decls[0].variants[0].body else {
+            panic!("expected a tuple");
+        };
+        let names: Vec<Option<&str>> = params.iter().map(|p| p.name.as_deref()).collect();
+        assert_eq!(names, vec![None, Some("a"), Some("b")]);
+    }
+
+    #[test]
+    fn rejects_malformed_parameter_lists() {
+        assert_eq!(
+            err("enum A = X(a: Int, Int);"),
+            (1, 20, "Unnamed parameter after a named parameter".to_string())
+        );
+        assert_eq!(err("enum A = X(a Int);").2, "Expected ':'");
+        assert_eq!(err("enum A = X(const: Int);").2, "Expected type");
+    }
+
+    #[test]
+    fn parses_named_arguments_after_positional_ones() {
+        let values = parse_values("X(1, a: 2, b: c,)").unwrap();
+        let ValueKind::Tagged {
+            body: Some(TaggedBody::Tuple(args)),
+            ..
+        } = &values[0].kind
+        else {
+            panic!("expected a tuple");
+        };
+        let names: Vec<Option<&str>> = args.iter().map(|a| a.name.as_deref()).collect();
+        assert_eq!(names, vec![None, Some("a"), Some("b")]);
+        // The name before a colon is not a const reference, but the value after it can be.
+        assert!(matches!(&args[2].value.kind, ValueKind::Tagged { name, body: None } if name == "c"));
+    }
+
+    #[test]
+    fn rejects_positional_arguments_after_named_ones() {
+        let e = parse_values("X(a: 1, 2)").unwrap_err();
+        assert_eq!((e.pos.line, e.pos.col), (1, 9));
+        assert_eq!(e.message, "Positional argument after a named argument");
     }
 
     #[test]

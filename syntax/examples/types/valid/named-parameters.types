@@ -1,0 +1,9 @@
+// Unnamed parameters come first and are bound by position; named ones may be bound by position or by name.
+enum Image = Image(
+    String,
+    String,
+    hOffset: Nat,
+    vOffset: Nat,
+    alignment: String
+);
+enum Span = Span(start: Nat, end: Nat), Empty();

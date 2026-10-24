@@ -1,0 +1,2 @@
+// expect: Unknown argument colour in Image
+Image("a.jpg", "A", colour: "red", hOffset: 1, vOffset: 2, alignment: "left");

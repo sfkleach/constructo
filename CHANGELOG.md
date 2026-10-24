@@ -61,6 +61,15 @@ Following the style in https://keepachangelog.com/en/1.0.0/
   - The grammar files, the diagrams and `syntax/grammar.md` describe consts, and `ConstRef` in the data-values grammar.
 - The standard prelude declares the consts `null`, `true` and `false`, as `const null<T>: Option<T> = None;`,
   `const true: Bool = True;` and `const false: Bool = False;`. Under `--no-prelude` they are unknown.
+- Named parameters and arguments for tuple constructors.
+  - A parameter may be given a name, as in `enum Image = Image(String, String, hOffset: Nat, alignment: String);`.
+    Unnamed parameters come first and can only be bound by position. Named parameters can be bound by position or
+    by name, and names are per constructor.
+  - An argument list has its positional arguments first, followed by named arguments in any order, as in
+    `Image("a.jpg", "A", alignment: "left", hOffset: 100)`. A parameter can be bound only once, every parameter must
+    still be supplied, and an unknown name is an error. Names affect only the matching of arguments to parameters,
+    not the types.
+  - The grammar files, the diagrams and `syntax/grammar.md` describe `Parameter` and `Argument`.
 
 ### Changed
 

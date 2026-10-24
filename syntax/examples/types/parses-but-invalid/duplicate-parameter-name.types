@@ -1,0 +1,1 @@
+enum Span = Span(start: Nat, start: Nat);

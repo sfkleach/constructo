@@ -6,7 +6,10 @@
 //!
 //! The errors are reported at the innermost term that fails. Checking a top-level value stops at its first error.
 
-use crate::ast::{ConstDecl, EnumDecl, Field, TaggedBody, Type, TypeParam, Value, ValueKind, Variant, VariantBody};
+use crate::ast::{
+    Argument, ConstDecl, EnumDecl, Field, Parameter, TaggedBody, Type, TypeParam, Value, ValueKind, Variant,
+    VariantBody,
+};
 use crate::diagnostics::Pos;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -638,19 +641,13 @@ impl Checker<'_, '_> {
                 self.check_members(pos, name, members, &fields)
             }
             (VariantBody::Record(_), _) => error(pos, format!("Constructor {} takes a record", name)),
-            (VariantBody::Tuple(types), Some(TaggedBody::Tuple(values))) => {
-                if types.len() != values.len() {
-                    let message = format!(
-                        "Constructor {} takes {} value(s) but has {}",
-                        name,
-                        types.len(),
-                        values.len()
-                    );
-                    return error(pos, message);
-                }
-                for (ty, value) in types.iter().zip(values) {
-                    let ty = instantiate(ty, &decl.params, &args);
-                    self.check(value, &ty)?;
+            (VariantBody::Tuple(parameters), Some(TaggedBody::Tuple(arguments))) => {
+                let bound = bind_arguments(pos, name, parameters, arguments)?;
+                for (argument, index) in arguments.iter().zip(bound) {
+                    let ty = instantiate(&parameters[index].ty, &decl.params, &args);
+                    let parameter = parameters[index].name.as_deref();
+                    self.check(&argument.value, &ty)
+                        .map_err(|e| name_parameter(e, argument.value.pos, parameter))?;
                 }
                 Ok(())
             }
@@ -689,6 +686,77 @@ impl Checker<'_, '_> {
         }
         Ok(())
     }
+}
+
+/// Adds the name of the parameter to a mismatch that is for the argument itself, giving "Expected Nat for argument x
+/// but found String". A mismatch somewhere inside the argument is left alone, as it is not about the parameter.
+fn name_parameter(mut error: TypeError, argument_pos: Pos, parameter: Option<&str>) -> TypeError {
+    if let (Some(name), true) = (parameter, error.pos == argument_pos) {
+        if let Some(rest) = error.message.strip_prefix("Expected ") {
+            if let Some((expected, found)) = rest.split_once(" but found ") {
+                error.message = format!("Expected {} for argument {} but found {}", expected, name, found);
+            }
+        }
+    }
+    error
+}
+
+/// Matches the arguments of a tuple constructor to its parameters, returning the index of the parameter that each
+/// argument is for. Every parameter must be bound exactly once.
+fn bind_arguments(pos: Pos, constructor: &str, parameters: &[Parameter], arguments: &[Argument]) -> Result<Vec<usize>> {
+    let mut bound: Vec<Option<usize>> = vec![None; parameters.len()];
+    let mut targets = Vec::with_capacity(arguments.len());
+    for (index, argument) in arguments.iter().enumerate() {
+        let target = match &argument.name {
+            None if index < parameters.len() => index,
+            None => {
+                let message = format!(
+                    "Constructor {} takes {} value(s) but has {}",
+                    constructor,
+                    parameters.len(),
+                    arguments.len()
+                );
+                return error(argument.pos, message);
+            }
+            Some(name) => match parameters.iter().position(|p| p.name.as_deref() == Some(name)) {
+                Some(target) => target,
+                None => return error(argument.pos, format!("Unknown argument {} in {}", name, constructor)),
+            },
+        };
+        if bound[target].is_some() {
+            let name = parameters[target].name.as_deref();
+            let message = match name {
+                Some(name) => format!("Argument {} is given more than once in {}", name, constructor),
+                None => format!("Argument {} is given more than once in {}", target + 1, constructor),
+            };
+            return error(argument.pos, message);
+        }
+        bound[target] = Some(index);
+        targets.push(target);
+    }
+    // An unnamed parameter can only be bound by position, so leaving one out is a count error. Any other parameter is
+    // reported by name.
+    let unbound = |named: bool| {
+        parameters
+            .iter()
+            .zip(&bound)
+            .find(|(parameter, binding)| binding.is_none() && parameter.name.is_some() == named)
+            .map(|(parameter, _)| parameter)
+    };
+    if unbound(false).is_some() {
+        let message = format!(
+            "Constructor {} takes {} value(s) but has {}",
+            constructor,
+            parameters.len(),
+            arguments.len()
+        );
+        return error(pos, message);
+    }
+    if let Some(parameter) = unbound(true) {
+        let name = parameter.name.as_deref().expect("the parameter is named");
+        return error(pos, format!("Missing argument for {} in {}", name, constructor));
+    }
+    Ok(targets)
 }
 
 fn instantiate_fields(fields: &[Field], params: &[TypeParam], args: &[Ty]) -> Vec<(String, Ty)> {
@@ -769,6 +837,49 @@ mod tests {
         ];
         for (value, expected) in cases {
             assert_eq!(errors(SHAPES, value, true), vec![expected.to_string()], "{}", value);
+        }
+    }
+
+    const IMAGES: &str = "enum Image = Image(String, hOffset: Nat, vOffset: Nat), Span(start: Nat, end: Nat);";
+
+    #[test]
+    fn arguments_are_bound_by_position_or_by_name() {
+        let values = "Image(\"a\", 1, 2); Image(\"a\", vOffset: 2, hOffset: 1); Image(\"a\", 1, vOffset: 2); \
+                      Span(end: 2, start: 1); Span(1, end: 2)";
+        assert_eq!(errors(IMAGES, values, true), Vec::<String>::new());
+    }
+
+    #[test]
+    fn arguments_that_cannot_be_bound_are_errors() {
+        let cases = [
+            (
+                "Span(start: 1, start: 2)",
+                "1:16 Argument start is given more than once in Span",
+            ),
+            (
+                "Span(1, 2, start: 3)",
+                "1:12 Argument start is given more than once in Span",
+            ),
+            ("Span(1, 2, 3)", "1:12 Constructor Span takes 2 value(s) but has 3"),
+            ("Span(start: 1, stop: 2)", "1:16 Unknown argument stop in Span"),
+            ("Span(start: 1)", "1:1 Missing argument for end in Span"),
+            (
+                "Image(hOffset: 1, vOffset: 2)",
+                "1:1 Constructor Image takes 3 value(s) but has 2",
+            ),
+            (
+                "Image(src: \"a\", hOffset: 1, vOffset: 2)",
+                "1:7 Unknown argument src in Image",
+            ),
+            (
+                "Span(start: 1, end: \"x\")",
+                "1:21 Expected Nat for argument end but found String",
+            ),
+            ("Span(1, \"x\")", "1:9 Expected Nat for argument end but found String"),
+            ("Image([1], 1, 2)", "1:7 Expected String but found an array"),
+        ];
+        for (value, expected) in cases {
+            assert_eq!(errors(IMAGES, value, true), vec![expected.to_string()], "{}", value);
         }
     }
 
