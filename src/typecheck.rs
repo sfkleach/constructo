@@ -34,6 +34,9 @@ fn error<T>(pos: Pos, message: impl Into<String>) -> Result<T> {
 /// The declarations that are in scope for a values file.
 pub struct Env<'a> {
     enums: HashMap<&'a str, &'a EnumDecl>,
+    /// Every enum that is declared, whether or not a values file can see it yet. A type can refer to an enum that is
+    /// declared later, and the default of that type has to be worked out from it.
+    declared: HashMap<&'a str, &'a EnumDecl>,
     constructors: HashMap<&'a str, (&'a EnumDecl, &'a Variant)>,
     consts: HashMap<&'a str, &'a ConstDecl>,
     /// The types of the consts that were declared without one, once they have been inferred.
@@ -58,6 +61,7 @@ impl<'a> Env<'a> {
     pub fn new(decls: impl IntoIterator<Item = &'a EnumDecl>, consts: impl IntoIterator<Item = &'a ConstDecl>) -> Self {
         let mut env = Env {
             enums: HashMap::new(),
+            declared: HashMap::new(),
             constructors: HashMap::new(),
             consts: HashMap::new(),
             inferred: HashMap::new(),
@@ -68,6 +72,7 @@ impl<'a> Env<'a> {
         }
         for decl in decls {
             env.enums.entry(decl.name.as_str()).or_insert(decl);
+            env.declared.entry(decl.name.as_str()).or_insert(decl);
             for variant in &decl.variants {
                 env.constructors.entry(variant.name.as_str()).or_insert((decl, variant));
             }
@@ -75,10 +80,12 @@ impl<'a> Env<'a> {
         env
     }
 
-    /// Gives this scope the inferred types of another, which has the consts that this one has and possibly more.
+    /// Gives this scope the inferred types, the default limit and the declared enums of another, which has the consts
+    /// and enums that this one has and possibly more. The scope still only sees its own constructors.
     pub fn with_inferred_from(mut self, other: &Env<'a>) -> Self {
         self.inferred = other.inferred.clone();
         self.default_limit = other.default_limit;
+        self.declared = other.declared.clone();
         self
     }
 
@@ -777,7 +784,10 @@ impl Checker<'_, '_> {
                     if path.contains(name) {
                         return Err(NoDefault::Recursive(ty.clone()));
                     }
-                    let decl = self.env.enums[name.as_str()];
+                    // Validation has checked that every type that is used is declared, so this is only a defensive check.
+                    let Some(&decl) = self.env.declared.get(name.as_str()) else {
+                        return Err(NoDefault::Unknown);
+                    };
                     // Validation does not insist that an enum has a constructor, and one that has none has no default.
                     let Some(first) = decl.variants.first() else {
                         return Err(NoDefault::Recursive(ty.clone()));
