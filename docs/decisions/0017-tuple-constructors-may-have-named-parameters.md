@@ -15,8 +15,8 @@ arguments refer to them, and what the names mean to the type system.
 - An argument may be written `name: value`. Positional arguments come first and a positional argument after a named
   one is a syntax error. Named arguments may be in any order.
 - A named argument must name a parameter of the constructor, and each parameter can be bound only once, whether by
-  position or by name. For now every parameter must be supplied. A missing named parameter is reported as
-  `Missing argument for <name>`, and any other shortfall keeps the existing count message.
+  position or by name. A named parameter may be left out (decision 18), and an unnamed one must be supplied, or
+  the count message `Constructor X takes N value(s) but has M` is reported.
 - The parser tells a name from a const reference by looking one token ahead for the colon, as a lowercase name
   followed by a colon cannot otherwise appear in an argument list.
 - Parameter names are not part of the type. They only decide which parameter an argument is for, so widening and
@@ -29,7 +29,7 @@ arguments refer to them, and what the names mean to the type system.
 - The order of the parameters still matters, because arguments may be given by position.
 - A constructor can have more than one way to be written, so tools that compare values textually must match
   arguments to parameters first.
-- Making named arguments optional is a separate step.
+- Leaving out a named argument is the subject of decision 18.
 
 ## Options and Outcome
 

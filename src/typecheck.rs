@@ -38,6 +38,8 @@ pub struct Env<'a> {
     consts: HashMap<&'a str, &'a ConstDecl>,
     /// The types of the consts that were declared without one, once they have been inferred.
     inferred: HashMap<&'a str, Scheme>,
+    /// The most nodes that the default value of an omitted argument may have.
+    default_limit: usize,
 }
 
 /// The inferred type of a const: a type in which `Ty::Gen(i)` stands for the `i`th type that the value left open. Each
@@ -59,6 +61,7 @@ impl<'a> Env<'a> {
             constructors: HashMap::new(),
             consts: HashMap::new(),
             inferred: HashMap::new(),
+            default_limit: DEFAULT_VALUE_LIMIT,
         };
         for constant in consts {
             env.consts.entry(constant.name.as_str()).or_insert(constant);
@@ -75,6 +78,13 @@ impl<'a> Env<'a> {
     /// Gives this scope the inferred types of another, which has the consts that this one has and possibly more.
     pub fn with_inferred_from(mut self, other: &Env<'a>) -> Self {
         self.inferred = other.inferred.clone();
+        self.default_limit = other.default_limit;
+        self
+    }
+
+    /// Sets the most nodes that the default value of an omitted argument may have.
+    pub fn with_default_limit(mut self, limit: usize) -> Self {
+        self.default_limit = limit;
         self
     }
 
@@ -99,6 +109,11 @@ pub fn check_value(env: &Env, widening: bool, value: &Value) -> Result<()> {
 /// The default for the most nodes that the inferred type of a const may have. Types share their parts, so a short value
 /// can have a type that is exponentially large when written out, and generalising it would take as long.
 pub const DEFAULT_INFER_LIMIT: usize = 10_000;
+
+/// The default for the most nodes that the default value of an omitted argument may have. A default is the first
+/// constructor of an enum, filled in all the way down, so a few short declarations can make one that doubles in size
+/// at each level.
+pub const DEFAULT_VALUE_LIMIT: usize = 10_000;
 
 /// Checks the consts of a run, each given with the index of its source, and returns the errors ordered by source and
 /// position. A const without a declared type has its type inferred from its value, and the consts are taken in
@@ -642,12 +657,22 @@ impl Checker<'_, '_> {
             }
             (VariantBody::Record(_), _) => error(pos, format!("Constructor {} takes a record", name)),
             (VariantBody::Tuple(parameters), Some(TaggedBody::Tuple(arguments))) => {
-                let bound = bind_arguments(pos, name, parameters, arguments)?;
+                let (bound, omitted) = bind_arguments(pos, name, parameters, arguments)?;
                 for (argument, index) in arguments.iter().zip(bound) {
                     let ty = instantiate(&parameters[index].ty, &decl.params, &args);
                     let parameter = parameters[index].name.as_deref();
                     self.check(&argument.value, &ty)
                         .map_err(|e| name_parameter(e, argument.value.pos, parameter))?;
+                }
+                // The omitted arguments are checked last, so that the other arguments have fixed the types as far as
+                // they can.
+                for index in omitted {
+                    let ty = instantiate(&parameters[index].ty, &decl.params, &args);
+                    let parameter = parameters[index]
+                        .name
+                        .as_deref()
+                        .expect("an omitted parameter is named");
+                    self.check_default(pos, parameter, &ty)?;
                 }
                 Ok(())
             }
@@ -686,6 +711,95 @@ impl Checker<'_, '_> {
         }
         Ok(())
     }
+
+    /// Checks that an omitted argument of the given type has a default value that can be used. The default is the
+    /// zero of a primitive type, the empty array, the record of the defaults of the fields, and the first constructor
+    /// of an enum with the defaults of its fields. Nothing is built: the nodes are only counted against the limit.
+    fn check_default(&self, pos: Pos, parameter: &str, ty: &Ty) -> Result<()> {
+        let limit = self.env.default_limit;
+        let mut remaining = limit;
+        match self.default_nodes(ty, &mut Vec::new(), &mut remaining) {
+            Ok(()) => Ok(()),
+            Err(NoDefault::Unknown) => {
+                let message = format!(
+                    "Cannot work out the default value of argument {}: its type is not known",
+                    parameter
+                );
+                error(pos, message)
+            }
+            Err(NoDefault::Recursive(found)) => error(pos, format!("Type {} has no default value", self.show(&found))),
+            Err(NoDefault::TooLarge) => {
+                let message = format!(
+                    "The default value of {} has more than {} nodes, which is too large; give argument {} or raise \
+                     --default-limit",
+                    self.show(ty),
+                    limit,
+                    parameter
+                );
+                error(pos, message)
+            }
+        }
+    }
+
+    /// Counts the nodes of the default value of a type, taking them off `remaining`. The `path` has the enums that
+    /// are being expanded, to catch a type that contains itself.
+    fn default_nodes(
+        &self,
+        ty: &Ty,
+        path: &mut Vec<String>,
+        remaining: &mut usize,
+    ) -> std::result::Result<(), NoDefault> {
+        let ty = self.shallow(ty);
+        if matches!(ty, Ty::Var(_) | Ty::Param(_) | Ty::Gen(_)) {
+            return Err(NoDefault::Unknown);
+        }
+        if *remaining == 0 {
+            return Err(NoDefault::TooLarge);
+        }
+        *remaining -= 1;
+        match &ty {
+            Ty::Record(fields) => {
+                for (_, field) in fields.iter() {
+                    self.default_nodes(field, path, remaining)?;
+                }
+                Ok(())
+            }
+            Ty::Enum(name, args) => {
+                if path.contains(name) {
+                    return Err(NoDefault::Recursive(ty.clone()));
+                }
+                let decl = self.env.enums[name.as_str()];
+                // Validation does not insist that an enum has a constructor, and one that has none has no default.
+                let Some(first) = decl.variants.first() else {
+                    return Err(NoDefault::Recursive(ty.clone()));
+                };
+                path.push(name.clone());
+                let types: Vec<&Type> = match &first.body {
+                    VariantBody::Unit => Vec::new(),
+                    VariantBody::Record(fields) => fields.iter().map(|f| &f.ty).collect(),
+                    VariantBody::Tuple(parameters) => parameters.iter().map(|p| &p.ty).collect(),
+                };
+                for declared in types {
+                    let field = instantiate(declared, &decl.params, args);
+                    self.default_nodes(&field, path, remaining)?;
+                }
+                path.pop();
+                Ok(())
+            }
+            // The primitive types and the arrays have a default with no parts.
+            _ => Ok(()),
+        }
+    }
+}
+
+/// Why a type has no default value that can be used.
+enum NoDefault {
+    /// The type was met again while working out its own default, so the expansion would never end.
+    Recursive(Ty),
+    /// The expansion has more nodes than the limit.
+    TooLarge,
+    /// The type, or a part of it, is not known.
+    Unknown,
 }
 
 /// Adds the name of the parameter to a mismatch that is for the argument itself, giving "Expected Nat for argument x
@@ -702,8 +816,14 @@ fn name_parameter(mut error: TypeError, argument_pos: Pos, parameter: Option<&st
 }
 
 /// Matches the arguments of a tuple constructor to its parameters, returning the index of the parameter that each
-/// argument is for. Every parameter must be bound exactly once.
-fn bind_arguments(pos: Pos, constructor: &str, parameters: &[Parameter], arguments: &[Argument]) -> Result<Vec<usize>> {
+/// argument is for, and the indexes of the named parameters that no argument is for. A parameter can be bound at most
+/// once.
+fn bind_arguments(
+    pos: Pos,
+    constructor: &str,
+    parameters: &[Parameter],
+    arguments: &[Argument],
+) -> Result<(Vec<usize>, Vec<usize>)> {
     let mut bound: Vec<Option<usize>> = vec![None; parameters.len()];
     let mut targets = Vec::with_capacity(arguments.len());
     for (index, argument) in arguments.iter().enumerate() {
@@ -734,16 +854,10 @@ fn bind_arguments(pos: Pos, constructor: &str, parameters: &[Parameter], argumen
         bound[target] = Some(index);
         targets.push(target);
     }
-    // An unnamed parameter can only be bound by position, so leaving one out is a count error. Any other parameter is
-    // reported by name.
-    let unbound = |named: bool| {
-        parameters
-            .iter()
-            .zip(&bound)
-            .find(|(parameter, binding)| binding.is_none() && parameter.name.is_some() == named)
-            .map(|(parameter, _)| parameter)
-    };
-    if unbound(false).is_some() {
+    // An unnamed parameter can only be bound by position, so leaving one out is a count error. A named parameter that
+    // is left out takes the default value of its type.
+    let unbound: Vec<usize> = (0..parameters.len()).filter(|&i| bound[i].is_none()).collect();
+    if unbound.iter().any(|&i| parameters[i].name.is_none()) {
         let message = format!(
             "Constructor {} takes {} value(s) but has {}",
             constructor,
@@ -752,11 +866,7 @@ fn bind_arguments(pos: Pos, constructor: &str, parameters: &[Parameter], argumen
         );
         return error(pos, message);
     }
-    if let Some(parameter) = unbound(true) {
-        let name = parameter.name.as_deref().expect("the parameter is named");
-        return error(pos, format!("Missing argument for {} in {}", name, constructor));
-    }
-    Ok(targets)
+    Ok((targets, unbound))
 }
 
 fn instantiate_fields(fields: &[Field], params: &[TypeParam], args: &[Ty]) -> Vec<(String, Ty)> {
@@ -862,7 +972,6 @@ mod tests {
             ),
             ("Span(1, 2, 3)", "1:12 Constructor Span takes 2 value(s) but has 3"),
             ("Span(start: 1, stop: 2)", "1:16 Unknown argument stop in Span"),
-            ("Span(start: 1)", "1:1 Missing argument for end in Span"),
             (
                 "Image(hOffset: 1, vOffset: 2)",
                 "1:1 Constructor Image takes 3 value(s) but has 2",
@@ -881,6 +990,84 @@ mod tests {
         for (value, expected) in cases {
             assert_eq!(errors(IMAGES, value, true), vec![expected.to_string()], "{}", value);
         }
+    }
+
+    #[test]
+    fn named_arguments_may_be_omitted() {
+        assert_eq!(
+            errors(IMAGES, "Span(); Span(1); Span(end: 2); Image(\"a\", vOffset: 2)", true),
+            Vec::<String>::new()
+        );
+        // An unnamed parameter cannot be left out.
+        assert_eq!(
+            errors(IMAGES, "Image()", true),
+            vec!["1:1 Constructor Image takes 3 value(s) but has 0"]
+        );
+    }
+
+    const DEFAULTS: &str = "enum Bool = False, True; enum Option<T> = None, Some(T); \
+                            enum Mixed = Mixed(a: Nat, b: Int, c: Float, d: String, e: [Nat], f: { x: Bool, y: Option<Nat> }); \
+                            enum Box<T> = Box(label: String, content: T); \
+                            enum Holder = Holder(b: Box<Nat>);";
+
+    #[test]
+    fn every_type_has_a_default() {
+        assert_eq!(
+            errors(DEFAULTS, "Mixed(); Mixed(1, e: [2]); Holder(); Box(\"x\", 1)", true),
+            Vec::<String>::new()
+        );
+        assert_eq!(errors(DEFAULTS, "Holder(Box(\"x\"))", true), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_default_needs_its_type_to_be_known() {
+        assert_eq!(
+            errors(DEFAULTS, "Box(\"x\")", true),
+            vec!["1:1 Cannot work out the default value of argument content: its type is not known"]
+        );
+    }
+
+    #[test]
+    fn a_recursive_default_is_an_error_at_the_omission() {
+        let list = "enum List<T> = Cons { head: T, tail: List<T> }, Nil; enum Holder = Holder(items: List<Nat>); ";
+        assert_eq!(
+            errors(list, "Holder(Nil); Holder()", true),
+            vec!["1:14 Type List<Nat> has no default value"]
+        );
+        let nil_first = "enum List<T> = Nil, Cons { head: T, tail: List<T> }; enum Holder = Holder(items: List<Nat>); ";
+        assert_eq!(errors(nil_first, "Holder()", true), Vec::<String>::new());
+        let mutual = "enum A = A(b: B); enum B = B(a: A); enum Holder = Holder(x: A);";
+        assert_eq!(
+            errors(mutual, "Holder()", true),
+            vec!["1:1 Type A has no default value"]
+        );
+    }
+
+    #[test]
+    fn a_huge_default_is_refused_but_a_small_one_is_not() {
+        let mut types = String::from("enum E0 = E0; ");
+        for n in 1..=15 {
+            types.push_str(&format!("enum E{n} = E{n}(a: E{p}, b: E{p}); ", n = n, p = n - 1));
+        }
+        types.push_str("enum Holder = Holder(x: E15, y: E3);");
+        let file = parse(&types).unwrap();
+        let check = |limit: usize| {
+            let env = Env::new(&file.enums, &file.consts).with_default_limit(limit);
+            check_value(&env, true, &parse_values("Holder()").unwrap()[0])
+                .err()
+                .map(|e| e.message)
+        };
+        assert_eq!(
+            check(DEFAULT_VALUE_LIMIT),
+            Some(
+                "The default value of E15 has more than 10000 nodes, which is too large; give argument x or raise \
+                 --default-limit"
+                    .to_string()
+            )
+        );
+        // The limit applies to each omitted argument, and E15 has 2^16 - 1 nodes.
+        assert_eq!(check(65_535), None);
+        assert!(check(65_534).is_some());
     }
 
     #[test]

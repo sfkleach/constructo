@@ -14,6 +14,8 @@ treats it like any other input. There is no special case in the parser or the ch
 The prelude text uses the comma-separated syntax of the grammar, `enum Bool = True, False;`. The task document
 originally showed `|` between variants, which is not part of the grammar, so the task document was corrected.
 
+Note: decision 18 later reordered the variants to `enum Bool = False, True;`.
+
 ## Consequences
 
 - Redeclaring `Bool`, `Option`, `True`, `False`, `None` or `Some` is a duplicate error that points at
