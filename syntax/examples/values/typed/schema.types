@@ -10,3 +10,4 @@ const Unit: Shape = Circle { radius: 1.0 };
 const max_width: Float = 100.0;
 const default_radius = 2.5;
 const no_tags = [];
+enum Image = Image(String, String, hOffset: Nat, vOffset: Nat, alignment: String);

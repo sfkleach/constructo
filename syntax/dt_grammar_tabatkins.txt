@@ -125,11 +125,11 @@ Diagram(
         Terminal('('),
         Optional(
             Sequence(
-                NonTerminal('Type'),
+                NonTerminal('Parameter'),
                 ZeroOrMore(
                     Sequence(
                         Terminal(','),
-                        NonTerminal('Type')
+                        NonTerminal('Parameter')
                     )
                 ),
                 Optional(Terminal(','))
@@ -216,5 +216,19 @@ Diagram(
         Terminal('//'),
         ZeroOrMore(NonTerminal('any-char-except-newline')),
         NonTerminal('newline')
+    )
+)
+
+// Parameter
+Diagram(
+    Comment('Parameter'),
+    Sequence(
+        Optional(
+            Sequence(
+                NonTerminal('param-name'),
+                Terminal(':')
+            )
+        ),
+        NonTerminal('Type')
     )
 )

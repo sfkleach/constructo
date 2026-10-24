@@ -29,9 +29,9 @@ unit_circle
 ```
 
 The two grammars are given below as railroad diagrams. Both use `//` line comments, and the same `TypeName`
-(uppercase initial) and `field-name` (lowercase or underscore initial) identifiers. The sources of the diagrams are
-`dt_grammar_tabatkins.txt` and `dv_grammar_tabatkins.txt`, and the diagrams are built with `just build`. Example
-files for each grammar are in [examples/](examples/).
+(uppercase initial) and `field-name` (lowercase or underscore initial) identifiers. A `param-name` has the same shape
+as a `field-name`. The sources of the diagrams are `dt_grammar_tabatkins.txt` and `dv_grammar_tabatkins.txt`, and the
+diagrams are built with `just build`. Example files for each grammar are in [examples/](examples/).
 
 ## Data-types grammar
 

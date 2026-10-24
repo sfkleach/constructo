@@ -86,11 +86,11 @@ Diagram(
         Terminal('('),
         Optional(
             Sequence(
-                NonTerminal('Value'),
+                NonTerminal('Argument'),
                 ZeroOrMore(
                     Sequence(
                         Terminal(','),
-                        NonTerminal('Value')
+                        NonTerminal('Argument')
                     )
                 ),
                 Optional(Terminal(','))
@@ -213,5 +213,19 @@ Diagram(
         Terminal('//'),
         ZeroOrMore(NonTerminal('any-char-except-newline')),
         NonTerminal('newline')
+    )
+)
+
+// Argument
+Diagram(
+    Comment('Argument'),
+    Sequence(
+        Optional(
+            Sequence(
+                NonTerminal('param-name'),
+                Terminal(':')
+            )
+        ),
+        NonTerminal('Value')
     )
 )
