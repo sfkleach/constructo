@@ -261,7 +261,6 @@ fn type_check_values(
             Parsed::Values(_) if stopped => outcomes[index] = Outcome::NotChecked,
             Parsed::Values(values) => {
                 let env = Env::new(visible_enums.iter().copied(), visible_consts.iter().copied())
-                    .with_default_limit(options.default_limit)
                     .with_inferred_from(&everything);
                 for value in values {
                     if let Err(e) = check_value(&env, options.widening, value) {
@@ -445,6 +444,16 @@ mod tests {
             ..CheckOptions::default()
         };
         assert!(check_sources_with(&sources(&["Circle { radius: 3.0 }"]), &options).is_ok());
+    }
+
+    #[test]
+    fn the_default_of_a_type_can_use_an_enum_that_is_declared_later() {
+        let report = check_sources(&sources(&[
+            "enum Holder = Holder(x: Later);",
+            "Holder()",
+            "enum Later = Ready;",
+        ]));
+        assert!(report.is_ok(), "{:?}", report.diagnostics);
     }
 
     #[test]

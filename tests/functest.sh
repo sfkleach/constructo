@@ -294,6 +294,16 @@ trap 'rm -f "$chain" "$doubling" "$doubled_values" "$long_chain"' EXIT
     for i in $(seq 1 50000); do echo "enum E$i = E$i(a: E$(( i - 1 )));"; done
     echo "enum Holder = Holder(x: E50000);"
 } > "$long_chain"
+# The default of a type may need an enum that is declared after the values file, which cannot name it itself.
+forward_types="$(mktemp)"
+forward_later="$(mktemp)"
+forward_values="$(mktemp)"
+trap 'rm -f "$chain" "$doubling" "$doubled_values" "$long_chain" "$forward_types" "$forward_later" "$forward_values"' EXIT
+echo "enum Holder = Holder(x: Later);" > "$forward_types"
+echo "enum Later = Ready;" > "$forward_later"
+echo "Holder();" > "$forward_values"
+expect_exit "the default may use an enum that is declared after the values" 0 \
+    check "$forward_types" "$forward_values" "$forward_later"
 expect_exit "a long chain of defaults is refused, not a crash" 1 check "$long_chain" "$doubled_values"
 expect_exit "a long chain of defaults is accepted within the limit" 0 check --default-limit=1000000 "$long_chain" "$doubled_values"
 echo ""
