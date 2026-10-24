@@ -771,16 +771,19 @@ impl Checker<'_, '_> {
     fn default_nodes(&self, ty: &Ty, remaining: &mut usize) -> std::result::Result<(), NoDefault> {
         enum Step {
             Visit(Ty),
-            /// The end of the expansion of an enum, which takes its name off the path.
+            /// The end of the expansion of an enum, which takes the type off the path.
             Leave(String),
         }
-        // The enums that are being expanded, to catch a type that contains itself.
+        // The types that are being expanded, as they are written, to catch a type that contains itself. The type
+        // arguments are part of it, so `Box<Box<Nat>>` containing `Box<Nat>` is not a cycle, while a type whose
+        // arguments keep changing is stopped by the limit. A very long type is written out in part only, and a
+        // collision between two of those is a harmless error: such a type is far too large to have a default anyway.
         let mut path: HashSet<String> = HashSet::new();
         let mut stack = vec![Step::Visit(ty.clone())];
         while let Some(step) = stack.pop() {
             let ty = match step {
-                Step::Leave(name) => {
-                    path.remove(&name);
+                Step::Leave(key) => {
+                    path.remove(&key);
                     continue;
                 }
                 Step::Visit(ty) => self.shallow(&ty),
@@ -798,7 +801,8 @@ impl Checker<'_, '_> {
                     stack.extend(fields.iter().rev().map(|(_, field)| Step::Visit(field.clone())));
                 }
                 Ty::Enum(name, args) => {
-                    if path.contains(name) {
+                    let key = self.show(&ty);
+                    if path.contains(&key) {
                         return Err(NoDefault::Recursive(ty.clone()));
                     }
                     // Validation has checked that every type that is used is declared, so this is only a defensive check.
@@ -809,8 +813,8 @@ impl Checker<'_, '_> {
                     let Some(first) = decl.variants.first() else {
                         return Err(NoDefault::Recursive(ty.clone()));
                     };
-                    path.insert(name.clone());
-                    stack.push(Step::Leave(name.clone()));
+                    path.insert(key.clone());
+                    stack.push(Step::Leave(key));
                     let types: Vec<&Type> = match &first.body {
                         VariantBody::Unit => Vec::new(),
                         VariantBody::Record(fields) => fields.iter().map(|f| &f.ty).collect(),
@@ -1072,6 +1076,22 @@ mod tests {
         assert_eq!(
             errors(DEFAULTS, "Box(\"x\")", true),
             vec!["1:1 Cannot work out the default value of argument content: its type is not known"]
+        );
+    }
+
+    #[test]
+    fn a_type_inside_itself_with_other_arguments_is_not_recursive() {
+        let types =
+            "enum Box<T> = Box(T); enum Holder = Holder(x: Box<Box<Nat>>); enum Deep = Deep(x: Box<Box<Box<Nat>>>);";
+        assert_eq!(errors(types, "Holder(); Deep()", true), Vec::<String>::new());
+        // The arguments of this one change at every level, so it never ends and the limit stops it.
+        let nest = "enum Nest<T> = Nest(next: Nest<[T]>); enum Holder = Holder(x: Nest<Nat>);";
+        let found = errors(nest, "Holder()", true);
+        assert_eq!(found.len(), 1, "{:?}", found);
+        assert!(
+            found[0].contains("is too large") || found[0].contains("has no default value"),
+            "{:?}",
+            found
         );
     }
 
