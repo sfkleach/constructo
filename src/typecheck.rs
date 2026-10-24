@@ -108,9 +108,11 @@ pub fn check_value(env: &Env, widening: bool, value: &Value) -> Result<()> {
         env,
         widening,
         slots: Vec::new(),
+        omitted: Vec::new(),
     };
     let top = checker.fresh();
-    checker.check(value, &top)
+    checker.check(value, &top)?;
+    checker.check_omitted()
 }
 
 /// The default for the most nodes that the inferred type of a const may have. Types share their parts, so a short value
@@ -207,11 +209,13 @@ fn check_declared_const(env: &Env, widening: bool, constant: &ConstDecl, ty: &Ty
         env,
         widening,
         slots: Vec::new(),
+        omitted: Vec::new(),
     };
     // The type parameters are unknown types here, because the value has to be valid whatever they turn out to be.
     let args: Vec<Ty> = constant.params.iter().map(|p| Ty::Param(p.name.clone())).collect();
     let declared = instantiate(ty, &constant.params, &args);
-    checker.check(&constant.value, &declared)
+    checker.check(&constant.value, &declared)?;
+    checker.check_omitted()
 }
 
 /// Works out the type of a const from its value. Whatever the value leaves open is generalised.
@@ -220,9 +224,11 @@ fn infer_const(env: &Env, widening: bool, infer_limit: usize, constant: &ConstDe
         env,
         widening,
         slots: Vec::new(),
+        omitted: Vec::new(),
     };
     let top = checker.fresh();
     checker.check(&constant.value, &top)?;
+    checker.check_omitted()?;
     let mut open = Vec::new();
     let mut budget = infer_limit;
     let too_large = || TypeError {
@@ -317,6 +323,10 @@ struct Checker<'a, 'e> {
     env: &'e Env<'a>,
     widening: bool,
     slots: Vec<Slot>,
+    /// The arguments that were left out, each with the position of the constructor, the name of the parameter and its
+    /// type. They are checked once the whole value has been, because the other arguments may fix the type of an omitted
+    /// one, wherever in the value they are.
+    omitted: Vec<(Pos, String, Ty)>,
 }
 
 impl Checker<'_, '_> {
@@ -671,15 +681,14 @@ impl Checker<'_, '_> {
                     self.check(&argument.value, &ty)
                         .map_err(|e| name_parameter(e, argument.value.pos, parameter))?;
                 }
-                // The omitted arguments are checked last, so that the other arguments have fixed the types as far as
-                // they can.
+                // The omitted arguments are only noted here: they are checked at the end of the value.
                 for index in omitted {
                     let ty = instantiate(&parameters[index].ty, &decl.params, &args);
                     let parameter = parameters[index]
                         .name
                         .as_deref()
                         .expect("an omitted parameter is named");
-                    self.check_default(pos, parameter, &ty)?;
+                    self.omitted.push((pos, parameter.to_string(), ty));
                 }
                 Ok(())
             }
@@ -715,6 +724,14 @@ impl Checker<'_, '_> {
                 .expect("the field exists")
                 .1;
             self.check(&member.value, ty)?;
+        }
+        Ok(())
+    }
+
+    /// Checks the omitted arguments that have been noted, in the order in which they were met.
+    fn check_omitted(&mut self) -> Result<()> {
+        for (pos, parameter, ty) in std::mem::take(&mut self.omitted) {
+            self.check_default(pos, &parameter, &ty)?;
         }
         Ok(())
     }
@@ -1036,6 +1053,18 @@ mod tests {
             Vec::<String>::new()
         );
         assert_eq!(errors(DEFAULTS, "Holder(Box(\"x\"))", true), Vec::<String>::new());
+    }
+
+    #[test]
+    fn the_order_of_the_arguments_does_not_matter_to_a_default() {
+        let types = "enum Cell<T> = Cell(content: T); enum Pair<T> = Pair(cell: Cell<T>, value: T);";
+        let values = "Pair(cell: Cell(), value: 1); Pair(value: 1, cell: Cell()); Pair(Cell(), 1)";
+        assert_eq!(errors(types, values, true), Vec::<String>::new());
+        // Nothing fixes the type here, wherever it is looked at from.
+        assert_eq!(
+            errors(types, "Pair(cell: Cell(), value: Cell())", true),
+            vec!["1:12 Cannot work out the default value of argument content: its type is not known"]
+        );
     }
 
     #[test]
@@ -1621,6 +1650,7 @@ mod tests {
             env: &env,
             widening: true,
             slots: Vec::new(),
+            omitted: Vec::new(),
         };
         let pos = Pos { line: 1, col: 1 };
         let v = checker.fresh();
