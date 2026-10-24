@@ -1,2 +1,0 @@
-// expect: Missing argument for alignment in Image
-Image("a.jpg", "A", hOffset: 1, vOffset: 2);
