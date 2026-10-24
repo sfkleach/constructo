@@ -89,3 +89,42 @@ Argument lists can only appear in the context of a constructor, so the type
 of the arguments is fully determined. Named arguments may be omitted without
 ambiguity. 
 
+
+### Refinements agreed
+
+Meaning of omission:
+
+- Any named parameter of a tuple constructor may be omitted. Omission means the default value of the parameter's
+  type. There are no declared defaults, because the files must also make sense when they are parsed without a set of
+  types, and a default would be implicit rather than explicit.
+- Unnamed parameters must still be supplied. Leaving one out is still the error "Constructor X takes N value(s) but
+  has M".
+- Positional arguments still bind a prefix of the parameters, so a parameter can only be skipped by name.
+- Omission applies only to the named parameters of tuple constructors, not to record fields.
+- There is no flag to turn omission off. That is out of scope for now.
+
+The default of a type:
+
+- `Nat` and `Int` default to `0`, `Float` to `0.0` and `String` to `""`. An array defaults to `[]`.
+- An untagged record defaults to the record of the defaults of its fields.
+- An enum defaults to its first constructor, always, with the default of every field or parameter of that
+  constructor, named or not.
+- The prelude is reordered to `enum Bool = False, True;` so that the default of `Bool` is `false`. `Option<T>` already
+  defaults to `None`.
+- A type parameter has the default of the type that it stands for.
+
+Errors, which are reported at the omission and not at the declaration, so that types that are never defaulted are
+unaffected:
+
+- If the expansion of a default is recursive, directly or through other types, it is an error such as
+  "Type List<T> has no default value". Writing `Nil` before `Cons` avoids it.
+- If the expansion is not recursive but is too large, for example when it doubles with each declaration, it is an
+  error such as "The default value of T is too large". The size is the number of values in the expansion, and it is
+  worked out by counting, without building the value.
+- If the type of the omitted parameter is still unknown, such as a `T` that nothing else determines, it is an error
+  because the default cannot be worked out.
+- The limit is 10,000 nodes by default, as for inference. `--default-limit=N` changes it, and the library option is
+  `CheckOptions::default_limit`.
+
+Deliverables: argument matching and default checking in the type checker, the prelude reorder, the option and the
+flag, unit tests, examples and functests, a decision record and a CHANGELOG entry.
