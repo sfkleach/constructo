@@ -86,17 +86,52 @@ Diagram(
         Terminal('('),
         Optional(
             Sequence(
-                NonTerminal('Argument'),
-                ZeroOrMore(
+                Choice(0,
                     Sequence(
-                        Terminal(','),
-                        NonTerminal('Argument')
+                        NonTerminal('Value'),
+                        ZeroOrMore(
+                            Sequence(
+                                Terminal(','),
+                                NonTerminal('Value')
+                            )
+                        ),
+                        Optional(
+                            Sequence(
+                                Terminal(','),
+                                NonTerminal('NamedArgument'),
+                                ZeroOrMore(
+                                    Sequence(
+                                        Terminal(','),
+                                        NonTerminal('NamedArgument')
+                                    )
+                                )
+                            )
+                        )
+                    ),
+                    Sequence(
+                        NonTerminal('NamedArgument'),
+                        ZeroOrMore(
+                            Sequence(
+                                Terminal(','),
+                                NonTerminal('NamedArgument')
+                            )
+                        )
                     )
                 ),
                 Optional(Terminal(','))
             )
         ),
         Terminal(')')
+    )
+)
+
+// NamedArgument
+Diagram(
+    Comment('NamedArgument'),
+    Sequence(
+        NonTerminal('field-name'),
+        Terminal(':'),
+        NonTerminal('Value')
     )
 )
 
@@ -213,19 +248,5 @@ Diagram(
         Terminal('//'),
         ZeroOrMore(NonTerminal('any-char-except-newline')),
         NonTerminal('newline')
-    )
-)
-
-// Argument
-Diagram(
-    Comment('Argument'),
-    Sequence(
-        Optional(
-            Sequence(
-                NonTerminal('param-name'),
-                Terminal(':')
-            )
-        ),
-        NonTerminal('Value')
     )
 )
