@@ -384,6 +384,35 @@ impl Checker<'_, '_> {
         }
     }
 
+    /// Compares two types by their structure, looking at no more than `budget` nodes. Returns `None` if that is not
+    /// enough to decide, which is possible because sharing means a type can be exponentially larger than it is in memory.
+    fn same_type(&self, a: &Ty, b: &Ty, budget: &mut usize) -> Option<bool> {
+        let mut pairs = vec![(a.clone(), b.clone())];
+        while let Some((a, b)) = pairs.pop() {
+            *budget = budget.checked_sub(1)?;
+            match (self.shallow(&a), self.shallow(&b)) {
+                (Ty::Nat, Ty::Nat) | (Ty::Int, Ty::Int) | (Ty::Float, Ty::Float) | (Ty::Str, Ty::Str) => {}
+                (Ty::Array(x), Ty::Array(y)) => pairs.push(((*x).clone(), (*y).clone())),
+                (Ty::Enum(m, x), Ty::Enum(n, y)) if m == n && x.len() == y.len() => {
+                    pairs.extend(x.iter().cloned().zip(y.iter().cloned()));
+                }
+                (Ty::Record(x), Ty::Record(y)) if x.len() == y.len() => {
+                    for ((m, s), (n, t)) in x.iter().zip(y.iter()) {
+                        if m != n {
+                            return Some(false);
+                        }
+                        pairs.push((s.clone(), t.clone()));
+                    }
+                }
+                (Ty::Var(x), Ty::Var(y)) if x == y => {}
+                (Ty::Param(x), Ty::Param(y)) if x == y => {}
+                (Ty::Gen(x), Ty::Gen(y)) if x == y => {}
+                _ => return Some(false),
+            }
+        }
+        Some(true)
+    }
+
     fn bind(&mut self, free: &Ty, ty: Ty, flexible: bool) {
         if let Ty::Var(id) = free {
             self.slots[*id] = Slot::Bound(ty, flexible);
@@ -777,13 +806,18 @@ impl Checker<'_, '_> {
         // The types that are being expanded, as they are written, to catch a type that contains itself. The type
         // arguments are part of it, so `Box<Box<Nat>>` containing `Box<Nat>` is not a cycle, while a type whose
         // arguments keep changing is stopped by the limit. A very long type is written out in part only, and a
-        // collision between two of those is a harmless error: such a type is far too large to have a default anyway.
-        let mut path: HashSet<String> = HashSet::new();
+        // collision between two of those is settled by comparing the types themselves.
+        let mut path: HashMap<String, Vec<Ty>> = HashMap::new();
         let mut stack = vec![Step::Visit(ty.clone())];
         while let Some(step) = stack.pop() {
             let ty = match step {
                 Step::Leave(key) => {
-                    path.remove(&key);
+                    if let Some(open) = path.get_mut(&key) {
+                        open.pop();
+                        if open.is_empty() {
+                            path.remove(&key);
+                        }
+                    }
                     continue;
                 }
                 Step::Visit(ty) => self.shallow(&ty),
@@ -802,8 +836,22 @@ impl Checker<'_, '_> {
                 }
                 Ty::Enum(name, args) => {
                     let key = self.show(&ty);
-                    if path.contains(&key) {
-                        return Err(NoDefault::Recursive(ty.clone()));
+                    if let Some(open) = path.get(&key) {
+                        // The text of a type that is not cut short stands for the type exactly.
+                        let mut recursive = !key.ends_with("...");
+                        if !recursive {
+                            let mut budget = DEFAULT_VALUE_LIMIT;
+                            for other in open {
+                                match self.same_type(&ty, other, &mut budget) {
+                                    Some(true) => recursive = true,
+                                    Some(false) => {}
+                                    None => return Err(NoDefault::TooLarge),
+                                }
+                            }
+                        }
+                        if recursive {
+                            return Err(NoDefault::Recursive(ty.clone()));
+                        }
                     }
                     // Validation has checked that every type that is used is declared, so this is only a defensive check.
                     let Some(&decl) = self.env.declared.get(name.as_str()) else {
@@ -813,7 +861,7 @@ impl Checker<'_, '_> {
                     let Some(first) = decl.variants.first() else {
                         return Err(NoDefault::Recursive(ty.clone()));
                     };
-                    path.insert(key.clone());
+                    path.entry(key.clone()).or_default().push(ty.clone());
                     stack.push(Step::Leave(key));
                     let types: Vec<&Type> = match &first.body {
                         VariantBody::Unit => Vec::new(),
@@ -1030,6 +1078,14 @@ mod tests {
         for (value, expected) in cases {
             assert_eq!(errors(IMAGES, value, true), vec![expected.to_string()], "{}", value);
         }
+    }
+
+    #[test]
+    fn a_deeply_nested_finite_type_has_a_default() {
+        // The text of the type is cut short, so the outer type and the types inside it start with the same text.
+        let ty = format!("{}Nat{}", "Box<".repeat(40), ">".repeat(40));
+        let types = format!("enum Box<T> = Box(T); enum Holder = Holder(x: {});", ty);
+        assert_eq!(errors(&types, "Holder()", true), Vec::<String>::new());
     }
 
     #[test]
