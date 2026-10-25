@@ -98,6 +98,10 @@ struct Parser {
     index: usize,
     context: Option<String>,
     depth: u32,
+    /// The height of the tallest of the children that have been parsed so far for the construct being parsed.
+    tallest: u32,
+    /// The number of postfix `?` that have been parsed so far for the construct being parsed. Each one adds a level.
+    wrapped: u32,
     experimental: Experimental,
 }
 
@@ -108,6 +112,8 @@ impl Parser {
             index: 0,
             context: None,
             depth: 0,
+            tallest: 0,
+            wrapped: 0,
             experimental,
         }
     }
@@ -128,18 +134,33 @@ impl Parser {
 
     /// Runs a parser for a nested construct. The limit is a defensive check: the parser is recursive, so without it
     /// deeply nested input would overflow the stack and crash instead of being reported as a syntax error.
+    ///
+    /// The limit is on the height of the tree as well as on the depth of the calls. A postfix `?` adds a level to the
+    /// tree without a call, so the height of a construct is worked out from its children and its `?`, and is passed up
+    /// to the construct that contains it.
     fn nested<T>(&mut self, parse: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
         if self.depth >= MAX_DEPTH {
-            return Err(SyntaxError {
-                pos: self.pos(),
-                message: "Nesting is too deep".to_string(),
-                context: self.context.clone(),
-            });
+            return Err(self.too_deep());
         }
         self.depth += 1;
+        let outer = (std::mem::take(&mut self.tallest), std::mem::take(&mut self.wrapped));
         let result = parse(self);
+        let height = self.tallest + 1 + self.wrapped;
+        (self.tallest, self.wrapped) = outer;
         self.depth -= 1;
+        if result.is_ok() && height > MAX_DEPTH {
+            return Err(self.too_deep());
+        }
+        self.tallest = self.tallest.max(height);
         result
+    }
+
+    fn too_deep(&self) -> SyntaxError {
+        SyntaxError {
+            pos: self.pos(),
+            message: "Nesting is too deep".to_string(),
+            context: self.context.clone(),
+        }
     }
 
     fn peek(&self) -> &Tok {
@@ -373,7 +394,6 @@ impl Parser {
     /// Parses a type and then any postfix `?`, each of which makes the type optional.
     fn ty_unchecked(&mut self) -> Result<Type> {
         let pos = self.pos();
-        let start_depth = self.depth;
         let mut ty = self.primary_type()?;
         while self.peek() == &Tok::Question {
             self.question()?;
@@ -383,22 +403,16 @@ impl Parser {
                 args: vec![ty],
             };
         }
-        // The nesting that the question marks added ends with the type.
-        self.depth = start_depth;
         Ok(ty)
     }
 
-    /// Consumes a postfix `?`. Each one wraps what it follows, so it counts towards the nesting limit, which would
-    /// otherwise not bound a long run of them.
+    /// Consumes a postfix `?`. Each one wraps what it follows and so adds a level to the tree, which has to be counted
+    /// at once because a long run of them would otherwise build a tree that is too tall before anything notices.
     fn question(&mut self) -> Result<()> {
         self.bump();
-        self.depth += 1;
-        if self.depth > MAX_DEPTH {
-            return Err(SyntaxError {
-                pos: self.pos(),
-                message: "Nesting is too deep".to_string(),
-                context: self.context.clone(),
-            });
+        self.wrapped += 1;
+        if self.tallest + 1 + self.wrapped > MAX_DEPTH {
+            return Err(self.too_deep());
         }
         Ok(())
     }
@@ -463,7 +477,6 @@ impl Parser {
 
     /// Parses a value and then any postfix `?`, each of which wraps it in `Some`.
     fn value_unchecked(&mut self) -> Result<Value> {
-        let start_depth = self.depth;
         let mut value = self.primary_value()?;
         while self.peek() == &Tok::Question {
             if !self.experimental.some_query {
@@ -483,8 +496,6 @@ impl Parser {
                 },
             };
         }
-        // The nesting that the question marks added ends with the value.
-        self.depth = start_depth;
         Ok(value)
     }
 
@@ -1028,5 +1039,38 @@ mod tests {
             parse_values_with(&text, SOME_QUERY).unwrap_err().message,
             "Nesting is too deep"
         );
+    }
+
+    #[test]
+    fn question_marks_between_arrays_count_towards_the_nesting_limit() {
+        // Each level is an array and a `?`, so the tree is twice as tall as the calls are deep.
+        let text = format!("enum A = X({}Nat{});", "[".repeat(150), "]?".repeat(150));
+        assert_eq!(err(&text).2, "Nesting is too deep");
+        let text = format!("enum A = X({}Nat{});", "[".repeat(90), "]?".repeat(90));
+        assert!(parse(&text).is_ok());
+        let text = format!("{}1{}", "[".repeat(150), "]?".repeat(150));
+        assert_eq!(
+            parse_values_with(&text, SOME_QUERY).unwrap_err().message,
+            "Nesting is too deep"
+        );
+        let text = format!("{}1{}", "[".repeat(90), "]?".repeat(90));
+        assert!(parse_values_with(&text, SOME_QUERY).is_ok());
+    }
+
+    #[test]
+    fn question_marks_between_other_constructs_count_towards_the_nesting_limit() {
+        // A constructor, a record and a type argument, each followed by a `?`.
+        let text = format!("{}1{}", "Box(".repeat(150), ")?".repeat(150));
+        assert_eq!(
+            parse_values_with(&text, SOME_QUERY).unwrap_err().message,
+            "Nesting is too deep"
+        );
+        let text = format!("{}1{}", "{ a: ".repeat(150), " }?".repeat(150));
+        assert_eq!(
+            parse_values_with(&text, SOME_QUERY).unwrap_err().message,
+            "Nesting is too deep"
+        );
+        let text = format!("enum A = X({}Nat{});", "Box<".repeat(150), ">?".repeat(150));
+        assert_eq!(err(&text).2, "Nesting is too deep");
     }
 }
