@@ -22,6 +22,8 @@ pub enum Tok {
     LBracket,
     RBracket,
     Colon,
+    /// The postfix `?`, which is shorthand for `Option` in a type and for `Some` in a value.
+    Question,
     /// An unsigned integer literal, such as `42`, with its text unchanged.
     Nat(String),
     /// A signed integer literal, such as `+8` or `-1`.
@@ -124,6 +126,7 @@ pub fn lex(text: &str) -> Vec<Token> {
                 '[' => Tok::LBracket,
                 ']' => Tok::RBracket,
                 ':' => Tok::Colon,
+                '?' => Tok::Question,
                 other => Tok::Invalid(other),
             };
             tokens.push(Token { tok, pos });

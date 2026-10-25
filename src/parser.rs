@@ -47,22 +47,41 @@ pub enum Parsed {
     Values(Vec<Value>),
 }
 
-/// Parses the text of a types file into its declarations.
-pub fn parse(text: &str) -> Result<TypesFile> {
-    Parser::new(text).types()
+/// The experimental features of the syntax, each of which has to be switched on to be accepted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Experimental {
+    /// The postfix `?` on a value, which is shorthand for `Some`.
+    pub some_query: bool,
 }
 
-/// Parses the text of a values file into its values.
+impl Experimental {
+    /// Every experimental feature switched on.
+    pub fn all() -> Experimental {
+        Experimental { some_query: true }
+    }
+}
+
+/// Parses the text of a types file into its declarations, with no experimental features.
+pub fn parse(text: &str) -> Result<TypesFile> {
+    Parser::new(text, Experimental::default()).types()
+}
+
+/// Parses the text of a values file into its values, with no experimental features.
 pub fn parse_values(text: &str) -> Result<Vec<Value>> {
-    Parser::new(text).values()
+    parse_values_with(text, Experimental::default())
+}
+
+/// Parses the text of a values file into its values, accepting the experimental features that are switched on.
+pub fn parse_values_with(text: &str, experimental: Experimental) -> Result<Vec<Value>> {
+    Parser::new(text, experimental).values()
 }
 
 /// Classifies a file by its first token and parses it with the matching grammar.
 ///
 /// A types file always starts with `enum` or `const` and a values file never does. A file with no tokens is treated as a types
 /// file, which is how it was handled before values files were supported. The kind is returned even when parsing fails.
-pub fn parse_file(text: &str) -> (SourceKind, Result<Parsed>) {
-    let mut parser = Parser::new(text);
+pub fn parse_file(text: &str, experimental: Experimental) -> (SourceKind, Result<Parsed>) {
+    let mut parser = Parser::new(text, experimental);
     let kind = match parser.peek() {
         Tok::Enum | Tok::Const | Tok::Eof => SourceKind::Types,
         _ => SourceKind::Values,
@@ -79,15 +98,17 @@ struct Parser {
     index: usize,
     context: Option<String>,
     depth: u32,
+    experimental: Experimental,
 }
 
 impl Parser {
-    fn new(text: &str) -> Parser {
+    fn new(text: &str, experimental: Experimental) -> Parser {
         Parser {
             tokens: lex(text),
             index: 0,
             context: None,
             depth: 0,
+            experimental,
         }
     }
 
@@ -349,7 +370,40 @@ impl Parser {
         self.nested(Self::ty_unchecked)
     }
 
+    /// Parses a type and then any postfix `?`, each of which makes the type optional.
     fn ty_unchecked(&mut self) -> Result<Type> {
+        let pos = self.pos();
+        let start_depth = self.depth;
+        let mut ty = self.primary_type()?;
+        while self.peek() == &Tok::Question {
+            self.question()?;
+            ty = Type::Ref {
+                name: "Option".to_string(),
+                pos,
+                args: vec![ty],
+            };
+        }
+        // The nesting that the question marks added ends with the type.
+        self.depth = start_depth;
+        Ok(ty)
+    }
+
+    /// Consumes a postfix `?`. Each one wraps what it follows, so it counts towards the nesting limit, which would
+    /// otherwise not bound a long run of them.
+    fn question(&mut self) -> Result<()> {
+        self.bump();
+        self.depth += 1;
+        if self.depth > MAX_DEPTH {
+            return Err(SyntaxError {
+                pos: self.pos(),
+                message: "Nesting is too deep".to_string(),
+                context: self.context.clone(),
+            });
+        }
+        Ok(())
+    }
+
+    fn primary_type(&mut self) -> Result<Type> {
         match self.peek() {
             Tok::TypeName(_) => {
                 let (name, pos) = self.type_name("type")?;
@@ -407,7 +461,34 @@ impl Parser {
         self.nested(Self::value_unchecked)
     }
 
+    /// Parses a value and then any postfix `?`, each of which wraps it in `Some`.
     fn value_unchecked(&mut self) -> Result<Value> {
+        let start_depth = self.depth;
+        let mut value = self.primary_value()?;
+        while self.peek() == &Tok::Question {
+            if !self.experimental.some_query {
+                return Err(SyntaxError {
+                    pos: self.pos(),
+                    message: "Postfix '?' is experimental; enable it with --experimental=some-query".to_string(),
+                    context: self.context.clone(),
+                });
+            }
+            self.question()?;
+            let pos = value.pos;
+            value = Value {
+                pos,
+                kind: ValueKind::Tagged {
+                    name: "Some".to_string(),
+                    body: Some(TaggedBody::Tuple(vec![Argument { name: None, pos, value }])),
+                },
+            };
+        }
+        // The nesting that the question marks added ends with the value.
+        self.depth = start_depth;
+        Ok(value)
+    }
+
+    fn primary_value(&mut self) -> Result<Value> {
         let pos = self.pos();
         let kind = match self.peek().clone() {
             Tok::Nat(text) => self.literal(ValueKind::Nat(text)),
@@ -700,15 +781,21 @@ mod tests {
 
     #[test]
     fn classifies_a_file_by_its_first_token() {
-        assert_eq!(parse_file("enum A = X;").0, SourceKind::Types);
-        assert_eq!(parse_file("A { x: 1 }").0, SourceKind::Values);
-        assert_eq!(parse_file("42").0, SourceKind::Values);
-        assert_eq!(parse_file("const N: Nat = 1;").0, SourceKind::Types);
-        assert_eq!(parse_file("n").0, SourceKind::Values);
-        assert_eq!(parse_file("").0, SourceKind::Types);
-        assert_eq!(parse_file("// Just a comment.\n").0, SourceKind::Types);
+        assert_eq!(parse_file("enum A = X;", Experimental::default()).0, SourceKind::Types);
+        assert_eq!(parse_file("A { x: 1 }", Experimental::default()).0, SourceKind::Values);
+        assert_eq!(parse_file("42", Experimental::default()).0, SourceKind::Values);
+        assert_eq!(
+            parse_file("const N: Nat = 1;", Experimental::default()).0,
+            SourceKind::Types
+        );
+        assert_eq!(parse_file("n", Experimental::default()).0, SourceKind::Values);
+        assert_eq!(parse_file("", Experimental::default()).0, SourceKind::Types);
+        assert_eq!(
+            parse_file("// Just a comment.\n", Experimental::default()).0,
+            SourceKind::Types
+        );
         // The kind is known even when the file does not parse.
-        let (kind, parsed) = parse_file("circle {");
+        let (kind, parsed) = parse_file("circle {", Experimental::default());
         assert_eq!(kind, SourceKind::Values);
         assert!(parsed.is_err());
     }
@@ -795,5 +882,151 @@ mod tests {
         // Moderate nesting is fine.
         let nested = format!("{}1{}", "[".repeat(50), "]".repeat(50));
         assert!(parse_values(&nested).is_ok());
+    }
+
+    fn option_of(ty: &Type) -> Option<&Type> {
+        match ty {
+            Type::Ref { name, args, .. } if name == "Option" && args.len() == 1 => Some(&args[0]),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn a_postfix_question_makes_a_type_optional() {
+        let decls = parse("enum A = X(Nat?, [Nat]?, { a: Nat }?, Box<Nat>?, Nat??, Nat ?);")
+            .unwrap()
+            .enums;
+        let VariantBody::Tuple(params) = &decls[0].variants[0].body else {
+            panic!("expected a tuple");
+        };
+        let shown: Vec<String> = params.iter().map(|p| p.ty.to_string()).collect();
+        assert_eq!(
+            shown,
+            vec![
+                "Option<Nat>",
+                "Option<[Nat]>",
+                "Option<{ a: Nat }>",
+                "Option<Box<Nat>>",
+                "Option<Option<Nat>>",
+                "Option<Nat>"
+            ]
+        );
+        // Only the whole type is wrapped, so the question mark inside an array is for the elements.
+        let decls = parse("enum A = X([Nat?]);").unwrap().enums;
+        let VariantBody::Tuple(params) = &decls[0].variants[0].body else {
+            panic!("expected a tuple");
+        };
+        assert_eq!(params[0].ty.to_string(), "[Option<Nat>]");
+    }
+
+    #[test]
+    fn an_optional_type_is_positioned_at_the_start_of_its_operand() {
+        let decls = parse("enum A = X(  Nat?);").unwrap().enums;
+        let VariantBody::Tuple(params) = &decls[0].variants[0].body else {
+            panic!("expected a tuple");
+        };
+        let Type::Ref { pos, .. } = &params[0].ty else {
+            panic!("expected a reference");
+        };
+        assert_eq!((pos.line, pos.col), (1, 14));
+        assert!(option_of(&params[0].ty).is_some());
+    }
+
+    #[test]
+    fn rejects_a_question_with_nothing_to_make_optional() {
+        assert_eq!(err("enum A = X(?);"), (1, 12, "Expected type".to_string()));
+        assert_eq!(err("enum A = X(Nat, ?);"), (1, 17, "Expected type".to_string()));
+        assert_eq!(err("enum A = ?;"), (1, 10, "Expected constructor name".to_string()));
+    }
+
+    #[test]
+    fn many_question_marks_are_stopped_by_the_nesting_limit() {
+        let text = format!("enum A = X(Nat{});", "?".repeat(1000));
+        assert_eq!(err(&text).2, "Nesting is too deep");
+        let text = format!("enum A = X(Nat{});", "?".repeat(50));
+        assert!(parse(&text).is_ok());
+    }
+
+    const SOME_QUERY: Experimental = Experimental { some_query: true };
+
+    #[test]
+    fn a_postfix_question_on_a_value_needs_the_feature() {
+        let e = parse_values("0?").unwrap_err();
+        assert_eq!(
+            (e.pos.line, e.pos.col, e.message.as_str()),
+            (
+                1,
+                2,
+                "Postfix '?' is experimental; enable it with --experimental=some-query"
+            )
+        );
+        // The feature is for values, wherever they are written.
+        let e = parse("const a = 0?;").unwrap_err();
+        assert_eq!(
+            e.message,
+            "Postfix '?' is experimental; enable it with --experimental=some-query"
+        );
+        assert!(parse_values_with("0?", Experimental::default()).is_err());
+        assert!(parse_values_with("0?", SOME_QUERY).is_ok());
+        assert!(parse_values_with("0?", Experimental::all()).is_ok());
+    }
+
+    #[test]
+    fn a_postfix_question_on_a_value_is_some() {
+        let values = parse_values_with("1?; [2?]; Point(1, 2)?; x ?; 3??", SOME_QUERY).unwrap();
+        let ValueKind::Tagged { name, body } = &values[0].kind else {
+            panic!("expected a constructor");
+        };
+        assert_eq!(name, "Some");
+        let Some(TaggedBody::Tuple(arguments)) = body else {
+            panic!("expected a tuple");
+        };
+        assert_eq!(arguments.len(), 1);
+        assert_eq!(arguments[0].name, None);
+        assert!(matches!(&arguments[0].value.kind, ValueKind::Nat(text) if text == "1"));
+        // The Some is positioned at its operand, as is the argument.
+        assert_eq!((values[0].pos.line, values[0].pos.col), (1, 1));
+        assert_eq!(arguments[0].pos, values[0].pos);
+        // It applies to the whole value, including the body of a constructor.
+        let ValueKind::Tagged {
+            body: Some(TaggedBody::Tuple(arguments)),
+            ..
+        } = &values[2].kind
+        else {
+            panic!("expected a constructor");
+        };
+        assert!(matches!(&arguments[0].value.kind, ValueKind::Tagged { name, .. } if name == "Point"));
+        // A repeated question mark wraps once for each.
+        let ValueKind::Tagged {
+            body: Some(TaggedBody::Tuple(arguments)),
+            ..
+        } = &values[4].kind
+        else {
+            panic!("expected a constructor");
+        };
+        assert!(matches!(&arguments[0].value.kind, ValueKind::Tagged { name, .. } if name == "Some"));
+    }
+
+    #[test]
+    fn a_postfix_question_on_a_value_is_not_confused_with_a_named_argument() {
+        let values = parse_values_with("X(a: 1?, b: 2)", SOME_QUERY).unwrap();
+        let ValueKind::Tagged {
+            body: Some(TaggedBody::Tuple(arguments)),
+            ..
+        } = &values[0].kind
+        else {
+            panic!("expected a constructor");
+        };
+        let names: Vec<Option<&str>> = arguments.iter().map(|a| a.name.as_deref()).collect();
+        assert_eq!(names, vec![Some("a"), Some("b")]);
+    }
+
+    #[test]
+    fn many_question_marks_on_a_value_are_stopped_by_the_nesting_limit() {
+        let text = format!("1{}", "?".repeat(1000));
+        assert_eq!(
+            parse_values_with(&text, SOME_QUERY).unwrap_err().message,
+            "Nesting is too deep"
+        );
     }
 }

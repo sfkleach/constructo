@@ -1,0 +1,2 @@
+// A `?` needs a type before it.
+enum Attempt = Attempt(?);

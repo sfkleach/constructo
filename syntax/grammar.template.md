@@ -47,6 +47,11 @@ has that type for every `T`. They belong to the type, so they can only be given 
 this, although the parser reads a parameter list without a type and the checker then rejects it. The type parameters
 are in scope in the type only.
 
+A `Type` can be followed by any number of `?`, each of which makes it optional: `Nat?` is `Option<Nat>`, `[Nat]?` is
+`Option<[Nat]>` and `Nat??` is `Option<Option<Nat>>`. A `?` applies to the whole type before it, so the elements of an
+array are made optional with `[Nat?]`. It is only shorthand, so it needs the prelude, or another `Option`, to be
+declared.
+
 The `Value` of a const is the one defined in the [data-values grammar](#data-values-grammar). A const name may have
 either case. The names `enum` and `const` are reserved, and cannot be used as the name of a const or a field.
 
@@ -67,6 +72,11 @@ A bare name is a `Tagged` value if it starts with an uppercase letter and a `Con
 letter or underscore. A `Tagged` value with no body is a constructor, or a const of that name, and the checker decides
 which. A `ConstRef` is always a const and takes no body. The standard prelude declares the consts `null`, `true` and
 `false`, so these are ordinary names and not special literals.
+
+A `Value` can be followed by any number of `?`, each of which wraps it in `Some`: `0?` is `Some(0)`. This is
+experimental, and is rejected unless it is switched on with `--experimental=some-query` (or `-x`, which switches on
+every experimental feature). Like the `?` on a type it applies to the whole value before it, and needs `Some` to be
+declared.
 
 The rules are:
 

@@ -1,7 +1,7 @@
-use clap::{Parser, Subcommand};
+use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use constructo::{
-    check_sources_with, prelude_source, syntax_error, CheckOptions, Outcome, Source, SourceKind, DEFAULT_INFER_LIMIT,
-    DEFAULT_VALUE_LIMIT,
+    check_sources_with, prelude_source, syntax_error, CheckOptions, Experimental, Outcome, Source, SourceKind,
+    DEFAULT_INFER_LIMIT, DEFAULT_VALUE_LIMIT,
 };
 use std::io::Read;
 use std::path::PathBuf;
@@ -17,6 +17,27 @@ const EXIT_USAGE: u8 = 2;
 struct Cli {
     #[command(subcommand)]
     command: Command,
+}
+
+/// The experimental features that can be switched on with `--experimental`.
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+enum Feature {
+    /// Every experimental feature
+    All,
+    /// The postfix `?` on a value, as in `0?`, which is shorthand for `Some(0)`
+    SomeQuery,
+}
+
+/// Works out which experimental features have been switched on.
+fn experimental(features: &[Feature]) -> Experimental {
+    let mut experimental = Experimental::default();
+    for feature in features {
+        match feature {
+            Feature::All => experimental = Experimental::all(),
+            Feature::SomeQuery => experimental.some_query = true,
+        }
+    }
+    experimental
 }
 
 #[derive(Subcommand, Debug)]
@@ -55,6 +76,20 @@ enum Command {
         #[arg(long, value_name = "N", default_value_t = DEFAULT_VALUE_LIMIT)]
         default_limit: usize,
 
+        /// Switch on experimental features. On its own it switches on all of them, and `-x=FEATURE` switches on just
+        /// that one. The option can be repeated.
+        #[arg(
+            short = 'x',
+            long,
+            value_name = "FEATURE",
+            value_enum,
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "all",
+            action = ArgAction::Append
+        )]
+        experimental: Vec<Feature>,
+
         /// Print a message when the check succeeds
         #[arg(long, short)]
         verbose: bool,
@@ -77,6 +112,7 @@ fn main() -> ExitCode {
             allow_refs,
             infer_limit,
             default_limit,
+            experimental: features,
             verbose,
             files,
         } => {
@@ -87,6 +123,7 @@ fn main() -> ExitCode {
                 allow_refs,
                 infer_limit,
                 default_limit,
+                experimental: experimental(&features),
             };
             check(stdin, no_prelude, verbose, &options, &files)
         }
@@ -109,7 +146,7 @@ fn check(stdin: bool, no_prelude: bool, verbose: bool, options: &CheckOptions, f
                 return ExitCode::from(EXIT_USAGE);
             }
         }
-        if syntax_error(sources.last().expect("a source was just pushed")).is_some() {
+        if syntax_error(sources.last().expect("a source was just pushed"), options.experimental).is_some() {
             syntax_failed = true;
             break;
         }

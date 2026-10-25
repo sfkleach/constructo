@@ -1,0 +1,7 @@
+// A postfix `?` is the same as writing `Some`, so these are values of Option types.
+Attempt("build", retries: 3?);
+Attempt("build", 3?, Attempt("fallback")?);
+Attempt("build", tags: ["fast"]?);
+// A value without it still fits an optional parameter if it is wrapped with `Some`.
+Attempt("build", retries: Some(3));
+Attempt("build", retries: null);

@@ -18,13 +18,16 @@ Diagram(
 // Value
 Diagram(
     Comment('Value'),
-    Choice(0,
-        NonTerminal('Tagged'),
-        NonTerminal('ConstRef'),
-        NonTerminal('Record'),
-        NonTerminal('Array'),
-        NonTerminal('Number'),
-        NonTerminal('String')
+    Sequence(
+        Choice(0,
+            NonTerminal('Tagged'),
+            NonTerminal('ConstRef'),
+            NonTerminal('Record'),
+            NonTerminal('Array'),
+            NonTerminal('Number'),
+            NonTerminal('String')
+        ),
+        ZeroOrMore(Terminal('?'), Comment('experimental: some-query'))
     )
 )
 
