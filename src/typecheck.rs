@@ -11,8 +11,10 @@ use crate::ast::{
     VariantBody,
 };
 use crate::diagnostics::Pos;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 /// A failed type-check: where the offending term is, and what is wrong with it.
@@ -299,6 +301,17 @@ fn fill(ty: &Ty, args: &[Ty]) -> Ty {
 }
 
 /// The longest description of a type that is put in a message, in characters.
+/// Combines a tag, a name and the hashes of the parts into the hash of a type, using two differently seeded hashers.
+fn combine(tag: u8, name: &str, parts: &[u128]) -> u128 {
+    let mut hash = 0u128;
+    for seed in [1u8, 2u8] {
+        let mut hasher = DefaultHasher::new();
+        (seed, tag, name, parts).hash(&mut hasher);
+        hash = (hash << 64) | u128::from(hasher.finish());
+    }
+    hash
+}
+
 const SHOW_LIMIT: usize = 120;
 
 /// The widening order of the numeric types.
@@ -384,33 +397,77 @@ impl Checker<'_, '_> {
         }
     }
 
-    /// Compares two types by their structure, looking at no more than `budget` nodes. Returns `None` if that is not
-    /// enough to decide, which is possible because sharing means a type can be exponentially larger than it is in memory.
-    fn same_type(&self, a: &Ty, b: &Ty, budget: &mut usize) -> Option<bool> {
-        let mut pairs = vec![(a.clone(), b.clone())];
-        while let Some((a, b)) = pairs.pop() {
-            *budget = budget.checked_sub(1)?;
-            match (self.shallow(&a), self.shallow(&b)) {
-                (Ty::Nat, Ty::Nat) | (Ty::Int, Ty::Int) | (Ty::Float, Ty::Float) | (Ty::Str, Ty::Str) => {}
-                (Ty::Array(x), Ty::Array(y)) => pairs.push(((*x).clone(), (*y).clone())),
-                (Ty::Enum(m, x), Ty::Enum(n, y)) if m == n && x.len() == y.len() => {
-                    pairs.extend(x.iter().cloned().zip(y.iter().cloned()));
-                }
-                (Ty::Record(x), Ty::Record(y)) if x.len() == y.len() => {
-                    for ((m, s), (n, t)) in x.iter().zip(y.iter()) {
-                        if m != n {
-                            return Some(false);
-                        }
-                        pairs.push((s.clone(), t.clone()));
+    /// Hashes a type by its structure, in 128 bits so that two different types will not be taken for one. The hash of
+    /// each shared part is worked out once, which keeps the cost to the size of the type in memory and not to the size
+    /// of it written out. `memo` is keyed by the address of the part, and keeps the part so that the address stays its own.
+    fn type_hash(&self, ty: &Ty, memo: &mut HashMap<usize, (Ty, u128)>) -> u128 {
+        enum Work {
+            Enter(Ty),
+            Leave(Ty),
+        }
+        let mut stack = vec![Work::Enter(ty.clone())];
+        while let Some(work) = stack.pop() {
+            match work {
+                Work::Enter(part) => {
+                    let part = self.shallow(&part);
+                    if Self::address(&part).is_some_and(|address| memo.contains_key(&address)) {
+                        continue;
+                    }
+                    stack.push(Work::Leave(part.clone()));
+                    match &part {
+                        Ty::Array(element) => stack.push(Work::Enter((**element).clone())),
+                        Ty::Enum(_, args) => stack.extend(args.iter().map(|arg| Work::Enter(arg.clone()))),
+                        Ty::Record(fields) => stack.extend(fields.iter().map(|(_, ty)| Work::Enter(ty.clone()))),
+                        _ => {}
                     }
                 }
-                (Ty::Var(x), Ty::Var(y)) if x == y => {}
-                (Ty::Param(x), Ty::Param(y)) if x == y => {}
-                (Ty::Gen(x), Ty::Gen(y)) if x == y => {}
-                _ => return Some(false),
+                Work::Leave(part) => {
+                    let Some(address) = Self::address(&part) else { continue };
+                    let hash = match &part {
+                        Ty::Array(element) => combine(b'[', "", &[self.part_hash(element, memo)]),
+                        Ty::Enum(name, args) => {
+                            let args: Vec<u128> = args.iter().map(|arg| self.part_hash(arg, memo)).collect();
+                            combine(b'E', name, &args)
+                        }
+                        Ty::Record(fields) => {
+                            let names: Vec<&str> = fields.iter().map(|(name, _)| name.as_str()).collect();
+                            let types: Vec<u128> = fields.iter().map(|(_, ty)| self.part_hash(ty, memo)).collect();
+                            combine(b'{', &names.join(","), &types)
+                        }
+                        _ => continue,
+                    };
+                    memo.insert(address, (part, hash));
+                }
             }
         }
-        Some(true)
+        self.part_hash(ty, memo)
+    }
+
+    /// The address of the shared part of a type, which is what a hash is remembered by.
+    fn address(ty: &Ty) -> Option<usize> {
+        match ty {
+            Ty::Array(element) => Some(Rc::as_ptr(element) as usize),
+            Ty::Enum(_, args) => Some(Rc::as_ptr(args) as usize),
+            Ty::Record(fields) => Some(Rc::as_ptr(fields) as usize),
+            _ => None,
+        }
+    }
+
+    /// The hash of a part whose own parts have been hashed already.
+    fn part_hash(&self, ty: &Ty, memo: &HashMap<usize, (Ty, u128)>) -> u128 {
+        let ty = self.shallow(ty);
+        match &ty {
+            Ty::Nat => combine(b'N', "", &[]),
+            Ty::Int => combine(b'I', "", &[]),
+            Ty::Float => combine(b'F', "", &[]),
+            Ty::Str => combine(b'S', "", &[]),
+            Ty::Var(id) => combine(b'V', &id.to_string(), &[]),
+            Ty::Param(name) => combine(b'P', name, &[]),
+            Ty::Gen(id) => combine(b'G', &id.to_string(), &[]),
+            Ty::Array(_) | Ty::Enum(..) | Ty::Record(_) => {
+                Self::address(&ty).and_then(|a| memo.get(&a)).map_or(0, |m| m.1)
+            }
+        }
     }
 
     fn bind(&mut self, free: &Ty, ty: Ty, flexible: bool) {
@@ -801,23 +858,18 @@ impl Checker<'_, '_> {
         enum Step {
             Visit(Ty),
             /// The end of the expansion of an enum, which takes the type off the path.
-            Leave(String),
+            Leave(u128),
         }
-        // The types that are being expanded, as they are written, to catch a type that contains itself. The type
-        // arguments are part of it, so `Box<Box<Nat>>` containing `Box<Nat>` is not a cycle, while a type whose
-        // arguments keep changing is stopped by the limit. A very long type is written out in part only, and a
-        // collision between two of those is settled by comparing the types themselves.
-        let mut path: HashMap<String, Vec<Ty>> = HashMap::new();
+        // The hashes of the types that are being expanded, to catch a type that contains itself. The type arguments
+        // are part of it, so `Box<Box<Nat>>` containing `Box<Nat>` is not a cycle, while a type whose arguments keep
+        // changing is stopped by the limit.
+        let mut path: HashSet<u128> = HashSet::new();
+        let mut memo: HashMap<usize, (Ty, u128)> = HashMap::new();
         let mut stack = vec![Step::Visit(ty.clone())];
         while let Some(step) = stack.pop() {
             let ty = match step {
                 Step::Leave(key) => {
-                    if let Some(open) = path.get_mut(&key) {
-                        open.pop();
-                        if open.is_empty() {
-                            path.remove(&key);
-                        }
-                    }
+                    path.remove(&key);
                     continue;
                 }
                 Step::Visit(ty) => self.shallow(&ty),
@@ -835,23 +887,9 @@ impl Checker<'_, '_> {
                     stack.extend(fields.iter().rev().map(|(_, field)| Step::Visit(field.clone())));
                 }
                 Ty::Enum(name, args) => {
-                    let key = self.show(&ty);
-                    if let Some(open) = path.get(&key) {
-                        // The text of a type that is not cut short stands for the type exactly.
-                        let mut recursive = !key.ends_with("...");
-                        if !recursive {
-                            let mut budget = DEFAULT_VALUE_LIMIT;
-                            for other in open {
-                                match self.same_type(&ty, other, &mut budget) {
-                                    Some(true) => recursive = true,
-                                    Some(false) => {}
-                                    None => return Err(NoDefault::TooLarge),
-                                }
-                            }
-                        }
-                        if recursive {
-                            return Err(NoDefault::Recursive(ty.clone()));
-                        }
+                    let key = self.type_hash(&ty, &mut memo);
+                    if !path.insert(key) {
+                        return Err(NoDefault::Recursive(ty.clone()));
                     }
                     // Validation has checked that every type that is used is declared, so this is only a defensive check.
                     let Some(&decl) = self.env.declared.get(name.as_str()) else {
@@ -861,7 +899,6 @@ impl Checker<'_, '_> {
                     let Some(first) = decl.variants.first() else {
                         return Err(NoDefault::Recursive(ty.clone()));
                     };
-                    path.entry(key.clone()).or_default().push(ty.clone());
                     stack.push(Step::Leave(key));
                     let types: Vec<&Type> = match &first.body {
                         VariantBody::Unit => Vec::new(),
