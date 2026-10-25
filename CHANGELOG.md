@@ -77,6 +77,15 @@ Following the style in https://keepachangelog.com/en/1.0.0/
     nodes than `--default-limit=N` allows (10,000 by default; the library option is `CheckOptions::default_limit`).
   - The grammar files, the diagrams and `syntax/grammar.md` describe `NamedParameter` and `NamedArgument`, and
     show that named ones come after unnamed ones.
+- A postfix `?` on a type is shorthand for `Option`: `Nat?` is `Option<Nat>`, `[Nat]?` is `Option<[Nat]>` and
+  `Nat??` is `Option<Option<Nat>>`. It applies to the whole type before it, it is only sugar so it needs an `Option`
+  to be declared (the prelude has one), and messages show `Option<Nat>`. An `Option` parameter that is named may be
+  left out, as it defaults to `None`.
+- An experimental postfix `?` on a value is shorthand for `Some`: `0?` is `Some(0)`. It is a syntax error unless it is
+  switched on, with `constructo check -x` for every experimental feature or `-x=some-query` (`--experimental`) for this
+  one. The option's value must be given with `=`, it can be repeated, and an unknown name is a usage error. The
+  library has `CheckOptions::experimental`, and `parse_file` and `syntax_error` take an `Experimental` argument.
+  The grammar files, the diagrams and `syntax/grammar.md` show both.
 
 ### Changed
 

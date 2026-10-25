@@ -177,10 +177,13 @@ Diagram(
 // Type
 Diagram(
     Comment('Type'),
-    Choice(0,
-        NonTerminal('TypeRef'),
-        NonTerminal('ArrayType'),
-        NonTerminal('RecordBody')
+    Sequence(
+        Choice(0,
+            NonTerminal('TypeRef'),
+            NonTerminal('ArrayType'),
+            NonTerminal('RecordBody')
+        ),
+        ZeroOrMore(Terminal('?'))
     )
 )
 

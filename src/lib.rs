@@ -15,7 +15,7 @@ use parser::{parse_file, Parsed};
 use typecheck::{check_consts, check_value, Env};
 use validate::{validate, ParsedFile};
 
-pub use parser::SourceKind;
+pub use parser::{Experimental, SourceKind};
 pub use typecheck::{DEFAULT_INFER_LIMIT, DEFAULT_VALUE_LIMIT};
 
 /// The standard prelude: declarations that are available to every types file unless the prelude is disabled.
@@ -98,8 +98,11 @@ fn syntax_diagnostic(source: &Source, e: parser::SyntaxError) -> Diagnostic {
 ///
 /// This lets a caller that reads its inputs one at a time stop reading at the first syntax error, before any later
 /// input could fail for some unrelated reason.
-pub fn syntax_error(source: &Source) -> Option<Diagnostic> {
-    parse_file(&source.text).1.err().map(|e| syntax_diagnostic(source, e))
+pub fn syntax_error(source: &Source, experimental: Experimental) -> Option<Diagnostic> {
+    parse_file(&source.text, experimental)
+        .1
+        .err()
+        .map(|e| syntax_diagnostic(source, e))
 }
 
 /// The options that change how sources are checked.
@@ -119,6 +122,8 @@ pub struct CheckOptions {
     /// The most nodes that the default value of an omitted argument may have, so that a default that is huge when
     /// written out is refused.
     pub default_limit: usize,
+    /// The experimental features of the syntax that are switched on.
+    pub experimental: Experimental,
 }
 
 impl Default for CheckOptions {
@@ -130,6 +135,7 @@ impl Default for CheckOptions {
             allow_refs: false,
             infer_limit: DEFAULT_INFER_LIMIT,
             default_limit: DEFAULT_VALUE_LIMIT,
+            experimental: Experimental::default(),
         }
     }
 }
@@ -154,7 +160,7 @@ pub fn check_sources_with(sources: &[Source], options: &CheckOptions) -> Report 
     let mut kinds = vec![None; sources.len()];
     let mut parsed_sources = Vec::new();
     for (index, source) in sources.iter().enumerate() {
-        let (kind, parsed) = parse_file(&source.text);
+        let (kind, parsed) = parse_file(&source.text, options.experimental);
         kinds[index] = Some(kind);
         match parsed {
             Ok(parsed) => parsed_sources.push(parsed),
@@ -359,8 +365,11 @@ mod tests {
             name: "f".to_string(),
             text: text.to_string(),
         };
-        assert_eq!(syntax_error(&source("enum A = X(Missing);")), None);
-        let e = syntax_error(&source("enum A = X")).unwrap();
+        assert_eq!(
+            syntax_error(&source("enum A = X(Missing);"), Experimental::default()),
+            None
+        );
+        let e = syntax_error(&source("enum A = X"), Experimental::default()).unwrap();
         assert_eq!(
             e.to_string(),
             "ERROR: Expected comma or semi-colon (f, line 1, col 11); in enum A"
@@ -373,7 +382,7 @@ mod tests {
             name: "f".to_string(),
             text: "Circle { radius: 3.0 }; Dot".to_string(),
         };
-        assert_eq!(syntax_error(&source), None);
+        assert_eq!(syntax_error(&source, Experimental::default()), None);
     }
 
     #[test]
@@ -454,6 +463,44 @@ mod tests {
             "enum Later = Ready;",
         ]));
         assert!(report.is_ok(), "{:?}", report.diagnostics);
+    }
+
+    #[test]
+    fn a_postfix_question_is_checked_as_option_and_some() {
+        let mut all = vec![prelude_source()];
+        all.extend(sources(&[
+            "enum Job = Job(String, retries: Nat?, backup: Job?);",
+            "Job(\"a\", 3?, Job(\"b\")?); Job(\"c\"); Job(\"d\", retries: null)",
+        ]));
+        let options = CheckOptions {
+            experimental: Experimental::all(),
+            ..CheckOptions::default()
+        };
+        let report = check_sources_with(&all, &options);
+        assert!(report.is_ok(), "{:?}", messages(&report));
+        // The types are not experimental, but the values are.
+        let report = check_sources(&all);
+        assert_eq!(
+            messages(&report),
+            vec!["ERROR: Postfix '?' is experimental; enable it with --experimental=some-query (f1, line 1, col 11)"]
+        );
+        // A mismatch is described in the same way as for a constructor that is written out.
+        let mut wrong = vec![prelude_source()];
+        wrong.extend(sources(&[
+            "enum Job = Job(String, retries: Nat?);",
+            "Job(\"a\", \"x\"?)",
+        ]));
+        let report = check_sources_with(&wrong, &options);
+        assert_eq!(
+            messages(&report),
+            vec!["ERROR: Expected Nat but found String (f1, line 1, col 10)"]
+        );
+        // Without the prelude the names that the shorthand stands for are unknown.
+        let report = check_sources_with(&sources(&["enum Job = Job(Nat?);"]), &options);
+        assert_eq!(
+            messages(&report),
+            vec!["ERROR: Unknown type Option (f0, line 1, col 16)"]
+        );
     }
 
     #[test]

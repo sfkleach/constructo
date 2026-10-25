@@ -765,7 +765,7 @@ impl Checker<'_, '_> {
                     let ty = instantiate(&parameters[index].ty, &decl.params, &args);
                     let parameter = parameters[index].name.as_deref();
                     self.check(&argument.value, &ty)
-                        .map_err(|e| name_parameter(e, argument.value.pos, parameter))?;
+                        .map_err(|e| name_parameter(e, &argument.value, parameter))?;
                 }
                 // The omitted arguments are only noted here: they are checked at the end of the value.
                 for index in omitted {
@@ -929,8 +929,11 @@ enum NoDefault {
 
 /// Adds the name of the parameter to a mismatch that is for the argument itself, giving "Expected Nat for argument x
 /// but found String". A mismatch somewhere inside the argument is left alone, as it is not about the parameter.
-fn name_parameter(mut error: TypeError, argument_pos: Pos, parameter: Option<&str>) -> TypeError {
-    if let (Some(name), true) = (parameter, error.pos == argument_pos) {
+///
+/// An argument written with a postfix `?` is also left alone. Its `Some` has the position of its operand, so a
+/// mismatch inside cannot be told from one of the whole by position, and the parameter's type is not that of the operand.
+fn name_parameter(mut error: TypeError, argument: &Value, parameter: Option<&str>) -> TypeError {
+    if let (Some(name), true) = (parameter, error.pos == argument.pos && !is_postfix_some(argument)) {
         if let Some(rest) = error.message.strip_prefix("Expected ") {
             if let Some((expected, found)) = rest.split_once(" but found ") {
                 error.message = format!("Expected {} for argument {} but found {}", expected, name, found);
@@ -938,6 +941,20 @@ fn name_parameter(mut error: TypeError, argument_pos: Pos, parameter: Option<&st
         }
     }
     error
+}
+
+/// Whether a value is a `Some` that the parser made from a postfix `?`, which can be told because a constructor that
+/// is written out starts before its first argument.
+fn is_postfix_some(value: &Value) -> bool {
+    match &value.kind {
+        ValueKind::Tagged {
+            body: Some(TaggedBody::Tuple(arguments)),
+            ..
+        } => arguments
+            .first()
+            .is_some_and(|argument| argument.value.pos == value.pos),
+        _ => false,
+    }
 }
 
 /// Matches the arguments of a tuple constructor to its parameters, returning the index of the parameter that each

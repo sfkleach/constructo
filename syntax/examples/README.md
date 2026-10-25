@@ -16,6 +16,10 @@
 - `types/refs`: consts that refer to other consts. `chain.types` is valid with `--allow-refs` and invalid without it.
   `cycle.types` is invalid with or without it.
 - `values/valid`, `values/invalid` are only checked for being well-formed (`--no-type-check`).
+- `types/valid/postfix-optional.types` shows the postfix `?` on types, which is shorthand for `Option`.
+- `values/experimental`: values that use the postfix `?` on values, which needs `--experimental=some-query` (or `-x`).
+  `valid/` is only checked for being well-formed, and fails without the option. `typed/valid` and `typed/invalid` are
+  checked against `values/typed/schema.types` in the same way as `values/typed`.
 - `values/typed`: values that are checked against `values/typed/schema.types` (and the prelude). `valid/` must pass
   and `invalid/` must fail the type-check, though each invalid file is well-formed.
   Each invalid file has a `// expect: <message>` line, and the functional test requires that exact error.

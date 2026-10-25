@@ -432,6 +432,58 @@ else
 fi
 echo ""
 
+echo "--- experimental features ---"
+EXPERIMENTAL="$VALUES/experimental"
+# Every example needs the feature, so each one fails without it, with a message that says how to switch it on.
+for f in "$EXPERIMENTAL"/valid/*.values; do
+    name="experimental/valid/$(basename "$f")"
+    expect_exit "$name with -x" 0 check -x --no-type-check "$f"
+    expect_exit "$name with --experimental=some-query" 0 check --experimental=some-query --no-type-check "$f"
+    expect_exit "$name with -x=some-query" 0 check -x=some-query --no-type-check "$f"
+    expect_exit "$name without -x" 1 check --no-type-check "$f"
+done
+for f in "$EXPERIMENTAL"/typed/valid/*.values; do
+    name="experimental/typed/valid/$(basename "$f")"
+    expect_exit "$name with -x" 0 check -x "$TYPED/schema.types" "$f"
+    expect_exit "$name without -x" 1 check "$TYPED/schema.types" "$f"
+done
+for f in "$EXPERIMENTAL"/typed/invalid/*.values; do
+    expected="$(sed -n 's|^// expect: ||p' "$f")"
+    actual=0
+    err="$("$CONSTRUCTO" check -x "$TYPED/schema.types" "$f" 2>&1 >/dev/null)" || actual=$?
+    if [[ -n "$expected" && "$actual" -eq 1 && "$err" == "ERROR: $expected ("* ]]; then
+        pass "experimental/typed/invalid/$(basename "$f")"
+    else
+        fail "experimental/typed/invalid/$(basename "$f") (expected '$expected' and exit 1, got exit $actual and '$err')"
+    fi
+done
+err="$("$CONSTRUCTO" check "$EXPERIMENTAL/valid/some-query.values" --no-type-check 2>&1 >/dev/null || true)"
+question="Postfix '?' is experimental; enable it with --experimental=some-query"
+if [[ "$err" == "ERROR: $question ("*"line 2, col 2)" ]]; then
+    pass "the message says how to switch the feature on"
+else
+    fail "the message says how to switch the feature on (got '$err')"
+fi
+expect_exit "a feature in a const of a types file needs the option too" 1 check \
+    <(printf 'const a = 0?;\n')
+expect_exit "a feature in a const of a types file with -x" 0 check -x <(printf 'const a = 0?;\n')
+expect_exit "a bare -x does not take the file as its value" 0 \
+    check -x --no-type-check "$EXPERIMENTAL/valid/some-query.values"
+expect_exit "the option can be repeated" 0 check -x=some-query -x=all --no-type-check \
+    "$EXPERIMENTAL/valid/some-query.values"
+expect_exit "an unknown feature is a usage error" 2 check -x=nonsense "$EXAMPLES/valid/empty.types"
+expect_exit "a name after a space is taken as a file, which cannot be read" 2 \
+    check -x nonsense "$EXAMPLES/valid/empty.types"
+err="$("$CONSTRUCTO" check -x=nonsense "$EXAMPLES/valid/empty.types" 2>&1 >/dev/null || true)"
+if [[ "$err" == *"some-query"* ]]; then
+    pass "an unknown feature is reported with the names that are known"
+else
+    fail "an unknown feature is reported with the names that are known (got '$err')"
+fi
+expect_exit "without the prelude the shorthands are unknown" 1 \
+    check --no-prelude -x "$EXAMPLES/valid/postfix-optional.types"
+echo ""
+
 TOTAL=$(( PASS + FAIL ))
 echo "Results: $PASS/$TOTAL passed"
 if [[ $FAIL -gt 0 ]]; then

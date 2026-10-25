@@ -1,0 +1,10 @@
+// A postfix `?` makes a type optional: `T?` is `Option<T>`.
+enum Attempt = Attempt(String, retries: Nat?, backup: Attempt?);
+// It applies to the whole type before it, and it can be repeated or follow white space.
+enum Shapes =
+  Many { names: [String]?, origin: { x: Nat, y: Nat }? },
+  Nested(Nat??, Option<Nat?>? ),
+  Spaced(Nat ?, Box<Nat> ?);
+enum Box<T> = Box(T);
+const none: Nat? = None;
+const maybe: [Nat?]? = Some([None]);
