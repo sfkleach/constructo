@@ -27,7 +27,8 @@ Following the style in https://keepachangelog.com/en/1.0.0/
 - `constructo check` classifies each input by its first token as data-types (`enum` or `const`, or no tokens) or
   data-values, and checks that a data-values file is well-formed, reporting the file name and location of any syntax
   error. In verbose mode each input is reported with its kind, e.g. `OK: prod.values (data-values)`.
-- The parser rejects input nested more than 200 levels deep instead of overflowing the stack.
+- The parser rejects input nested more than 200 levels deep instead of overflowing the stack. The limit is on the
+  height of the tree, which includes the levels that a postfix `?` adds, as well as on the depth of the calls.
 - `constructo check` type-checks data-values against the data-types that come before them on the command line (and
   the prelude). Constructors must exist and have the declared shape, records must have exactly the declared fields,
   and the type parameters of generic enums are unified across a top-level value. Numbers widen from Nat to Int to
@@ -61,15 +62,14 @@ Following the style in https://keepachangelog.com/en/1.0.0/
   - The grammar files, the diagrams and `syntax/grammar.md` describe consts, and `ConstRef` in the data-values grammar.
 - The standard prelude declares the consts `null`, `true` and `false`, as `const null<T>: Option<T> = None;`,
   `const true: Bool = True;` and `const false: Bool = False;`. Under `--no-prelude` they are unknown.
-- Named parameters and arguments for tuple constructors.
+- Named parameters and arguments for tuple constructors. See decisions 17 and 18.
   - A parameter may be given a name, as in `enum Image = Image(String, String, hOffset: Nat, alignment: String);`.
     Unnamed parameters come first and can only be bound by position. Named parameters can be bound by position or
     by name, and names are per constructor.
   - An argument list has its positional arguments first, followed by named arguments in any order, as in
     `Image("a.jpg", "A", alignment: "left", hOffset: 100)`. A parameter can be bound only once, and an unknown name
-    is an error. Names affect only the matching of arguments to parameters,
-    not the types. A mismatch for a named parameter says which argument it is
-    for.
+    is an error. Names affect only the matching of arguments to parameters, not the types. A mismatch for a named
+    parameter says which argument it is for, as in `Expected Nat for argument hOffset but found String`.
   - A named argument may be left out, and then takes the default value of its type: `0` for `Nat` and `Int`, `0.0`
     for `Float`, `""` for `String`, `[]` for an array, the defaults of the fields for a record, and the first
     constructor of an enum with the defaults of its fields. Unnamed parameters must still be supplied. It is an error
@@ -77,18 +77,20 @@ Following the style in https://keepachangelog.com/en/1.0.0/
     nodes than `--default-limit=N` allows (10,000 by default; the library option is `CheckOptions::default_limit`).
   - The grammar files, the diagrams and `syntax/grammar.md` describe `NamedParameter` and `NamedArgument`, and
     show that named ones come after unnamed ones.
-- A postfix `?` on a type is shorthand for `Option`: `Nat?` is `Option<Nat>`, `[Nat]?` is `Option<[Nat]>` and
-  `Nat??` is `Option<Option<Nat>>`. It applies to the whole type before it, it is only sugar so it needs an `Option`
-  to be declared (the prelude has one), and messages show `Option<Nat>`. An `Option` parameter that is named may be
-  left out, as it defaults to `None`.
-- An experimental postfix `?` on a value is shorthand for `Some`: `0?` is `Some(0)`. It is a syntax error unless it is
-  switched on, with `constructo check -x` for every experimental feature or `-x=some-query` (`--experimental`) for this
-  one. The option's value must be given with `=`, it can be repeated, and an unknown name is a usage error. The
-  library has `CheckOptions::experimental`, and `parse_file` and `syntax_error` take an `Experimental` argument.
-  The grammar files, the diagrams and `syntax/grammar.md` show both.
+- A postfix `?` on a type is shorthand for `Option` (decision 19): `Nat?` is `Option<Nat>`, `[Nat]?` is
+  `Option<[Nat]>` and `Nat??` is `Option<Option<Nat>>`. It applies to the whole type before it, it is only sugar so it
+  needs an `Option` to be declared (the prelude has one), and messages show `Option<Nat>`. An `Option` parameter that
+  is named may be left out, as it defaults to `None`.
+- An experimental postfix `?` on a value is shorthand for `Some`: `0?` is `Some(0)` (decision 20). It is a syntax
+  error unless it is switched on, with `constructo check -x` for every experimental feature or `-x=some-query`
+  (`--experimental`) for this one. The option's value must be given with `=`, it can be repeated, and an unknown name
+  is a usage error. The library has `CheckOptions::experimental`, and `parse_file` and `syntax_error` take an
+  `Experimental` argument. The grammar files, the diagrams and `syntax/grammar.md` show both.
 
 ### Changed
 
+- The prelude declares `enum Bool = False, True;` and not `True, False`, so that the default of a `Bool` parameter
+  that is left out is `false`.
 - Data values are separated by semi-colons, with an optional trailing one. This resolves the ambiguity of a
   constructor followed by a record or tuple. The values examples and grammar are updated.
 - `docs/vision.md` diagnostics now include the file name.
