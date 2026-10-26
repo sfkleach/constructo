@@ -491,6 +491,55 @@ expect_exit "without the prelude the shorthands are unknown" 1 \
     check --no-prelude -x "$EXAMPLES/valid/postfix-optional.types"
 echo ""
 
+echo "--- paired flags ---"
+# The last of a flag and its opposite wins, whichever order they come in.
+TYPES="$EXAMPLES/valid/postfix-optional.types"
+SOME_QUERY="$VALUES/experimental/valid/some-query.values"
+expect_exit "--prelude after --no-prelude loads the prelude" 0 check --no-prelude --prelude "$TYPES"
+expect_exit "--no-prelude after --prelude does not" 1 check --prelude --no-prelude "$TYPES"
+expect_exit "--type-check after --no-type-check checks the types" 1 \
+    check --no-type-check --type-check "$VALUES/valid/single-value.values"
+expect_exit "--no-type-check after --type-check does not" 0 \
+    check --type-check --no-type-check "$VALUES/valid/single-value.values"
+expect_exit "--widening after --no-widening widens" 0 \
+    check --no-widening --widening "$TYPED/schema.types" "$TYPED/valid/shapes.values"
+expect_exit "--no-widening after --widening does not" 1 \
+    check --widening --no-widening "$TYPED/schema.types" "$TYPED/valid/shapes.values"
+for order in "--continue --no-continue" "--no-continue --continue"; do
+    # shellcheck disable=SC2086
+    errors="$("$CONSTRUCTO" check $order "$TYPED/schema.types" "$TYPED/invalid/missing-field.values" \
+        "$TYPED/invalid/unknown-field.values" 2>&1 >/dev/null || true)"
+    if [[ "$order" == "--continue --no-continue" && "$(wc -l <<< "$errors")" -eq 1 ]] \
+        || [[ "$order" == "--no-continue --continue" && "$(wc -l <<< "$errors")" -eq 2 ]]; then
+        pass "the last of $order wins"
+    else
+        fail "the last of $order wins (got '$errors')"
+    fi
+done
+expect_exit "--allow-refs after --no-allow-refs allows references" 0 \
+    check --no-allow-refs --allow-refs "$REFS/chain.types"
+expect_exit "--no-allow-refs after --allow-refs does not" 1 check --allow-refs --no-allow-refs "$REFS/chain.types"
+quiet="$("$CONSTRUCTO" check -v --no-verbose "$EXAMPLES/valid/empty.types" 2>&1)"
+loud="$("$CONSTRUCTO" check --no-verbose -v "$EXAMPLES/valid/empty.types" 2>&1)"
+if [[ -z "$quiet" && "$loud" == *"OK: checked 1 file(s)"* ]]; then
+    pass "the last of --verbose and --no-verbose wins"
+else
+    fail "the last of --verbose and --no-verbose wins (got '$quiet' and '$loud')"
+fi
+expect_exit "-x then --no-experimental=some-query switches the feature off" 1 \
+    check -x --no-experimental=some-query --no-type-check "$SOME_QUERY"
+expect_exit "--no-experimental=some-query then -x switches it on" 0 \
+    check --no-experimental=some-query -x --no-type-check "$SOME_QUERY"
+expect_exit "-x then a bare --no-experimental switches every feature off" 1 \
+    check -x --no-experimental --no-type-check "$SOME_QUERY"
+expect_exit "a bare --no-experimental then -x=some-query switches it on" 0 \
+    check --no-experimental -x=some-query --no-type-check "$SOME_QUERY"
+expect_exit "--no-experimental=some-query on its own changes nothing" 1 \
+    check --no-experimental=some-query --no-type-check "$SOME_QUERY"
+expect_exit "an unknown name for --no-experimental is a usage error" 2 \
+    check --no-experimental=nonsense "$EXAMPLES/valid/empty.types"
+echo ""
+
 TOTAL=$(( PASS + FAIL ))
 echo "Results: $PASS/$TOTAL passed"
 if [[ $FAIL -gt 0 ]]; then
