@@ -1,4 +1,4 @@
-use clap::{ArgAction, Parser, Subcommand, ValueEnum};
+use clap::{ArgAction, ArgMatches, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use constructo::{
     check_sources_with, prelude_source, syntax_error, CheckOptions, Experimental, Outcome, Source, SourceKind,
     DEFAULT_INFER_LIMIT, DEFAULT_VALUE_LIMIT,
@@ -28,16 +28,48 @@ enum Feature {
     SomeQuery,
 }
 
-/// Works out which experimental features have been switched on.
-fn experimental(features: &[Feature]) -> Experimental {
+/// Works out which experimental features have been switched on, given the arguments that switch features on or off
+/// in the order in which they were written. The last argument to mention a feature wins.
+fn experimental(changes: &[(bool, Feature)]) -> Experimental {
     let mut experimental = Experimental::default();
-    for feature in features {
+    for (on, feature) in changes {
         match feature {
-            Feature::All => experimental = Experimental::all(),
-            Feature::SomeQuery => experimental.some_query = true,
+            Feature::All => {
+                experimental = if *on {
+                    Experimental::all()
+                } else {
+                    Experimental::default()
+                }
+            }
+            Feature::SomeQuery => experimental.some_query = *on,
         }
     }
     experimental
+}
+
+/// The arguments `--experimental` and `--no-experimental` in the order in which they were written, each with whether
+/// it switches features on. Clap keeps the values of the two options apart, so the order comes from their indices.
+fn feature_changes(matches: &ArgMatches) -> Vec<(bool, Feature)> {
+    let mut changes: Vec<(usize, bool, Feature)> = Vec::new();
+    for (name, on) in [("experimental", true), ("no_experimental", false)] {
+        if let (Some(indices), Some(values)) = (matches.indices_of(name), matches.get_many::<Feature>(name)) {
+            changes.extend(indices.zip(values).map(|(index, feature)| (index, on, *feature)));
+        }
+    }
+    changes.sort_by_key(|(index, _, _)| *index);
+    changes.into_iter().map(|(_, on, feature)| (on, feature)).collect()
+}
+
+/// The value of a setting that has a positive and a negative flag. Giving one of the flags after the other undoes it,
+/// which clap arranges with `overrides_with`, so at most one of them is set here.
+fn setting(on: bool, off: bool, default: bool) -> bool {
+    if on {
+        true
+    } else if off {
+        false
+    } else {
+        default
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -48,25 +80,45 @@ enum Command {
         #[arg(long)]
         stdin: bool,
 
+        /// Load the standard prelude (Bool and Option) [default]
+        #[arg(long, overrides_with = "no_prelude")]
+        prelude: bool,
+
         /// Do not load the standard prelude (Bool and Option)
-        #[arg(long)]
+        #[arg(long, overrides_with = "prelude")]
         no_prelude: bool,
 
+        /// Check that data-values match the data-types [default]
+        #[arg(long, overrides_with = "no_type_check")]
+        type_check: bool,
+
         /// Only check that data-values are well-formed, not that they match the data-types
-        #[arg(long)]
+        #[arg(long, overrides_with = "type_check")]
         no_type_check: bool,
 
+        /// Let a Nat fit where an Int or Float is expected, and an Int where a Float is expected [default]
+        #[arg(long, overrides_with = "no_widening")]
+        widening: bool,
+
         /// Require numbers to have exactly the expected type: no Nat as an Int, and no Nat or Int as a Float
-        #[arg(long)]
+        #[arg(long, overrides_with = "widening")]
         no_widening: bool,
 
         /// After a type error, carry on with the next value to report more errors
-        #[arg(long = "continue")]
+        #[arg(long = "continue", overrides_with = "no_continue")]
         continue_after_error: bool,
 
+        /// Stop at the first type error [default]
+        #[arg(long = "no-continue", overrides_with = "continue_after_error")]
+        no_continue: bool,
+
         /// Let the definition of a const refer to other consts
-        #[arg(long)]
+        #[arg(long, overrides_with = "no_allow_refs")]
         allow_refs: bool,
+
+        /// Do not let the definition of a const refer to other consts [default]
+        #[arg(long, overrides_with = "allow_refs")]
+        no_allow_refs: bool,
 
         /// The most nodes that the type inferred for a const may have
         #[arg(long, value_name = "N", default_value_t = DEFAULT_INFER_LIMIT)]
@@ -77,7 +129,7 @@ enum Command {
         default_limit: usize,
 
         /// Switch on experimental features. On its own it switches on all of them, and `-x=FEATURE` switches on just
-        /// that one. The option can be repeated.
+        /// that one. The option can be repeated, and for each feature the last of this and --no-experimental wins.
         #[arg(
             short = 'x',
             long,
@@ -90,9 +142,26 @@ enum Command {
         )]
         experimental: Vec<Feature>,
 
+        /// Switch off experimental features. On its own it switches off all of them, and `--no-experimental=FEATURE`
+        /// switches off just that one. The option can be repeated.
+        #[arg(
+            long,
+            value_name = "FEATURE",
+            value_enum,
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "all",
+            action = ArgAction::Append
+        )]
+        no_experimental: Vec<Feature>,
+
         /// Print a message when the check succeeds
-        #[arg(long, short)]
+        #[arg(long, short, overrides_with = "no_verbose")]
         verbose: bool,
+
+        /// Do not print a message when the check succeeds [default]
+        #[arg(long, overrides_with = "verbose")]
+        no_verbose: bool,
 
         /// The files to check
         #[arg(value_name = "FILES", required_unless_present = "stdin")]
@@ -101,31 +170,50 @@ enum Command {
 }
 
 fn main() -> ExitCode {
-    let cli = Cli::parse();
+    let matches = Cli::command().get_matches();
+    let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
     match cli.command {
         Command::Check {
             stdin,
+            prelude,
             no_prelude,
+            type_check,
             no_type_check,
+            widening,
             no_widening,
             continue_after_error,
+            no_continue,
             allow_refs,
+            no_allow_refs,
             infer_limit,
             default_limit,
-            experimental: features,
+            experimental: _,
+            no_experimental: _,
             verbose,
+            no_verbose,
             files,
         } => {
+            // The subcommand is there, since the command line was parsed into it.
+            let check_matches = matches
+                .subcommand_matches("check")
+                .expect("the check subcommand was given");
             let options = CheckOptions {
-                type_check: !no_type_check,
-                widening: !no_widening,
-                continue_after_error,
-                allow_refs,
+                type_check: setting(type_check, no_type_check, true),
+                widening: setting(widening, no_widening, true),
+                continue_after_error: setting(continue_after_error, no_continue, false),
+                allow_refs: setting(allow_refs, no_allow_refs, false),
                 infer_limit,
                 default_limit,
-                experimental: experimental(&features),
+                experimental: experimental(&feature_changes(check_matches)),
             };
-            check(stdin, no_prelude, verbose, &options, &files)
+            let load_prelude = setting(prelude, no_prelude, true);
+            check(
+                stdin,
+                !load_prelude,
+                setting(verbose, no_verbose, false),
+                &options,
+                &files,
+            )
         }
     }
 }
@@ -208,5 +296,40 @@ fn check(stdin: bool, no_prelude: bool, verbose: bool, options: &CheckOptions, f
         ExitCode::SUCCESS
     } else {
         ExitCode::from(EXIT_ERRORS)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_last_change_to_a_feature_wins() {
+        assert_eq!(experimental(&[]), Experimental::default());
+        assert_eq!(experimental(&[(true, Feature::SomeQuery)]), Experimental::all());
+        assert_eq!(
+            experimental(&[(true, Feature::SomeQuery), (false, Feature::SomeQuery)]),
+            Experimental::default()
+        );
+        assert_eq!(
+            experimental(&[(true, Feature::All), (false, Feature::SomeQuery)]),
+            Experimental::default()
+        );
+        assert_eq!(
+            experimental(&[(false, Feature::All), (true, Feature::SomeQuery)]),
+            Experimental::all()
+        );
+        assert_eq!(
+            experimental(&[(false, Feature::SomeQuery), (true, Feature::All)]),
+            Experimental::all()
+        );
+    }
+
+    #[test]
+    fn a_setting_takes_the_flag_that_was_given() {
+        assert!(setting(true, false, false));
+        assert!(!setting(false, true, true));
+        assert!(setting(false, false, true));
+        assert!(!setting(false, false, false));
     }
 }
