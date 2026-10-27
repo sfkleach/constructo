@@ -567,6 +567,16 @@ else
 fi
 expect_exit "--config can only be given once" 2 check --config="$CONFIG/valid/empty.toml" \
     --config="$CONFIG/valid/full.toml" "$EMPTY"
+expect_exit "--config cannot be given before and after the subcommand" 2 --config="$CONFIG/valid/empty.toml" \
+    check --config="$CONFIG/valid/full.toml" --print-config
+expect_exit "--config cannot be given before and after the subcommand, with a space" 2 \
+    --config "$CONFIG/valid/empty.toml" check --config "$CONFIG/valid/full.toml" "$EMPTY"
+err="$("$CONSTRUCTO" --config="$CONFIG/valid/empty.toml" check --config="$CONFIG/valid/full.toml" "$EMPTY" 2>&1 || true)"
+if [[ "$err" == *"--config can only be given once"* ]]; then
+    pass "the repeated --config is reported"
+else
+    fail "the repeated --config is reported (got '$err')"
+fi
 expect_exit "--config comes before the subcommand too" 0 --config="$CONFIG/valid/full.toml" check "$EMPTY"
 expect_exit "the config is read even if there are no files to check" 2 check --stdin \
     --config="$CONFIG/invalid/unknown-key.toml" < /dev/null

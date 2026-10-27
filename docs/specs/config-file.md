@@ -68,7 +68,7 @@ A limit is a whole number that is not negative.
 ## What is not in the file
 
 The inputs (the files to check and `--stdin`) are never taken from the file, and nor are `--config`, `--print-config`,
-`--help` and `--version`. `--config` can be given once.
+`--help` and `--version`. `--config` can be given once in all, whether it is before or after the subcommand.
 
 ## Errors
 
