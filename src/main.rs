@@ -14,7 +14,8 @@ const EXIT_USAGE: u8 = 2;
 #[derive(Parser, Debug)]
 #[command(name = "constructo", version, about = "Tools for Constructo files")]
 struct Cli {
-    /// Read settings from a TOML file. An option given on the command line overrides the file
+    /// Read settings from a TOML file. An option given on the command line overrides the file.
+    /// `constructo check --print-config` writes a file to start from
     #[arg(long, global = true, value_name = "PATH")]
     config: Option<PathBuf>,
 
@@ -80,6 +81,14 @@ fn setting(on: bool, off: bool, default: bool) -> bool {
 #[derive(Subcommand, Debug)]
 enum Command {
     /// Check the syntax and type-correctness of Constructo files
+    #[command(after_help = "\
+Settings can also be put in a TOML file that is named with --config=PATH. An option on the command line overrides the \
+file, which overrides the built-in default. To write a template that has every setting, with a comment on each, run:
+
+    constructo check --print-config > constructo.toml
+
+The format of the file is described in
+https://github.com/sfkleach/constructo/blob/main/docs/specs/config-file.md")]
     Check {
         /// Also process the standard input as if it were another file
         #[arg(long)]
@@ -168,8 +177,13 @@ enum Command {
         #[arg(long, overrides_with = "verbose")]
         no_verbose: bool,
 
+        /// Print the settings that the run would use, after the defaults, --config and the other options, as a
+        /// commented TOML file that --config can read, and exit without checking. It is a template for a config file
+        #[arg(long)]
+        print_config: bool,
+
         /// The files to check
-        #[arg(value_name = "FILES", required_unless_present = "stdin")]
+        #[arg(value_name = "FILES", required_unless_present_any = ["stdin", "print_config"])]
         files: Vec<PathBuf>,
     },
 }
@@ -217,6 +231,7 @@ fn main() -> ExitCode {
             no_experimental: _,
             verbose,
             no_verbose,
+            print_config,
             files,
         } => {
             // The subcommand is there, since the command line was parsed into it.
@@ -234,13 +249,12 @@ fn main() -> ExitCode {
                 experimental: experimental(from_file.experimental, &feature_changes(check_matches)),
             };
             let load_prelude = setting(prelude, no_prelude, config.prelude());
-            check(
-                stdin,
-                !load_prelude,
-                setting(verbose, no_verbose, config.verbose()),
-                &options,
-                &files,
-            )
+            let verbose = setting(verbose, no_verbose, config.verbose());
+            if print_config {
+                print!("{}", Config::effective(&options, load_prelude, verbose).to_toml());
+                return ExitCode::SUCCESS;
+            }
+            check(stdin, !load_prelude, verbose, &options, &files)
         }
     }
 }
