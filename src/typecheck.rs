@@ -848,6 +848,15 @@ impl Checker<'_, '_> {
                 );
                 error(pos, message)
             }
+            Err(NoDefault::TooDeep) => {
+                let message = format!(
+                    "The default value of {} is nested more than {} levels deep, which is too large; give argument {}",
+                    self.show(ty),
+                    MAX_TYPE_DEPTH,
+                    parameter
+                );
+                error(pos, message)
+            }
         }
     }
 
@@ -876,6 +885,11 @@ impl Checker<'_, '_> {
             };
             if matches!(ty, Ty::Var(_) | Ty::Param(_) | Ty::Gen(_)) {
                 return Err(NoDefault::Unknown);
+            }
+            // A type whose arguments keep growing would otherwise be expanded until the node limit, and a type that is
+            // thousands of levels deep overflows the stack when it is cloned or freed.
+            if is_deeper_than(&ty, MAX_TYPE_DEPTH) {
+                return Err(NoDefault::TooDeep);
             }
             if *remaining == 0 {
                 return Err(NoDefault::TooLarge);
@@ -917,12 +931,34 @@ impl Checker<'_, '_> {
     }
 }
 
+/// The most levels of arrays, records and type arguments that a type may have when its default value is worked out.
+/// Substituting arguments can make a type deeper than any that is written, so this is larger than the nesting limit of
+/// the parser. It is chosen to keep well inside the smallest stack that the checker might run on: freeing a type uses
+/// a little under 200 bytes of stack per level in a debug build, so this takes about 200 KB.
+const MAX_TYPE_DEPTH: u32 = 1000;
+
+/// Whether a type has more than `levels` levels of arrays, records and type arguments. The search stops at the limit, so
+/// it cannot overflow the stack however deep the type is.
+fn is_deeper_than(ty: &Ty, levels: u32) -> bool {
+    if levels == 0 {
+        return true;
+    }
+    match ty {
+        Ty::Array(element) => is_deeper_than(element, levels - 1),
+        Ty::Enum(_, args) => args.iter().any(|arg| is_deeper_than(arg, levels - 1)),
+        Ty::Record(fields) => fields.iter().any(|(_, field)| is_deeper_than(field, levels - 1)),
+        _ => false,
+    }
+}
+
 /// Why a type has no default value that can be used.
 enum NoDefault {
     /// The type was met again while working out its own default, so the expansion would never end.
     Recursive(Ty),
     /// The expansion has more nodes than the limit.
     TooLarge,
+    /// The type is nested more deeply than a type can be written.
+    TooDeep,
     /// The type, or a part of it, is not known.
     Unknown,
 }
@@ -1203,6 +1239,18 @@ mod tests {
             "{:?}",
             found
         );
+    }
+
+    #[test]
+    fn a_type_made_deep_by_substitution_still_has_a_default() {
+        // Each part is within the nesting limit of the parser, but the field of the result is 300 levels deep.
+        let arrays = |inner: &str| format!("{}{}{}", "[".repeat(150), inner, "]".repeat(150));
+        let types = format!(
+            "enum Wrap<T> = Wrap(v: {}); enum Holder = Holder(x: Wrap<{}>);",
+            arrays("T"),
+            arrays("Nat")
+        );
+        assert_eq!(errors(&types, "Holder()", true), Vec::<String>::new());
     }
 
     #[test]
