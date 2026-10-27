@@ -14,3 +14,7 @@ const grid: Matrix = Rows[[1, 2], [3]];
 const some: Maybe = Maybe[null, null];
 const wrapped: Wrapper = Wrapper(Some(Users[]));
 enum Wrapper = Wrapper(users: Users?);
+// The type of a const without one is inferred, with the parameters unified across the elements.
+const inferred = Items[1, 2.5];
+const generic<T>: JoinList<T> = Items[];
+const empty = Items[];
