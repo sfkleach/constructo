@@ -1,0 +1,3 @@
+# expect: unknown field `alow-refs`
+[check]
+alow-refs = true

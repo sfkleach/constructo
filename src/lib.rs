@@ -3,6 +3,7 @@
 //! The `constructo` command-line tool is a thin layer over this crate.
 
 pub mod ast;
+pub mod config;
 pub mod diagnostics;
 pub mod lexer;
 pub mod parser;
@@ -15,6 +16,7 @@ use parser::{parse_file, Parsed};
 use typecheck::{check_consts, check_value, Env};
 use validate::{validate, ParsedFile};
 
+pub use config::Config;
 pub use parser::{Experimental, SourceKind};
 pub use typecheck::{DEFAULT_INFER_LIMIT, DEFAULT_VALUE_LIMIT};
 

@@ -23,3 +23,7 @@
 - `values/typed`: values that are checked against `values/typed/schema.types` (and the prelude). `valid/` must pass
   and `invalid/` must fail the type-check, though each invalid file is well-formed.
   Each invalid file has a `// expect: <message>` line, and the functional test requires that exact error.
+- `config`: configuration files for `--config`, which are TOML and not Constructo. `valid/` must load, and `invalid/`
+  must be rejected with exit code 2. Each invalid file has a `# expect: <message>` line, and the functional test
+  requires that the error starts with exactly that. `precedence/` has the files that the functional tests combine with
+  arguments to check that an explicit argument overrides the file.

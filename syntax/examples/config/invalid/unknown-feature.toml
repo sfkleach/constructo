@@ -1,0 +1,3 @@
+# expect: unknown field `some_query`
+[experimental]
+some_query = true

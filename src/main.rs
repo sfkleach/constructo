@@ -1,7 +1,6 @@
 use clap::{ArgAction, ArgMatches, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use constructo::{
-    check_sources_with, prelude_source, syntax_error, CheckOptions, Experimental, Outcome, Source, SourceKind,
-    DEFAULT_INFER_LIMIT, DEFAULT_VALUE_LIMIT,
+    check_sources_with, prelude_source, syntax_error, CheckOptions, Config, Experimental, Outcome, Source, SourceKind,
 };
 use std::io::Read;
 use std::path::PathBuf;
@@ -15,6 +14,10 @@ const EXIT_USAGE: u8 = 2;
 #[derive(Parser, Debug)]
 #[command(name = "constructo", version, about = "Tools for Constructo files")]
 struct Cli {
+    /// Read settings from a TOML file. An option given on the command line overrides the file
+    #[arg(long, global = true, value_name = "PATH")]
+    config: Option<PathBuf>,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -28,10 +31,11 @@ enum Feature {
     SomeQuery,
 }
 
-/// Works out which experimental features have been switched on, given the arguments that switch features on or off
-/// in the order in which they were written. The last argument to mention a feature wins.
-fn experimental(changes: &[(bool, Feature)]) -> Experimental {
-    let mut experimental = Experimental::default();
+/// Works out which experimental features have been switched on, given the ones that are on to begin with and the
+/// arguments that switch features on or off in the order in which they were written. The last argument to mention a
+/// feature wins.
+fn experimental(start: Experimental, changes: &[(bool, Feature)]) -> Experimental {
+    let mut experimental = start;
     for (on, feature) in changes {
         match feature {
             Feature::All => {
@@ -60,8 +64,9 @@ fn feature_changes(matches: &ArgMatches) -> Vec<(bool, Feature)> {
     changes.into_iter().map(|(_, on, feature)| (on, feature)).collect()
 }
 
-/// The value of a setting that has a positive and a negative flag. Giving one of the flags after the other undoes it,
-/// which clap arranges with `overrides_with`, so at most one of them is set here.
+/// The value of a setting that has a positive and a negative flag, where `default` is what applies if neither is given,
+/// which is the setting from the configuration file or else the built-in default. Giving one of the flags after the
+/// other undoes it, which clap arranges with `overrides_with`, so at most one of them is set here.
 fn setting(on: bool, off: bool, default: bool) -> bool {
     if on {
         true
@@ -120,13 +125,13 @@ enum Command {
         #[arg(long, overrides_with = "allow_refs")]
         no_allow_refs: bool,
 
-        /// The most nodes that the type inferred for a const may have
-        #[arg(long, value_name = "N", default_value_t = DEFAULT_INFER_LIMIT)]
-        infer_limit: usize,
+        /// The most nodes that the type inferred for a const may have [default: 10000]
+        #[arg(long, value_name = "N")]
+        infer_limit: Option<usize>,
 
-        /// The most nodes that the default value of an omitted argument may have
-        #[arg(long, value_name = "N", default_value_t = DEFAULT_VALUE_LIMIT)]
-        default_limit: usize,
+        /// The most nodes that the default value of an omitted argument may have [default: 10000]
+        #[arg(long, value_name = "N")]
+        default_limit: Option<usize>,
 
         /// Switch on experimental features. On its own it switches on all of them, and `-x=FEATURE` switches on just
         /// that one. The option can be repeated, and for each feature the last of this and --no-experimental wins.
@@ -169,9 +174,30 @@ enum Command {
     },
 }
 
+/// Reads the configuration file named by `--config`, if there is one.
+fn load_config(path: Option<&PathBuf>) -> Result<Config, ExitCode> {
+    let Some(path) = path else {
+        return Ok(Config::default());
+    };
+    let text = std::fs::read_to_string(path).map_err(|e| {
+        eprintln!("ERROR: Cannot read {}: {}", path.display(), e);
+        ExitCode::from(EXIT_USAGE)
+    })?;
+    Config::parse(&text, &path.display().to_string()).map_err(|diagnostic| {
+        eprintln!("{}", diagnostic);
+        ExitCode::from(EXIT_USAGE)
+    })
+}
+
 fn main() -> ExitCode {
     let matches = Cli::command().get_matches();
     let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
+    // The settings come from the built-in defaults, which the configuration file overrides, and the arguments that were
+    // given on the command line override both.
+    let config = match load_config(cli.config.as_ref()) {
+        Ok(config) => config,
+        Err(code) => return code,
+    };
     match cli.command {
         Command::Check {
             stdin,
@@ -197,20 +223,21 @@ fn main() -> ExitCode {
             let check_matches = matches
                 .subcommand_matches("check")
                 .expect("the check subcommand was given");
+            let from_file = config.check_options();
             let options = CheckOptions {
-                type_check: setting(type_check, no_type_check, true),
-                widening: setting(widening, no_widening, true),
-                continue_after_error: setting(continue_after_error, no_continue, false),
-                allow_refs: setting(allow_refs, no_allow_refs, false),
-                infer_limit,
-                default_limit,
-                experimental: experimental(&feature_changes(check_matches)),
+                type_check: setting(type_check, no_type_check, from_file.type_check),
+                widening: setting(widening, no_widening, from_file.widening),
+                continue_after_error: setting(continue_after_error, no_continue, from_file.continue_after_error),
+                allow_refs: setting(allow_refs, no_allow_refs, from_file.allow_refs),
+                infer_limit: infer_limit.unwrap_or(from_file.infer_limit),
+                default_limit: default_limit.unwrap_or(from_file.default_limit),
+                experimental: experimental(from_file.experimental, &feature_changes(check_matches)),
             };
-            let load_prelude = setting(prelude, no_prelude, true);
+            let load_prelude = setting(prelude, no_prelude, config.prelude());
             check(
                 stdin,
                 !load_prelude,
-                setting(verbose, no_verbose, false),
+                setting(verbose, no_verbose, config.verbose()),
                 &options,
                 &files,
             )
@@ -305,24 +332,37 @@ mod tests {
 
     #[test]
     fn the_last_change_to_a_feature_wins() {
-        assert_eq!(experimental(&[]), Experimental::default());
-        assert_eq!(experimental(&[(true, Feature::SomeQuery)]), Experimental::all());
+        let none = Experimental::default();
+        assert_eq!(experimental(none, &[]), none);
+        assert_eq!(experimental(none, &[(true, Feature::SomeQuery)]), Experimental::all());
         assert_eq!(
-            experimental(&[(true, Feature::SomeQuery), (false, Feature::SomeQuery)]),
-            Experimental::default()
+            experimental(none, &[(true, Feature::SomeQuery), (false, Feature::SomeQuery)]),
+            none
         );
         assert_eq!(
-            experimental(&[(true, Feature::All), (false, Feature::SomeQuery)]),
-            Experimental::default()
+            experimental(none, &[(true, Feature::All), (false, Feature::SomeQuery)]),
+            none
         );
         assert_eq!(
-            experimental(&[(false, Feature::All), (true, Feature::SomeQuery)]),
+            experimental(none, &[(false, Feature::All), (true, Feature::SomeQuery)]),
             Experimental::all()
         );
         assert_eq!(
-            experimental(&[(false, Feature::SomeQuery), (true, Feature::All)]),
+            experimental(none, &[(false, Feature::SomeQuery), (true, Feature::All)]),
             Experimental::all()
         );
+    }
+
+    #[test]
+    fn the_features_that_the_file_switches_on_are_the_start() {
+        let all = Experimental::all();
+        assert_eq!(experimental(all, &[]), all);
+        assert_eq!(
+            experimental(all, &[(false, Feature::SomeQuery)]),
+            Experimental::default()
+        );
+        assert_eq!(experimental(all, &[(false, Feature::All)]), Experimental::default());
+        assert_eq!(experimental(all, &[(true, Feature::SomeQuery)]), all);
     }
 
     #[test]

@@ -1,0 +1,3 @@
+# expect: invalid type: floating point `1.5`
+[check]
+default-limit = 1.5
