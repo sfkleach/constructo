@@ -86,6 +86,24 @@ Following the style in https://keepachangelog.com/en/1.0.0/
   (`--experimental`) for this one. The option's value must be given with `=`, it can be repeated, and an unknown name
   is a usage error. The library has `CheckOptions::experimental`, and `parse_file` and `syntax_error` take an
   `Experimental` argument. The grammar files, the diagrams and `syntax/grammar.md` show both.
+- A configuration file, named with `constructo check --config=PATH` (decision 21). It is in TOML, with the tables
+  `[global]`, `[experimental]` and `[check]`, and a key is the long form of the option without the `--`, such as
+  `allow-refs` or `infer-limit`. An option on the command line overrides the file, which overrides the built-in
+  default. There is no search for a file, and `--config` can be given once, before or after the subcommand.
+  - Every problem is an error with exit code 2, in the usual form `ERROR: <message> (<file>, line L, col C)`: an
+    unknown key or table (the message lists the known ones), a value of the wrong type or out of range, and an error
+    in the TOML itself. A file that cannot be read is also exit code 2.
+  - The library has the `config` module, with `Config::parse` and `Config::check_options`, so a program that embeds it
+    can read the same file. The format is described in `docs/specs/config-file.md`.
+- `constructo check --print-config` prints the settings that the run would use, after the defaults, the file and the
+  options have been combined, as a TOML file with a comment on each key, and exits without checking anything. It is
+  a template for a configuration file and `--config` reads it back.
+- Every boolean option has a negative form, and the last one given wins: `--verbose` and `--no-verbose`, `--prelude`
+  and `--no-prelude`, `--type-check` and `--no-type-check`, `--widening` and `--no-widening`, `--continue` and
+  `--no-continue`, and `--allow-refs` and `--no-allow-refs`. So an option can undo a setting from the configuration
+  file. `--no-experimental`, with an optional `=FEATURE`, switches experimental features off, and it and `-x` apply
+  in order, feature by feature.
+- The dependencies `serde` and `toml`, for reading the configuration file.
 
 ### Changed
 
