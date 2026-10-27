@@ -38,5 +38,5 @@ This task makes it a command-line option and a config file setting, in the same 
 
 ## Dependencies
 
-This follows the config file task (`docs/tasks/2026-10-25-config-file/config-file.md`), which provides the config
+This follows the config file task (`docs/tasks/done/2026-10-25-config-file/config-file.md`), which provides the config
 file and `--print-config`.
