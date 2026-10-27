@@ -2,6 +2,7 @@ use clap::{ArgAction, ArgMatches, CommandFactory, FromArgMatches, Parser, Subcom
 use constructo::{
     check_sources_with, prelude_source, syntax_error, CheckOptions, Config, Experimental, Outcome, Source, SourceKind,
 };
+use std::ffi::OsString;
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -188,6 +189,17 @@ https://github.com/sfkleach/constructo/blob/main/docs/specs/config-file.md")]
     },
 }
 
+/// How many times `--config` is given in the arguments, wherever it is placed. Nothing after `--` is an option.
+fn config_occurrences(args: impl IntoIterator<Item = OsString>) -> usize {
+    args.into_iter()
+        .take_while(|arg| arg != "--")
+        .filter(|arg| {
+            let arg = arg.to_string_lossy();
+            arg == "--config" || arg.starts_with("--config=")
+        })
+        .count()
+}
+
 /// Reads the configuration file named by `--config`, if there is one.
 fn load_config(path: Option<&PathBuf>) -> Result<Config, ExitCode> {
     let Some(path) = path else {
@@ -206,6 +218,12 @@ fn load_config(path: Option<&PathBuf>) -> Result<Config, ExitCode> {
 fn main() -> ExitCode {
     let matches = Cli::command().get_matches();
     let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
+    // Clap keeps only the last value of a global option that is given on both sides of the subcommand, so repeats are
+    // counted in the raw arguments.
+    if config_occurrences(std::env::args_os().skip(1)) > 1 {
+        eprintln!("ERROR: --config can only be given once");
+        return ExitCode::from(EXIT_USAGE);
+    }
     // The settings come from the built-in defaults, which the configuration file overrides, and the arguments that were
     // given on the command line override both.
     let config = match load_config(cli.config.as_ref()) {
@@ -377,6 +395,17 @@ mod tests {
         );
         assert_eq!(experimental(all, &[(false, Feature::All)]), Experimental::default());
         assert_eq!(experimental(all, &[(true, Feature::SomeQuery)]), all);
+    }
+
+    #[test]
+    fn config_is_counted_on_both_sides_of_the_subcommand() {
+        let count = |args: &[&str]| config_occurrences(args.iter().map(OsString::from));
+        assert_eq!(count(&["check", "a.types"]), 0);
+        assert_eq!(count(&["--config=a.toml", "check", "a.types"]), 1);
+        assert_eq!(count(&["check", "--config", "a.toml"]), 1);
+        assert_eq!(count(&["--config=a.toml", "check", "--config=b.toml"]), 2);
+        assert_eq!(count(&["--config", "a.toml", "check", "--config", "b.toml"]), 2);
+        assert_eq!(count(&["check", "--", "--config=a.toml"]), 0);
     }
 
     #[test]
