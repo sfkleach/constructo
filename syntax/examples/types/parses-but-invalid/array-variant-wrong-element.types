@@ -1,0 +1,2 @@
+enum Items = Items[Nat];
+const bad: Items = Items[1, "two"];

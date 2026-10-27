@@ -324,9 +324,21 @@ impl Parser {
         let body = match self.peek() {
             Tok::LBrace => VariantBody::Record(self.record_body()?),
             Tok::LParen => VariantBody::Tuple(self.tuple_body()?),
+            Tok::LBracket => VariantBody::Array(self.array_body()?),
             _ => VariantBody::Unit,
         };
         Ok(Variant { name, pos, body })
+    }
+
+    /// The element type in the brackets of a variant such as `Users[User]`. There is exactly one.
+    fn array_body(&mut self) -> Result<Type> {
+        self.expect(Tok::LBracket, "'['")?;
+        let element = self.ty()?;
+        if self.peek() == &Tok::Comma {
+            return self.error("']' because an array variant has exactly one element type");
+        }
+        self.expect(Tok::RBracket, "']'")?;
+        Ok(element)
     }
 
     fn record_body(&mut self) -> Result<Vec<Field>> {
@@ -518,6 +530,7 @@ impl Parser {
                 let body = match self.peek() {
                     Tok::LBrace => Some(TaggedBody::Record(self.members()?)),
                     Tok::LParen => Some(TaggedBody::Tuple(self.tuple()?)),
+                    Tok::LBracket => Some(TaggedBody::Array(self.array()?)),
                     _ => None,
                 };
                 ValueKind::Tagged { name, body }
@@ -679,6 +692,65 @@ mod tests {
         let e = parse_values("X(a: 1, 2)").unwrap_err();
         assert_eq!((e.pos.line, e.pos.col), (1, 9));
         assert_eq!(e.message, "Positional argument after a named argument");
+    }
+
+    #[test]
+    fn parses_an_array_variant_with_one_element_type() {
+        let decls = parse("enum L<T> = Items[T], Join[L<T>], Rows[[Nat]], Maybe[Nat?], Done;")
+            .unwrap()
+            .enums;
+        let shown: Vec<String> = decls[0]
+            .variants
+            .iter()
+            .map(|v| match &v.body {
+                VariantBody::Array(element) => element.to_string(),
+                _ => "-".to_string(),
+            })
+            .collect();
+        assert_eq!(shown, ["T", "L<T>", "[Nat]", "Option<Nat>", "-"]);
+    }
+
+    #[test]
+    fn rejects_an_array_variant_without_exactly_one_element_type() {
+        let err = |text: &str| {
+            let e = parse(text).unwrap_err();
+            (e.pos.line, e.pos.col, e.message)
+        };
+        assert_eq!(err("enum A = X[];"), (1, 12, "Expected type".to_string()));
+        let (line, col, message) = err("enum A = X[Nat, String];");
+        assert_eq!((line, col), (1, 15));
+        assert!(message.contains("exactly one element type"), "{}", message);
+        assert_eq!(err("enum A = X[Nat;").2, "Expected ']'");
+    }
+
+    #[test]
+    fn parses_a_tagged_array_value() {
+        let values = parse_values("Items[1, 2,]; Items[]; Join[Items[1], Items[]]").unwrap();
+        let sizes: Vec<usize> = values
+            .iter()
+            .map(|v| match &v.kind {
+                ValueKind::Tagged {
+                    body: Some(TaggedBody::Array(items)),
+                    ..
+                } => items.len(),
+                other => panic!("not an array body: {:?}", other),
+            })
+            .collect();
+        assert_eq!(sizes, [2, 0, 2]);
+    }
+
+    #[test]
+    fn a_tagged_array_value_has_no_named_elements() {
+        let e = parse_values("Items[x: 1]").unwrap_err();
+        assert_eq!((e.pos.line, e.pos.col), (1, 8));
+        assert_eq!(e.message, "Expected comma or ']'");
+    }
+
+    #[test]
+    fn a_tagged_array_counts_towards_the_nesting_limit() {
+        let deep = |levels: usize| format!("{}1{}", "A[".repeat(levels), "]".repeat(levels));
+        assert!(parse_values(&deep(100)).is_ok());
+        assert!(parse_values(&deep(MAX_DEPTH as usize + 1)).is_err());
     }
 
     #[test]

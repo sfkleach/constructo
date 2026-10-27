@@ -1,0 +1,2 @@
+// expect: Expected [String] but found Names of type Names
+Config { name: "x", owner: None, limits: { cpu: 1, mem: 1 }, tags: Names["a"] }

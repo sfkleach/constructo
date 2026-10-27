@@ -39,7 +39,8 @@ Diagram(
         Optional(
             Choice(0,
                 NonTerminal('Record'),
-                NonTerminal('Tuple')
+                NonTerminal('Tuple'),
+                NonTerminal('Array')
             )
         )
     )

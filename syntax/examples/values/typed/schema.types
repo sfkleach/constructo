@@ -17,3 +17,6 @@ enum Linked = Linked(chain: Chain);
 enum Cell<T> = Cell(name: String, content: T);
 enum Cells = Cells(cell: Cell<Nat>);
 enum Attempt = Attempt(String, retries: Nat?, backup: Attempt?, tags: [String]?);
+enum JoinList<T> = Items[T], Join[JoinList<T>];
+enum Names = Names[String];
+enum Holder = Holder(list: JoinList<Nat>);
