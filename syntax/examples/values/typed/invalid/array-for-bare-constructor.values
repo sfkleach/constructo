@@ -1,0 +1,2 @@
+// expect: Constructor Dot takes no fields
+Dot[1]

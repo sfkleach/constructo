@@ -1,0 +1,10 @@
+Names["Ann", "Bob"];
+Names[];
+Items[1, 2];
+Join[Items[1, 2], Join[Items[3, 4], Items[5, 6]]];
+Items[];
+// The elements of a generic array are unified across the whole value.
+Items[1, 2.5];
+// A named argument that is left out takes the default of its type, which for JoinList is the empty Items.
+Holder();
+Holder(list: Join[Items[1]])

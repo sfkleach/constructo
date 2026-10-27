@@ -1,0 +1,2 @@
+// expect: Expected Nat but found String
+Join[Items[1], Items["x"]]

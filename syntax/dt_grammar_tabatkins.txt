@@ -81,9 +81,20 @@ Diagram(
         Optional(
             Choice(0,
                 NonTerminal('RecordBody'),
-                NonTerminal('TupleBody')
+                NonTerminal('TupleBody'),
+                NonTerminal('ArrayBody')
             )
         )
+    )
+)
+
+// ArrayBody
+Diagram(
+    Comment('ArrayBody'),
+    Sequence(
+        Terminal('['),
+        NonTerminal('Type'),
+        Terminal(']')
     )
 )
 

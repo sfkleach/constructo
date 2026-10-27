@@ -779,6 +779,11 @@ impl Checker<'_, '_> {
                 Ok(())
             }
             (VariantBody::Tuple(_), _) => error(pos, format!("Constructor {} takes a tuple", name)),
+            (VariantBody::Array(element), Some(TaggedBody::Array(items))) => {
+                let element = instantiate(element, &decl.params, &args);
+                items.iter().try_for_each(|item| self.check(item, &element))
+            }
+            (VariantBody::Array(_), _) => error(pos, format!("Constructor {} takes an array", name)),
         }
     }
 
@@ -918,6 +923,8 @@ impl Checker<'_, '_> {
                         VariantBody::Unit => Vec::new(),
                         VariantBody::Record(fields) => fields.iter().map(|f| &f.ty).collect(),
                         VariantBody::Tuple(parameters) => parameters.iter().map(|p| &p.ty).collect(),
+                        // The default of an array is the empty one, which has no parts.
+                        VariantBody::Array(_) => Vec::new(),
                     };
                     for declared in types.into_iter().rev() {
                         stack.push(Step::Visit(instantiate(declared, &decl.params, args)));

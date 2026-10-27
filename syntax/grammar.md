@@ -38,8 +38,9 @@ files for each grammar are in [examples/](examples/).
 A types file is a sequence of `enum` and `const` declarations, in any order. A file whose first token is `enum` or
 `const` is a types file.
 
-An `enum` declaration has optional type parameters and one or more variants, which are bare constructors, records or
-tuples.
+An `enum` declaration has optional type parameters and one or more variants, which are bare constructors, records,
+tuples or arrays. An array variant such as `Users[User]` holds an array whose elements have the one type in the
+brackets, and it is a different form from the tuple `Users([User])`: a value of one is never accepted for the other.
 
 A `const` declaration gives a name to a value. Its type is the `Type` after the colon, and it may be left out, in which
 case the type of the value is used. The type parameters, as in `const none<T>: Option<T> = None;`, say that the const
@@ -57,8 +58,8 @@ either case. The names `enum` and `const` are reserved, and cannot be used as th
 
 The rules are:
 
-`Data_Types`, `EnumDecl`, `ConstDecl`, `TypeParams`, `TypeParam`, `Variant`, `RecordBody`, `Field`, `TupleBody`,
-`NamedParameter`, `Type`, `TypeRef`, `ArrayType`, `TypeName`, `ConstName`, `field-name`, `Comment`.
+`Data_Types`, `EnumDecl`, `ConstDecl`, `TypeParams`, `TypeParam`, `Variant`, `ArrayBody`, `RecordBody`, `Field`,
+`TupleBody`, `NamedParameter`, `Type`, `TypeRef`, `ArrayType`, `TypeName`, `ConstName`, `field-name`, `Comment`.
 
 ![Data-types grammar](dt_grammar.svg)
 

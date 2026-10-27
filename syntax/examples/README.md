@@ -23,6 +23,9 @@
 - `values/typed`: values that are checked against `values/typed/schema.types` (and the prelude). `valid/` must pass
   and `invalid/` must fail the type-check, though each invalid file is well-formed.
   Each invalid file has a `// expect: <message>` line, and the functional test requires that exact error.
+- `types/valid/array-variants.types`, the `array-variant-*` examples and `values/valid/tagged-array.values` show the
+  array variant `Users[User]` and its values `Users[u1, u2]`. `values/typed/valid/tagged-arrays.values` and the
+  `*array-variant*` and `*-for-array-variant*` files in `values/typed/invalid` are checked against the schema.
 - `config`: configuration files for `--config`, which are TOML and not Constructo. `valid/` must load, and `invalid/`
   must be rejected with exit code 2. Each invalid file has a `# expect: <message>` line, and the functional test
   requires that the error starts with exactly that. `precedence/` has the files that the functional tests combine with

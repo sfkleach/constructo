@@ -104,6 +104,12 @@ Following the style in https://keepachangelog.com/en/1.0.0/
   file. `--no-experimental`, with an optional `=FEATURE`, switches experimental features off, and it and `-x` apply
   in order, feature by feature.
 - The dependencies `serde` and `toml`, for reading the configuration file.
+- Array variants (decision 22): a variant may hold an array of one type, as in `enum Users = Users[User], NoUsers;`,
+  with values written `Users[u1, u2]` or `Users[]`. It is a different form from `Users([User])`, and a value of one is
+  not accepted for the other (`Constructor Users takes an array`). The brackets of a declaration hold exactly one
+  type, so `Users[A, B]` and `Users[]` are syntax errors, and the type parameters of a generic enum, as in
+  `enum JoinList<T> = Items[T], Join[JoinList<T>];`, are unified across the elements. The default of an array is the
+  empty array. The grammar files, the diagrams and `syntax/grammar.md` show `ArrayBody` and the array form of `Tagged`.
 
 ### Changed
 

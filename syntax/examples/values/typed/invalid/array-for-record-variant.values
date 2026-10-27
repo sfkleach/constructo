@@ -1,0 +1,2 @@
+// expect: Constructor Box takes a record
+Box[1.0, 2.0]

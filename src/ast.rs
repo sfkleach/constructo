@@ -52,6 +52,8 @@ pub enum VariantBody {
     Record(Vec<Field>),
     /// A tuple such as `Write(String)` or `Image(String, hOffset: Nat)`, possibly empty as in `Ping()`.
     Tuple(Vec<Parameter>),
+    /// An array of one element type, as in `Users[User]`. It is a different form from `Users([User])`.
+    Array(Type),
 }
 
 /// A parameter of a tuple constructor. Unnamed parameters come first and can only be bound by position.
@@ -92,7 +94,8 @@ pub enum ValueKind {
     Str(String),
     Array(Vec<Value>),
     Record(Vec<Member>),
-    /// A constructor, optionally followed by a record or a tuple, as in `Quit`, `Move { x: 1 }` or `Write("hi")`.
+    /// A constructor, optionally followed by a record, a tuple or an array, as in `Quit`, `Move { x: 1 }`,
+    /// `Write("hi")` or `Users[u1, u2]`.
     /// A bare name with no body may instead be a reference to a const, and a lowercase name always is.
     Tagged {
         name: String,
@@ -105,6 +108,8 @@ pub enum TaggedBody {
     Record(Vec<Member>),
     /// A tuple, possibly empty as in `Ping()`. Positional arguments come before any named ones.
     Tuple(Vec<Argument>),
+    /// An array, possibly empty as in `Users[]`. It has no names, so every element is an ordinary value.
+    Array(Vec<Value>),
 }
 
 /// An argument of a tuple constructor, which is either positional or given by the name of a parameter.
@@ -158,6 +163,7 @@ impl Value {
                 match body {
                     Some(TaggedBody::Record(members)) => members.iter().for_each(|m| m.value.names(out)),
                     Some(TaggedBody::Tuple(items)) => items.iter().for_each(|item| item.value.names(out)),
+                    Some(TaggedBody::Array(items)) => items.iter().for_each(|item| item.names(out)),
                     None => {}
                 }
             }

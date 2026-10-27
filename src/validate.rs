@@ -303,6 +303,7 @@ impl<'a> Checker<'a> {
             match &variant.body {
                 VariantBody::Unit => {}
                 VariantBody::Record(fields) => self.check_fields(file, fields, &mut params),
+                VariantBody::Array(element) => self.check_type(file, element, &mut params),
                 VariantBody::Tuple(parameters) => {
                     let mut seen: HashMap<&str, Pos> = HashMap::new();
                     for parameter in parameters {

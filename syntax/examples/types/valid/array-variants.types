@@ -1,0 +1,16 @@
+// A variant can hold an array of one type, written with the type in brackets.
+enum JoinList<T> = Items[T], Join[JoinList<T>];
+enum Users = Users[User], NoUsers;
+enum User = User { name: String };
+// The array may be empty, and its elements may be arrays, or have a postfix question mark.
+enum Matrix = Rows[[Nat]];
+enum Maybe = Maybe[Nat?];
+const one: JoinList<Nat> = Items[1];
+const joined: JoinList<Nat> = Join[Items[1, 2], Join[Items[3, 4], Items[5, 6]]];
+const nothing: JoinList<Nat> = Items[];
+const floats: JoinList<Float> = Items[1, 2.5];
+const users: Users = Users[User { name: "Ann" }, User { name: "Bob" }];
+const grid: Matrix = Rows[[1, 2], [3]];
+const some: Maybe = Maybe[null, null];
+const wrapped: Wrapper = Wrapper(Some(Users[]));
+enum Wrapper = Wrapper(users: Users?);
