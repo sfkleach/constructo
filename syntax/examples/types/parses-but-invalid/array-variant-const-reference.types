@@ -1,0 +1,3 @@
+enum Names = Names[String];
+const first = "Ann";
+const names: Names = Names[first];

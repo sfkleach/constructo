@@ -1,0 +1,2 @@
+enum JoinList<T> = Items[T], Join[JoinList<T>];
+const mixed = Join[Items[1], Items["two"]];
