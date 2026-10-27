@@ -1,0 +1,4 @@
+# expect: duplicate key
+[check]
+prelude = true
+prelude = false

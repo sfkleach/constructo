@@ -1,0 +1,3 @@
+# Settings that are left out keep their defaults.
+[check]
+continue = true

@@ -1,0 +1,3 @@
+# expect: invalid value: integer `-1`
+[check]
+infer-limit = -1

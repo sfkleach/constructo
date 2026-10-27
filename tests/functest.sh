@@ -540,6 +540,96 @@ expect_exit "an unknown name for --no-experimental is a usage error" 2 \
     check --no-experimental=nonsense "$EXAMPLES/valid/empty.types"
 echo ""
 
+echo "--- configuration files ---"
+CONFIG="$(dirname "$0")/../syntax/examples/config"
+EMPTY="$EXAMPLES/valid/empty.types"
+for f in "$CONFIG"/valid/*.toml; do
+    expect_exit "config/valid/$(basename "$f")" 0 check --config="$f" "$EMPTY"
+    expect_exit "config/valid/$(basename "$f") with a space before the path" 0 check --config "$f" "$EMPTY"
+done
+# Each invalid file names its expected error, which is reported in the usual form with exit code 2.
+for f in "$CONFIG"/invalid/*.toml; do
+    expected="$(sed -n 's|^# expect: ||p' "$f")"
+    actual=0
+    err="$("$CONSTRUCTO" check --config="$f" "$EMPTY" 2>&1 >/dev/null)" || actual=$?
+    if [[ -n "$expected" && "$actual" -eq 2 && "$err" == "ERROR: $expected"*"($f, line "* ]]; then
+        pass "config/invalid/$(basename "$f")"
+    else
+        fail "config/invalid/$(basename "$f") (expected exit 2 with '$expected', got exit $actual and '$err')"
+    fi
+done
+expect_exit "a missing config file is a usage error" 2 check --config=nothing-here.toml "$EMPTY"
+err="$("$CONSTRUCTO" check --config=nothing-here.toml "$EMPTY" 2>&1 >/dev/null || true)"
+if [[ "$err" == "ERROR: Cannot read nothing-here.toml: "* ]]; then
+    pass "a missing config file is reported"
+else
+    fail "a missing config file is reported (got '$err')"
+fi
+expect_exit "--config can only be given once" 2 check --config="$CONFIG/valid/empty.toml" \
+    --config="$CONFIG/valid/full.toml" "$EMPTY"
+expect_exit "--config comes before the subcommand too" 0 --config="$CONFIG/valid/full.toml" check "$EMPTY"
+expect_exit "the config is read even if there are no files to check" 2 check --stdin \
+    --config="$CONFIG/invalid/unknown-key.toml" < /dev/null
+echo ""
+
+echo "--- the command line overrides the config file ---"
+PRE="$CONFIG/precedence"
+two_errors() {
+    # Prints the number of errors reported for the two ill-typed values.
+    "$CONSTRUCTO" check "$@" "$TYPED/schema.types" "$TYPED/invalid/missing-field.values" \
+        "$TYPED/invalid/unknown-field.values" 2>&1 >/dev/null | wc -l
+}
+if [[ "$(two_errors)" -eq 1 && "$(two_errors --config="$PRE/continue.toml")" -eq 2 \
+    && "$(two_errors --config="$PRE/continue.toml" --no-continue)" -eq 1 \
+    && "$(two_errors --no-continue --config="$PRE/continue.toml")" -eq 1 \
+    && "$(two_errors --config="$PRE/continue.toml" --continue)" -eq 2 ]]; then
+    pass "continue: default, file and argument"
+else
+    fail "continue: default, file and argument"
+fi
+expect_exit "prelude: the file turns it off" 1 check --config="$PRE/no-prelude.toml" "$TYPES"
+expect_exit "prelude: --prelude overrides the file" 0 check --config="$PRE/no-prelude.toml" --prelude "$TYPES"
+expect_exit "type-check: the file turns it off" 0 \
+    check --config="$PRE/no-type-check.toml" "$VALUES/valid/single-value.values"
+expect_exit "type-check: --type-check overrides the file" 1 \
+    check --config="$PRE/no-type-check.toml" --type-check "$VALUES/valid/single-value.values"
+expect_exit "widening: the file turns it off" 1 \
+    check --config="$PRE/no-widening.toml" "$TYPED/schema.types" "$TYPED/valid/shapes.values"
+expect_exit "widening: --widening overrides the file" 0 \
+    check --config="$PRE/no-widening.toml" --widening "$TYPED/schema.types" "$TYPED/valid/shapes.values"
+expect_exit "allow-refs: the file turns it on" 0 check --config="$PRE/allow-refs.toml" "$REFS/chain.types"
+expect_exit "allow-refs: --no-allow-refs overrides the file" 1 \
+    check --config="$PRE/allow-refs.toml" --no-allow-refs "$REFS/chain.types"
+quiet="$("$CONSTRUCTO" check "$EMPTY" 2>&1)"
+loud="$("$CONSTRUCTO" check --config="$PRE/verbose.toml" "$EMPTY" 2>&1)"
+overridden="$("$CONSTRUCTO" check --config="$PRE/verbose.toml" --no-verbose "$EMPTY" 2>&1)"
+if [[ -z "$quiet" && "$loud" == *"OK: checked 1 file(s)"* && -z "$overridden" ]]; then
+    pass "verbose: default, file and argument"
+else
+    fail "verbose: default, file and argument (got '$quiet', '$loud' and '$overridden')"
+fi
+OMITTED="$TYPED/valid/omitted-arguments.values"
+expect_exit "default-limit: the file sets it" 1 check --config="$PRE/limits.toml" "$TYPED/schema.types" "$OMITTED"
+expect_exit "default-limit: the argument overrides the file" 0 \
+    check --config="$PRE/limits.toml" --default-limit=10000 "$TYPED/schema.types" "$OMITTED"
+err="$("$CONSTRUCTO" check --config="$PRE/limits.toml" --allow-refs "$chain" 2>&1 >/dev/null || true)"
+if [[ "$err" == *"has more than 100 nodes"* ]]; then
+    pass "infer-limit: the file sets it"
+else
+    fail "infer-limit: the file sets it (got '$err')"
+fi
+expect_exit "infer-limit: the argument overrides the file" 0 \
+    check --config="$PRE/limits.toml" --infer-limit=5000000 --allow-refs "$chain"
+expect_exit "some-query: the file switches the feature on" 0 \
+    check --config="$PRE/some-query.toml" --no-type-check "$SOME_QUERY"
+expect_exit "some-query: --no-experimental=some-query overrides the file" 1 \
+    check --config="$PRE/some-query.toml" --no-experimental=some-query --no-type-check "$SOME_QUERY"
+expect_exit "some-query: a bare --no-experimental overrides the file" 1 \
+    check --config="$PRE/some-query.toml" --no-experimental --no-type-check "$SOME_QUERY"
+expect_exit "some-query: -x after --no-experimental switches it on again" 0 \
+    check --config="$PRE/some-query.toml" --no-experimental -x --no-type-check "$SOME_QUERY"
+echo ""
+
 TOTAL=$(( PASS + FAIL ))
 echo "Results: $PASS/$TOTAL passed"
 if [[ $FAIL -gt 0 ]]; then

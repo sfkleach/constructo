@@ -1,0 +1,3 @@
+# expect: invalid type: string "yes", expected a boolean
+[global]
+verbose = "yes"

@@ -1,0 +1,3 @@
+[check]
+default-limit = 2
+infer-limit = 100

@@ -1,0 +1,19 @@
+# Every setting, with its default.
+[global]
+verbose = false
+
+[check]
+prelude = true
+type-check = true
+widening = true
+continue = false
+allow-refs = false
+
+# Maximum number of nodes in the inferred type for a const.
+infer-limit = 10000
+
+# The most nodes that the default value of an omitted argument may have.
+default-limit = 10000
+
+[experimental]
+some-query = false
