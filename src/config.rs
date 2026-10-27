@@ -56,6 +56,97 @@ impl Config {
         })
     }
 
+    /// The settings that a run uses, with every key of the tables that `constructo check` has set.
+    pub fn effective(options: &CheckOptions, prelude: bool, verbose: bool) -> Config {
+        Config {
+            global: Global { verbose: Some(verbose) },
+            experimental: ExperimentalSettings {
+                some_query: Some(options.experimental.some_query),
+            },
+            check: CheckSettings {
+                prelude: Some(prelude),
+                type_check: Some(options.type_check),
+                widening: Some(options.widening),
+                continue_after_error: Some(options.continue_after_error),
+                allow_refs: Some(options.allow_refs),
+                infer_limit: Some(options.infer_limit),
+                default_limit: Some(options.default_limit),
+            },
+        }
+    }
+
+    /// The settings as a TOML document that `Config::parse` reads back. Every key is written, with its setting after
+    /// the defaults have been applied, and a comment says what it does. So the document is a template for a file.
+    pub fn to_toml(&self) -> String {
+        let options = self.check_options();
+        let sections: [(&str, Vec<Key>); 3] =
+            [
+                (
+                    "global",
+                    vec![Key::new(
+                        "verbose",
+                        "Report each input that was checked.",
+                        self.verbose(),
+                    )],
+                ),
+                (
+                    "experimental",
+                    vec![Key::new(
+                        "some-query",
+                        "A postfix `?` on a value, as in `0?`, is shorthand for `Some(0)`.",
+                        options.experimental.some_query,
+                    )],
+                ),
+                (
+                    "check",
+                    vec![
+                    Key::new("prelude", "Load the standard prelude, with Bool and Option.", self.prelude()),
+                    Key::new(
+                        "type-check",
+                        "Check that data-values match the data-types. If false, only check that they are well-formed.",
+                        options.type_check,
+                    ),
+                    Key::new(
+                        "widening",
+                        "Let a Nat fit where an Int or Float is expected, and an Int where a Float is expected.",
+                        options.widening,
+                    ),
+                    Key::new(
+                        "continue",
+                        "After a type error, carry on with the next value to report more errors.",
+                        options.continue_after_error,
+                    ),
+                    Key::new(
+                        "allow-refs",
+                        "Let the definition of a const refer to other consts.",
+                        options.allow_refs,
+                    ),
+                    Key::new(
+                        "infer-limit",
+                        "The most nodes that the type inferred for a const may have.",
+                        options.infer_limit,
+                    ),
+                    Key::new(
+                        "default-limit",
+                        "The most nodes that the default value of an omitted argument may have.",
+                        options.default_limit,
+                    ),
+                ],
+                ),
+            ];
+        let tables: Vec<String> = sections
+            .iter()
+            .map(|(table, keys)| {
+                let lines: Vec<String> = keys
+                    .iter()
+                    .map(|key| format!("# {}\n{} = {}\n", key.comment, key.name, key.value))
+                    .collect();
+                format!("[{}]\n{}", table, lines.join("\n"))
+            })
+            .collect();
+        tables.join("\n")
+    }
+
     /// The options for checking: the defaults, changed by what the file sets.
     pub fn check_options(&self) -> CheckOptions {
         let defaults = CheckOptions::default();
@@ -81,6 +172,24 @@ impl Config {
     /// Whether to report each input that was checked, which is not one of the `CheckOptions` either.
     pub fn verbose(&self) -> bool {
         self.global.verbose.unwrap_or(false)
+    }
+}
+
+/// A key of the configuration file as `Config::to_toml` writes it.
+struct Key {
+    name: &'static str,
+    comment: &'static str,
+    /// The value in TOML syntax.
+    value: String,
+}
+
+impl Key {
+    fn new(name: &'static str, comment: &'static str, value: impl std::fmt::Display) -> Key {
+        Key {
+            name,
+            comment,
+            value: value.to_string(),
+        }
     }
 }
 
@@ -132,6 +241,25 @@ mod tests {
                 experimental: Experimental::all(),
             }
         );
+    }
+
+    #[test]
+    fn the_effective_settings_are_written_so_that_they_can_be_read_back() {
+        let options = CheckOptions {
+            widening: false,
+            infer_limit: 7,
+            experimental: Experimental::all(),
+            ..CheckOptions::default()
+        };
+        let config = Config::effective(&options, false, true);
+        let text = config.to_toml();
+        assert!(
+            text.contains("[check]\n") && text.contains("infer-limit = 7\n") && text.contains("continue = false\n")
+        );
+        assert!(text.contains("# Load the standard prelude"), "{}", text);
+        assert_eq!(Config::parse(&text, "c.toml").unwrap(), config);
+        assert_eq!(config.check_options(), options);
+        assert!(!config.prelude() && config.verbose());
     }
 
     #[test]

@@ -628,6 +628,62 @@ expect_exit "some-query: a bare --no-experimental overrides the file" 1 \
     check --config="$PRE/some-query.toml" --no-experimental --no-type-check "$SOME_QUERY"
 expect_exit "some-query: -x after --no-experimental switches it on again" 0 \
     check --config="$PRE/some-query.toml" --no-experimental -x --no-type-check "$SOME_QUERY"
+echo "--- printing the effective settings ---"
+printed() { "$CONSTRUCTO" check --print-config "$@"; }
+# True if the printed settings contain the line, which is a key and its value.
+prints() { local line="$1"; shift; printed "$@" | grep -qxF "$line"; }
+expect_exit "--print-config needs no files" 0 check --print-config
+expect_exit "--print-config does not check the files" 0 check --print-config "$TYPED/schema.types" "$TYPED/invalid/missing-field.values"
+if [[ -z "$(printed 2>&1 >/dev/null)" && "$(printed)" == "$(printed --config="$CONFIG/valid/full.toml")" \
+    && "$(printed)" == "$(printed --config="$CONFIG/valid/empty.toml")" ]]; then
+    pass "print-config: the defaults are what the file with every default key gives"
+else
+    fail "print-config: the defaults are what the file with every default key gives"
+fi
+for line in "verbose = false" "prelude = true" "type-check = true" "widening = true" "continue = false" \
+    "allow-refs = false" "infer-limit = 10000" "default-limit = 10000" "some-query = false"; do
+    if prints "$line"; then pass "print-config shows $line by default"; else fail "print-config shows $line by default"; fi
+done
+for check in "continue = true:continue" "prelude = false:no-prelude" "type-check = false:no-type-check" \
+    "widening = false:no-widening" "allow-refs = true:allow-refs" "verbose = true:verbose" \
+    "infer-limit = 100:limits" "default-limit = 2:limits" "some-query = true:some-query"; do
+    line="${check%%:*}"; file="${check##*:}"
+    if prints "$line" --config="$PRE/$file.toml"; then
+        pass "print-config: $file.toml gives $line"
+    else
+        fail "print-config: $file.toml gives $line"
+    fi
+done
+if prints "continue = false" --config="$PRE/continue.toml" --no-continue \
+    && prints "continue = true" --no-continue --continue \
+    && prints "prelude = true" --config="$PRE/no-prelude.toml" --prelude \
+    && prints "infer-limit = 7" --config="$PRE/limits.toml" --infer-limit=7 \
+    && prints "some-query = false" --config="$PRE/some-query.toml" --no-experimental=some-query \
+    && prints "some-query = true" --config="$PRE/some-query.toml" --no-experimental -x; then
+    pass "print-config: an argument overrides the file"
+else
+    fail "print-config: an argument overrides the file"
+fi
+if printed | grep -qxF "# Load the standard prelude, with Bool and Option." \
+    && [[ "$(printed | grep -c '^# ')" -eq 9 ]]; then
+    pass "print-config: every key has a comment"
+else
+    fail "print-config: every key has a comment"
+fi
+help="$("$CONSTRUCTO" check --help)"
+if [[ "$help" == *"--print-config > constructo.toml"* && "$help" == *"docs/specs/config-file.md"* ]]; then
+    pass "--help says how to write a config file"
+else
+    fail "--help says how to write a config file"
+fi
+reloadable="$(mktemp)"
+printed --config="$PRE/limits.toml" --no-widening --no-prelude --continue --allow-refs -v -x > "$reloadable"
+if [[ "$(printed --config="$reloadable")" == "$(cat "$reloadable")" ]]; then
+    pass "print-config: the output can be loaded with --config"
+else
+    fail "print-config: the output can be loaded with --config"
+fi
+rm -f "$reloadable"
 echo ""
 
 TOTAL=$(( PASS + FAIL ))
