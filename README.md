@@ -25,7 +25,7 @@ Deploy {
     service: "https://predprod.acme.com/export?format=XML",
     env: Staging,
     replicas: 1,
-    canary: Some(Dev)   // or simply Dev?
+    canary: Some(Dev)
 }
 ```
 
