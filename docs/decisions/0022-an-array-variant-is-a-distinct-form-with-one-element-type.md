@@ -26,6 +26,14 @@ decide whether that is only another spelling of `Users([User])` or a form of its
 - The shape that is written in a value has to be the shape that was declared, for all four forms, and that is easy to
   explain and to check.
 - There are two ways to declare a variant of one array. A later lint could suggest the shorter one.
+- The shape of a variant is declared and cannot be recovered from a native value, so a serialiser with no mapping to
+  the types has to be told which shape to write. This is already so for the bare constructor, `Ping()` and `Ping{}`,
+  which all have no fields, and for a record variant `Users{user: User}` against a tuple that takes a record
+  `Users({user: User})`. The array variant is one more member of that family and not a new kind of problem.
+- Until serialisation has a better answer, a serialiser writes the shortest form that can hold the value: `Ping` and
+  not `Ping()` or `Ping{}`, `Users[User]` and not `Users([User])`, and `User{id: ...}` and not `User({id: ...})`. The
+  output then fails the check against a schema that declared the longer form, so such a schema has to be told, or
+  changed.
 - A variant that is an array cannot also take other arguments. That needs the tuple form, `Users([User], limit: Nat)`.
 
 ## Options and Outcome
