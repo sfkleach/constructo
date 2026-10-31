@@ -237,13 +237,59 @@ C. Inherited imports are a later task and do not appear in this step.
 
 ## Step 3: Standard Prelude
 
-With the advent of imports, the standard prelude can now be re-interpreted as an
-implicit import of a virtual project into group `local`. We reserve the
-`constructo` prefix for build in packages. And the standard prelude
-will use `constructo.prelude` as the project name.
+With the advent of imports, the standard prelude is a virtual project that every
+project imports into the group `local`, unless it says otherwise. The Step 1 and
+Step 2 fudge, where the command adds the prelude ahead of the project, goes away.
 
-The source of this virtual package is a distinctive URI such as 
-`constructo:/prelude.types`. Let's explore design options for this.
+### Built-in projects
+
+- The `constructo.` prefix is reserved for projects that are built in. The
+  standard prelude is `constructo.prelude`, and is held inside the binary.
+- A built-in project is a project like any other, with a project-file and types
+  files, and its source is a URI that names the project, as a folder would:
+  `constructo:/prelude`. The loader has a small table of built-in projects,
+  from the URI to the text of its files, so others can be added without new rules.
+  The types file of the prelude is shown in diagnostics as
+  `constructo:/prelude/prelude.types`, where `<prelude>` was.
+- The name of a user project may not be `constructo` or start with
+  `constructo.`; that is an error in its project-file. An import whose
+  `project-name` starts with `constructo.`, or whose `source` starts with
+  `constructo:`, must name a built-in project, with both agreeing, and
+  anything else is an error that lists the ones there are.
+- Built-in projects are not reported in verbose mode, as the prelude is not today.
+  The consts of a built-in project can be referred to without `--allow-refs`,
+  as those of the prelude can today.
+
+### The implicit import
+
+```toml
+# What a project that has no import of the prelude gets, in effect.
+[[import]]
+project-name = "constructo.prelude"
+group = "local"
+source = "constructo:/prelude"
+```
+
+- Every project gets this import, and so do the files given without a project.
+  It is a direct import, so `constructo.prelude::Bool` always works as well as `Bool`.
+- A project with an `[[import]]` of `constructo.prelude` of its own does not get
+  the implicit one. That is how it overrides the prelude: importing it into
+  another group, such as `group = "std"`, makes bare `Bool` the project's own
+  while `std::Bool` is still the prelude's, and importing it into `local` is
+  the same as the default.
+- `--no-prelude`, and `prelude = false` in the settings file, stop the implicit
+  import in every project, and nothing else. An explicit import is the
+  project's own statement and stays. With plain files they work as they do now.
+- The special rule of Step 2, that declaring a name the prelude has is a duplicate
+  at the declaration, is removed. The prelude is a project in `local` like any
+  other, so such a project makes each bare use ambiguous (decision 25), and the
+  way out is the override above.
+
+### Notes
+
+- Step 4 does not checksum a built-in project, as it has no files on disk and
+  its content is fixed by the binary.
+- Write a decision record, covering the above.
 
 ## Step 4: Verify the checksums
 
