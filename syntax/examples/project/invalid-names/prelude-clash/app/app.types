@@ -1,2 +1,3 @@
-// expect: Duplicate type Bool
+// expect: The name Bool is ambiguous: it could be example.app::Bool or constructo.prelude::Bool
 enum Bool = No, Yes;
+const flag: Bool = Yes;

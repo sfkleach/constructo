@@ -1,0 +1,3 @@
+# expect: Invalid project name "constructo.mine": names that start with constructo. are for built-in projects
+[project]
+name = "constructo.mine"

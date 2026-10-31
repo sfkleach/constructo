@@ -1,0 +1,5 @@
+// The project has its own Bool, and the prelude is still there as std.
+enum Bool = No, Yes;
+const mine: Bool = Yes;
+const theirs: std::Bool = std::True;
+const optional: std::Option<std::Bool> = std::Some(std::True);

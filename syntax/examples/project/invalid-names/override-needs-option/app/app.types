@@ -1,0 +1,3 @@
+// expect: Unknown type Option
+// The question mark is Option as it is written in the project, which has none because the prelude is not in local.
+enum Holder = Holder(Nat?);

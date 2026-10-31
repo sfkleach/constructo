@@ -34,10 +34,10 @@ the format of the project-file, how its files are found, and how it relates to t
 
 ## Consequences
 
-- The prelude is still added by the command ahead of the project's files, which is a stopgap. It is to become a virtual
-  project in the group `local` that every project includes unless it overrides it. Until then a project that declares
-  its own `Bool` or `Option` gets the duplicate error, and `--no-prelude` is the way round it. `Project` returns only
-  the project's own files so that this goes away without changing it.
+- The prelude is still added by the command ahead of the project's files, which is a stopgap (decision 26 replaces it).
+  It is to become a virtual project in the group `local` that every project includes unless it overrides it. Until then
+  a project that declares its own `Bool` or `Option` gets the duplicate error, and `--no-prelude` is the way round it.
+  `Project` returns only the project's own files so that this goes away without changing it.
 - The settings file and the project-file are two files, so a project cannot carry its own settings yet. The local
   configuration file of the task is for later, and needs a name and a rule for finding it.
 - A new dependency, `glob`, which has no dependencies of its own.

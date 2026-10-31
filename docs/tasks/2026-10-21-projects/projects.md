@@ -282,8 +282,13 @@ source = "constructo:/prelude"
   project's own statement and stays. With plain files they work as they do now.
 - The special rule of Step 2, that declaring a name the prelude has is a duplicate
   at the declaration, is removed. The prelude is a project in `local` like any
-  other, so such a project makes each bare use ambiguous (decision 25), and the
-  way out is the override above.
+  other, so declaring such a name makes each bare use ambiguous (decision 25), and
+  the way out is the override above.
+- There is always a project. With none named, it is a virtual project with no name
+  and no files, with the implicit import of the prelude, and the files and standard
+  input that are given are written in it, as they are in a named project. Its
+  names stay bare. It has no project-file, so `--no-prelude` is its only way to
+  override the prelude.
 
 ### Notes
 
@@ -294,7 +299,9 @@ source = "constructo:/prelude"
 ## Step 4: Verify the checksums
 
 Checksums of imports are calculated as the hashed digest of the files. They
-should be retained in the constructo.lock file.
+should be retained in the constructo.lock file. The built-in projects, such as
+`constructo.prelude`, are not checksummed, since their content is fixed by the
+binary.
 
 - Compare the checksum recorded for each file, and for each included project,
   with the content that was found. A mismatch is an error, and the diagnostic

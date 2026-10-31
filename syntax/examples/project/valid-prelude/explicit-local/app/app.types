@@ -1,0 +1,3 @@
+enum Holder = Holder(Bool, Option<Nat>), Plain(Nat?);
+const flag: Bool = true;
+const nothing: Option<Nat> = null;

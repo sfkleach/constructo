@@ -20,8 +20,8 @@ use validate::{validate, ParsedFile};
 
 pub use config::Config;
 pub use parser::{Experimental, SourceKind};
-pub use project::{Project, ProjectSet};
-pub use resolve::{Layout, Owner, ProjectInfo};
+pub use project::{InputFile, Project, ProjectSet, PRELUDE_PROJECT};
+pub use resolve::{Layout, ProjectInfo};
 pub use typecheck::{DEFAULT_INFER_LIMIT, DEFAULT_VALUE_LIMIT};
 
 /// The standard prelude: declarations that are available to every types file unless the prelude is disabled.
@@ -33,7 +33,7 @@ const false: Bool = False;
 ";
 
 /// The name under which the prelude appears in diagnostics.
-pub const PRELUDE_NAME: &str = "<prelude>";
+pub const PRELUDE_NAME: &str = "constructo:/prelude/prelude.types";
 
 /// Returns the prelude as a source, to be checked ahead of the user's inputs.
 pub fn prelude_source() -> Source {
@@ -181,6 +181,40 @@ pub fn check_in_projects(sources: &[Source], layout: &Layout, options: &CheckOpt
     check_with_layout(sources, Some(layout), options)
 }
 
+/// The layout of sources that were given without a project: they make one project that has no name, which imports the
+/// prelude into `local` if the prelude is among the sources. The prelude is known by its name.
+fn plain_layout(sources: &[Source]) -> Layout {
+    let plain = ProjectInfo {
+        name: String::new(),
+        imports: Vec::new(),
+        builtin: false,
+    };
+    if !sources.iter().any(|source| source.name == PRELUDE_NAME) {
+        return Layout {
+            projects: vec![plain],
+            owners: vec![0; sources.len()],
+            root: 0,
+        };
+    }
+    let prelude = ProjectInfo {
+        name: PRELUDE_PROJECT.to_string(),
+        imports: Vec::new(),
+        builtin: true,
+    };
+    let plain = ProjectInfo {
+        imports: vec![(Some("local".to_string()), 0)],
+        ..plain
+    };
+    Layout {
+        projects: vec![prelude, plain],
+        owners: sources
+            .iter()
+            .map(|source| usize::from(source.name != PRELUDE_NAME))
+            .collect(),
+        root: 1,
+    }
+}
+
 fn check_with_layout(sources: &[Source], layout: Option<&Layout>, options: &CheckOptions) -> Report {
     let mut kinds = vec![None; sources.len()];
     let mut parsed_sources = Vec::new();
@@ -213,6 +247,14 @@ fn check_with_layout(sources: &[Source], layout: Option<&Layout>, options: &Chec
         outcomes[index] = Outcome::Failed;
         found.push((index, diagnostic));
     }
+    let plain;
+    let layout = match layout {
+        Some(layout) => layout,
+        None => {
+            plain = plain_layout(sources);
+            &plain
+        }
+    };
     let resolution = resolve::resolve(sources, &mut parsed_sources, layout);
     // The names in a types file are unreliable if some could not be resolved, so the validity checks are skipped, as
     // they are for a syntax error. The names in the values are only looked at when the values are type-checked.
@@ -236,7 +278,7 @@ fn check_with_layout(sources: &[Source], layout: Option<&Layout>, options: &Chec
                 name: sources[index].name.clone(),
                 decls: file.enums.clone(),
                 consts: file.consts.clone(),
-                prelude: sources[index].name == PRELUDE_NAME,
+                prelude: layout.projects[layout.owners.get(index).copied().unwrap_or(layout.root)].builtin,
                 visible_types: resolution.visible_types[index].clone(),
             });
         }
@@ -419,22 +461,26 @@ mod tests {
     }
 
     #[test]
-    fn redeclaring_a_prelude_name_is_a_duplicate() {
-        let user = Source {
-            name: "user".to_string(),
-            text: "enum Bool = Yes, True;".to_string(),
+    fn a_prelude_name_that_is_redeclared_is_ambiguous_where_it_is_used() {
+        let errors = |text: &str| -> Vec<String> {
+            let user = Source {
+                name: "user".to_string(),
+                text: text.to_string(),
+            };
+            check_sources(&[prelude_source(), user])
+                .diagnostics
+                .iter()
+                .map(|d| d.to_string())
+                .collect()
         };
-        let errors: Vec<String> = check_sources(&[prelude_source(), user])
-            .diagnostics
-            .iter()
-            .map(|d| d.to_string())
-            .collect();
+        // The declaration alone is fine, because the prelude is a project like any other in local.
+        assert_eq!(errors("enum Bool = Yes, True;"), Vec::<String>::new());
         assert_eq!(
-            errors,
-            vec![
-                "ERROR: Duplicate type Bool (user, line 1, col 6); first declared at <prelude>, line 1, col 6",
-                "ERROR: Duplicate constructor True (user, line 1, col 18); first declared at <prelude>, line 1, col 20",
-            ]
+            errors("enum Bool = Yes, True;\nconst a: Bool = Yes;"),
+            vec![concat!(
+                "ERROR: The name Bool is ambiguous: it could be the Bool declared in the files given or ",
+                "constructo.prelude::Bool (user, line 2, col 10)"
+            )]
         );
     }
 
@@ -944,14 +990,16 @@ mod tests {
     }
 
     #[test]
-    fn the_prelude_names_cannot_be_redefined() {
+    fn a_prelude_const_that_is_redefined_is_ambiguous_where_it_is_used() {
         let report = with_prelude(&["const null: Nat = 1;\nconst true: Nat = 1;"]);
+        assert_eq!(messages(&report), Vec::<String>::new());
+        let report = with_prelude(&["const null: Nat = 1;\nconst x: Nat = null;"]);
         assert_eq!(
             messages(&report),
-            vec![
-                "ERROR: Duplicate const null (f0, line 1, col 7); first declared at <prelude>, line 3, col 7",
-                "ERROR: Duplicate const true (f0, line 2, col 7); first declared at <prelude>, line 4, col 7",
-            ]
+            vec![concat!(
+                "ERROR: The name null is ambiguous: it could be the null declared in the files given or ",
+                "constructo.prelude::null (f0, line 2, col 16)"
+            )]
         );
     }
 

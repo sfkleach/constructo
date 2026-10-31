@@ -17,6 +17,47 @@ pub const PROJECT_FILE: &str = "constructo.toml";
 /// The pattern for the types files of a project when the project-file does not give one.
 pub const DEFAULT_INCLUDE: &str = "**/*.types";
 
+/// The name of the standard prelude, which is a project that is built in.
+pub const PRELUDE_PROJECT: &str = "constructo.prelude";
+
+/// The start of the source of a built-in project, and of the name of one. The `constructo` prefix is reserved for them.
+const BUILTIN_SCHEME: &str = "constructo:";
+const BUILTIN_PREFIX: &str = "constructo.";
+
+/// A project that is held inside the binary. Its source is a URI that names the project as a folder would.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Builtin {
+    pub name: &'static str,
+    pub uri: &'static str,
+    /// The types files of the project, each with its name within the project and its text.
+    pub files: &'static [(&'static str, &'static str)],
+}
+
+/// The projects that are built in.
+pub const BUILTINS: &[Builtin] = &[Builtin {
+    name: PRELUDE_PROJECT,
+    uri: "constructo:/prelude",
+    files: &[("prelude.types", crate::PRELUDE)],
+}];
+
+fn builtin_for_uri(uri: &str) -> Option<&'static Builtin> {
+    BUILTINS.iter().find(|builtin| builtin.uri == uri)
+}
+
+/// The built-in projects as they are listed in a message.
+fn builtin_list() -> String {
+    BUILTINS
+        .iter()
+        .map(|builtin| builtin.uri)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Whether a source names a built-in project and not a folder.
+fn is_builtin_source(source: &str) -> bool {
+    source.starts_with(BUILTIN_SCHEME)
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ProjectFile {
@@ -56,6 +97,13 @@ pub struct Import {
     source_pos: Pos,
 }
 
+/// A types file of a project. A file of a built-in project has its text with it, since it is not on disk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InputFile {
+    pub path: PathBuf,
+    pub embedded: Option<&'static str>,
+}
+
 /// A project that has been loaded: its name, its imports and the types files that it holds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Project {
@@ -65,7 +113,9 @@ pub struct Project {
     /// The projects that this one imports, in the order in the project-file.
     pub imports: Vec<Import>,
     /// The types files of the project, each as the folder joined to the path within it, sorted by that path.
-    pub files: Vec<PathBuf>,
+    pub files: Vec<InputFile>,
+    /// True for a project that is built in, which is not reported as an input.
+    pub builtin: bool,
 }
 
 /// Why a project could not be loaded. Both kinds are problems with the invocation, not with the inputs.
@@ -104,9 +154,39 @@ struct ParsedFile {
 }
 
 impl Project {
+    /// A project that is built in.
+    fn from_builtin(builtin: &'static Builtin) -> Project {
+        let folder = PathBuf::from(builtin.uri);
+        let files = builtin
+            .files
+            .iter()
+            .map(|(name, text)| InputFile {
+                path: folder.join(name),
+                embedded: Some(text),
+            })
+            .collect();
+        Project {
+            name: builtin.name.to_string(),
+            folder,
+            imports: Vec::new(),
+            files,
+            builtin: true,
+        }
+    }
+
     /// Reads the project-file in the folder and finds the types files that it names. The imports are read but the
-    /// projects that they name are not loaded, which `ProjectSet::load` does.
+    /// projects that they name are not loaded, which `ProjectSet::load` does. A folder that is the URI of a built-in
+    /// project gives that project.
     pub fn load(folder: &Path) -> Result<Project, ProjectError> {
+        if let Some(uri) = folder.to_str().filter(|uri| is_builtin_source(uri)) {
+            return builtin_for_uri(uri).map(Project::from_builtin).ok_or_else(|| {
+                ProjectError::Cannot(format!(
+                    "There is no built-in project {}; the built-in projects are {}",
+                    uri,
+                    builtin_list()
+                ))
+            });
+        }
         let path = folder.join(PROJECT_FILE);
         let text = std::fs::read_to_string(&path)
             .map_err(|e| ProjectError::Cannot(format!("Cannot read {}: {}", path.display(), e)))?;
@@ -115,12 +195,19 @@ impl Project {
         walk(folder, "", true, &parsed.include, &parsed.exclude, &mut found)
             .map_err(|e| ProjectError::Cannot(format!("Cannot read {}: {}", folder.display(), e)))?;
         found.sort();
-        let files = found.iter().map(|relative| folder.join(relative)).collect();
+        let files = found
+            .iter()
+            .map(|relative| InputFile {
+                path: folder.join(relative),
+                embedded: None,
+            })
+            .collect();
         Ok(Project {
             name: parsed.name,
             folder: folder.to_path_buf(),
             imports: parsed.imports,
             files,
+            builtin: false,
         })
     }
 
@@ -140,6 +227,14 @@ impl Project {
         let table = parsed.project;
         if let Err(reason) = check_name(table.name.get_ref()) {
             let message = format!("Invalid project name \"{}\": {}", table.name.get_ref(), reason);
+            return Err(invalid(table.name.span().start, message));
+        }
+        if table.name.get_ref().starts_with(BUILTIN_PREFIX) {
+            let message = format!(
+                "Invalid project name \"{}\": names that start with {} are for built-in projects",
+                table.name.get_ref(),
+                BUILTIN_PREFIX
+            );
             return Err(invalid(table.name.span().start, message));
         }
         let patterns = |given: Option<Vec<Spanned<String>>>, default: &[&str]| -> Result<Vec<Pattern>, ProjectError> {
@@ -176,16 +271,46 @@ impl Project {
                     return Err(invalid(group.span().start, message));
                 }
             }
-            if entry.source.get_ref().is_empty() {
+            let source = entry.source.get_ref();
+            if source.is_empty() {
                 return Err(invalid(
                     entry.source.span().start,
                     "The source of an import is empty".to_string(),
                 ));
             }
+            // A built-in project has to be named by both its name and its source, so that neither can be mistaken.
+            let (named_builtin, source_builtin) = (name.starts_with(BUILTIN_PREFIX), is_builtin_source(source));
+            if named_builtin != source_builtin {
+                let message = if named_builtin {
+                    format!(
+                        "{} is a built-in project, so its source has to be one of {}",
+                        name,
+                        builtin_list()
+                    )
+                } else {
+                    format!(
+                        "The source {} is a built-in project, so the project name has to be a built-in one",
+                        source
+                    )
+                };
+                return Err(invalid(entry.source.span().start, message));
+            }
+            if source_builtin && builtin_for_uri(source).is_none() {
+                let message = format!(
+                    "There is no built-in project {}; the built-in projects are {}",
+                    source,
+                    builtin_list()
+                );
+                return Err(invalid(entry.source.span().start, message));
+            }
             imports.push(Import {
                 project_name: name.clone(),
                 group: entry.group.map(Spanned::into_inner),
-                folder: folder.join(entry.source.get_ref()),
+                folder: if source_builtin {
+                    PathBuf::from(source)
+                } else {
+                    folder.join(source)
+                },
                 target: None,
                 name_pos: at(entry.project_name.span().start),
                 source_pos: at(entry.source.span().start),
@@ -213,13 +338,42 @@ pub struct ProjectSet {
 
 impl ProjectSet {
     /// Loads the project in the folder and, following the imports to any depth, the projects that it imports.
-    pub fn load(folder: &Path) -> Result<ProjectSet, ProjectError> {
-        let mut loader = Loader::default();
+    ///
+    /// Unless `prelude` is false, every project that does not import the standard prelude itself is given an import of
+    /// it into the group `local`, as its first import. A project that does import it has said what it wants.
+    pub fn load(folder: &Path, prelude: bool) -> Result<ProjectSet, ProjectError> {
+        let mut loader = Loader {
+            implicit_prelude: prelude,
+            ..Loader::default()
+        };
         let root = Project::load(folder)?;
         loader.visit(root)?;
         Ok(ProjectSet {
             projects: loader.projects,
         })
+    }
+
+    /// The set for a run with no project named: a project with no name, no files and nothing but the implicit import
+    /// of the prelude, unless `prelude` is false. The files that are given are written in it as if they were its own,
+    /// which is how they are treated when a project is named too.
+    pub fn unnamed(prelude: bool) -> ProjectSet {
+        let mut loader = Loader {
+            implicit_prelude: prelude,
+            ..Loader::default()
+        };
+        let root = Project {
+            name: String::new(),
+            folder: PathBuf::new(),
+            imports: Vec::new(),
+            files: Vec::new(),
+            builtin: false,
+        };
+        loader
+            .visit(root)
+            .expect("a project with no files and only the prelude can always be loaded");
+        ProjectSet {
+            projects: loader.projects,
+        }
     }
 
     /// The project that was named, which is the last.
@@ -240,11 +394,37 @@ struct Loader {
     stack: Vec<(PathBuf, String)>,
     /// The folder of each project name that has been seen, so that one name is not two projects.
     names: HashMap<String, PathBuf>,
+    /// Whether a project that does not import the prelude is given the import of it.
+    implicit_prelude: bool,
 }
 
 impl Loader {
     /// Loads the imports of a project and then adds the project to the set, returning its index.
     fn visit(&mut self, mut project: Project) -> Result<usize, ProjectError> {
+        if self.implicit_prelude
+            && !project.builtin
+            && !project
+                .imports
+                .iter()
+                .any(|import| import.project_name == PRELUDE_PROJECT)
+        {
+            let prelude = BUILTINS
+                .iter()
+                .find(|builtin| builtin.name == PRELUDE_PROJECT)
+                .expect("the prelude is built in");
+            let start = Pos { line: 1, col: 1 };
+            project.imports.insert(
+                0,
+                Import {
+                    project_name: PRELUDE_PROJECT.to_string(),
+                    group: Some("local".to_string()),
+                    folder: PathBuf::from(prelude.uri),
+                    target: None,
+                    name_pos: start,
+                    source_pos: start,
+                },
+            );
+        }
         let canonical = absolute(&project.folder)
             .map_err(|e| ProjectError::Cannot(format!("Cannot read {}: {}", project.folder.display(), e)))?;
         self.names.insert(project.name.clone(), canonical.clone());
@@ -320,8 +500,13 @@ impl Loader {
     }
 }
 
-/// The folder as an absolute path with no links or `..`, which is the identity of a project.
+/// The folder as an absolute path with no links or `..`, which is the identity of a project. A built-in project is
+/// identified by its URI.
 fn absolute(folder: &Path) -> std::io::Result<PathBuf> {
+    // The project with no name has no folder either.
+    if folder.as_os_str().is_empty() || folder.to_str().is_some_and(is_builtin_source) {
+        return Ok(folder.to_path_buf());
+    }
     std::fs::canonicalize(folder)
 }
 

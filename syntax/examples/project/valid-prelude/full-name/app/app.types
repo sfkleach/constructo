@@ -1,0 +1,4 @@
+// The prelude is imported by default, so its full name works as well as the bare names.
+enum Holder = Holder(constructo.prelude::Bool), Other(Bool);
+const a: constructo.prelude::Bool = constructo.prelude::True;
+const b: Bool = constructo.prelude::false;

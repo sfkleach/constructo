@@ -1,0 +1,8 @@
+[project]
+name = "example.app"
+
+# This is the same as having no import of the prelude.
+[[import]]
+project-name = "constructo.prelude"
+group = "local"
+source = "constructo:/prelude"
