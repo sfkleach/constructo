@@ -210,6 +210,43 @@ impl Parser {
         }
     }
 
+    /// Whether the tokens from the current one are a qualifier: names separated by dots and ending in `::`, as in
+    /// `bundle::` or `acme.shapes::`.
+    fn at_qualifier(&self) -> bool {
+        let mut i = self.index;
+        loop {
+            if !matches!(self.tokens[i].tok, Tok::Name(_) | Tok::TypeName(_)) {
+                return false;
+            }
+            // The final token is `Eof`, which is neither a name nor a dot, so this never runs off the end.
+            match self.tokens[i + 1].tok {
+                Tok::Dot => i += 2,
+                Tok::ColonColon => return true,
+                _ => return false,
+            }
+        }
+    }
+
+    /// Consumes a qualifier that the caller has checked is there, and returns it with the `::`, as `acme.shapes::`.
+    fn qualifier(&mut self) -> String {
+        let mut text = String::new();
+        loop {
+            match self.peek() {
+                Tok::Name(part) | Tok::TypeName(part) => text.push_str(part),
+                _ => unreachable!("at_qualifier has checked the tokens"),
+            }
+            self.bump();
+            if self.peek() == &Tok::Dot {
+                text.push('.');
+                self.bump();
+            } else {
+                self.bump();
+                text.push_str("::");
+                return text;
+            }
+        }
+    }
+
     fn enum_decl(&mut self) -> Result<EnumDecl> {
         self.expect(Tok::Enum, "'enum'")?;
         let (name, pos) = self.type_name("type name")?;
@@ -371,8 +408,9 @@ impl Parser {
         let mut params: Vec<Parameter> = Vec::new();
         while self.peek() != &Tok::RParen {
             let pos = self.pos();
+            // A name begins a qualified type if it is followed by `::`, or by dots and then `::`.
             let name = match self.peek() {
-                Tok::Name(name) => {
+                Tok::Name(name) if !self.at_qualifier() => {
                     let name = name.clone();
                     self.bump();
                     self.expect(Tok::Colon, "':'")?;
@@ -431,8 +469,15 @@ impl Parser {
 
     fn primary_type(&mut self) -> Result<Type> {
         match self.peek() {
-            Tok::TypeName(_) => {
-                let (name, pos) = self.type_name("type")?;
+            Tok::TypeName(_) | Tok::Name(_) if self.at_qualifier() || matches!(self.peek(), Tok::TypeName(_)) => {
+                let pos = self.pos();
+                let qualifier = if self.at_qualifier() {
+                    self.qualifier()
+                } else {
+                    String::new()
+                };
+                let (name, _) = self.type_name("type")?;
+                let name = format!("{}{}", qualifier, name);
                 let mut args = Vec::new();
                 if self.peek() == &Tok::Lt {
                     self.bump();
@@ -514,6 +559,25 @@ impl Parser {
     fn primary_value(&mut self) -> Result<Value> {
         let pos = self.pos();
         let kind = match self.peek().clone() {
+            Tok::Name(_) | Tok::TypeName(_) if self.at_qualifier() => {
+                let qualifier = self.qualifier();
+                match self.peek().clone() {
+                    Tok::Name(name) => {
+                        self.bump();
+                        ValueKind::Tagged {
+                            name: format!("{}{}", qualifier, name),
+                            body: None,
+                        }
+                    }
+                    Tok::TypeName(name) => {
+                        self.bump();
+                        let name = format!("{}{}", qualifier, name);
+                        let body = self.tagged_body()?;
+                        ValueKind::Tagged { name, body }
+                    }
+                    _ => return self.error("name after '::'"),
+                }
+            }
             Tok::Nat(text) => self.literal(ValueKind::Nat(text)),
             Tok::Int(text) => self.literal(ValueKind::Int(text)),
             Tok::Float(text) => self.literal(ValueKind::Float(text)),
@@ -527,17 +591,22 @@ impl Parser {
             Tok::LBracket => ValueKind::Array(self.array()?),
             Tok::TypeName(name) => {
                 self.bump();
-                let body = match self.peek() {
-                    Tok::LBrace => Some(TaggedBody::Record(self.members()?)),
-                    Tok::LParen => Some(TaggedBody::Tuple(self.tuple()?)),
-                    Tok::LBracket => Some(TaggedBody::Array(self.array()?)),
-                    _ => None,
-                };
+                let body = self.tagged_body()?;
                 ValueKind::Tagged { name, body }
             }
             _ => return self.error("value"),
         };
         Ok(Value { pos, kind })
+    }
+
+    /// The record, tuple or array that may follow the name of a constructor.
+    fn tagged_body(&mut self) -> Result<Option<TaggedBody>> {
+        Ok(match self.peek() {
+            Tok::LBrace => Some(TaggedBody::Record(self.members()?)),
+            Tok::LParen => Some(TaggedBody::Tuple(self.tuple()?)),
+            Tok::LBracket => Some(TaggedBody::Array(self.array()?)),
+            _ => None,
+        })
     }
 
     /// Consumes the current token, which has already been read as a literal.
@@ -751,6 +820,104 @@ mod tests {
         let deep = |levels: usize| format!("{}1{}", "A[".repeat(levels), "]".repeat(levels));
         assert!(parse_values(&deep(100)).is_ok());
         assert!(parse_values(&deep(MAX_DEPTH as usize + 1)).is_err());
+    }
+
+    #[test]
+    fn parses_qualified_names_in_types() {
+        let text =
+            "enum A<T> = X(bundle::T, acme.shapes::U<Nat>, P.Q.R::Left, named: g::V?), Y[local::W], Z { f: [h::K] };";
+        let decls = parse(text).unwrap().enums;
+        let shown: Vec<String> = decls[0]
+            .variants
+            .iter()
+            .flat_map(|v| match &v.body {
+                VariantBody::Tuple(params) => params.iter().map(|p| p.ty.to_string()).collect::<Vec<_>>(),
+                VariantBody::Array(element) => vec![element.to_string()],
+                VariantBody::Record(fields) => fields.iter().map(|f| f.ty.to_string()).collect(),
+                VariantBody::Unit => Vec::new(),
+            })
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                "bundle::T",
+                "acme.shapes::U<Nat>",
+                "P.Q.R::Left",
+                "Option<g::V>",
+                "local::W",
+                "[h::K]"
+            ]
+        );
+    }
+
+    #[test]
+    fn parses_qualified_names_in_values() {
+        let values = parse_values(
+            "bundle::Foo(1); acme.shapes::Circle { r: 1.0 }; g::x; g::Foo[1, 2]; P.Q.R::Dot; local::Foo(a: g::y)",
+        )
+        .unwrap();
+        let names: Vec<(&str, bool)> = values
+            .iter()
+            .map(|v| match &v.kind {
+                ValueKind::Tagged { name, body } => (name.as_str(), body.is_some()),
+                other => panic!("not tagged: {:?}", other),
+            })
+            .collect();
+        assert_eq!(
+            names,
+            [
+                ("bundle::Foo", true),
+                ("acme.shapes::Circle", true),
+                ("g::x", false),
+                ("g::Foo", true),
+                ("P.Q.R::Dot", false),
+                ("local::Foo", true)
+            ]
+        );
+        // The position of a qualified value is the start of its qualifier.
+        assert_eq!((values[1].pos.line, values[1].pos.col), (1, 17));
+    }
+
+    #[test]
+    fn a_declaration_is_never_qualified() {
+        assert_eq!(parse("enum g::A = X;").unwrap_err().message, "Expected type name");
+        assert_eq!(
+            parse("enum A = g::X;").unwrap_err().message,
+            "Expected constructor name"
+        );
+        assert_eq!(parse("const g::x = 1;").unwrap_err().message, "Expected ':' or '='");
+    }
+
+    #[test]
+    fn rejects_a_qualifier_without_a_name() {
+        assert_eq!(parse("enum A = X(g::);").unwrap_err().message, "Expected type");
+        assert_eq!(parse_values("g::;").unwrap_err().message, "Expected name after '::'");
+        assert_eq!(parse_values("g::1").unwrap_err().message, "Expected name after '::'");
+        // A dot is only part of a qualifier, so this is not a value.
+        assert_eq!(parse_values("a.b").unwrap_err().message, "Expected semi-colon");
+        assert_eq!(parse("enum A = X(a.b);").unwrap_err().message, "Expected ':'");
+    }
+
+    #[test]
+    fn a_parameter_name_is_not_taken_for_a_qualifier() {
+        // A single colon still names a parameter or a field, and `::` begins a type.
+        let decls = parse("enum A = X(n: Nat, m: g::T);").unwrap().enums;
+        let VariantBody::Tuple(params) = &decls[0].variants[0].body else {
+            panic!("not a tuple");
+        };
+        assert_eq!(params[0].name.as_deref(), Some("n"));
+        assert_eq!(params[1].name.as_deref(), Some("m"));
+        assert_eq!(params[1].ty.to_string(), "g::T");
+        let values = parse_values("X(g::y, n: g::x)").unwrap();
+        let ValueKind::Tagged {
+            body: Some(TaggedBody::Tuple(args)),
+            ..
+        } = &values[0].kind
+        else {
+            panic!("not a tuple");
+        };
+        assert_eq!(args[0].name, None);
+        assert_eq!(args[1].name.as_deref(), Some("n"));
     }
 
     #[test]

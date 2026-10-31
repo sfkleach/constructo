@@ -4,13 +4,18 @@
 
 use crate::ast::{ConstDecl, EnumDecl, Field, Type, TypeParam, Value, VariantBody};
 use crate::diagnostics::{Diagnostic, Pos};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// The basic types, which are built in to the language.
 pub const BASIC_TYPES: [&str; 4] = ["Nat", "Int", "Float", "String"];
 
 fn is_basic(name: &str) -> bool {
     BASIC_TYPES.contains(&name)
+}
+
+/// The local name of a declared name, which is without the `@` and the project that a canonical name ends with.
+fn local(name: &str) -> &str {
+    name.split('@').next().unwrap_or(name)
 }
 
 /// The declarations of one successfully parsed file.
@@ -20,6 +25,8 @@ pub struct ParsedFile {
     pub consts: Vec<ConstDecl>,
     /// True for the standard prelude, whose consts may be referred to from the definition of any const.
     pub prelude: bool,
+    /// The local names of the types that can be written bare in the file.
+    pub visible_types: HashSet<String>,
 }
 
 /// Where a name was first declared: the index of the file and the position within it.
@@ -97,7 +104,7 @@ impl<'a> Checker<'a> {
         for (file, parsed) in files.iter().enumerate() {
             for decl in &parsed.decls {
                 let name = decl.name.as_str();
-                if is_basic(name) {
+                if is_basic(local(name)) {
                     self.report(
                         file,
                         decl.pos,
@@ -132,7 +139,7 @@ impl<'a> Checker<'a> {
                     Some(_) => ("const", "Const"),
                     None => ("constructor", "Constructor"),
                 };
-                if is_basic(name) {
+                if is_basic(local(name)) {
                     let message = format!("{} name {} clashes with a basic type", label, name);
                     self.report(file, pos, message, None);
                 } else if let Some(&first) = self.constructors.get(name) {
@@ -271,7 +278,7 @@ impl<'a> Checker<'a> {
                     format!("Type parameter {} clashes with a basic type", name),
                     None,
                 );
-            } else if self.types.contains_key(name) {
+            } else if self.files[file].visible_types.contains(name) {
                 self.report(
                     file,
                     param.pos,

@@ -1,0 +1,8 @@
+# expect: unknown field `version`, expected one of `project-name`, `source`, `group`
+[project]
+name = "example.app"
+
+[[import]]
+project-name = "example.lib"
+source = "../lib"
+version = "1"

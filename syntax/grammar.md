@@ -53,13 +53,19 @@ A `Type` can be followed by any number of `?`, each of which makes it optional: 
 array are made optional with `[Nat?]`. It is only shorthand, so it needs the prelude, or another `Option`, to be
 declared.
 
+A type, like a constructor or a const in a value, may be written with a `Qualifier` in front, which names a group or the
+full name of a project, as in `bundle::Shape` or `com.example.shapes::Shape`. A declaration is never qualified. The
+parts of a qualifier are identifiers of either case separated by dots, and what the qualifier refers to is decided when
+the names are resolved, which is described with the projects.
+
 The `Value` of a const is the one defined in the [data-values grammar](#data-values-grammar). A const name may have
 either case. The names `enum` and `const` are reserved, and cannot be used as the name of a const or a field.
 
 The rules are:
 
 `Data_Types`, `EnumDecl`, `ConstDecl`, `TypeParams`, `TypeParam`, `Variant`, `ArrayBody`, `RecordBody`, `Field`,
-`TupleBody`, `NamedParameter`, `Type`, `TypeRef`, `ArrayType`, `TypeName`, `ConstName`, `field-name`, `Comment`.
+`TupleBody`, `NamedParameter`, `Type`, `TypeRef`, `Qualifier`, `Part`, `ArrayType`, `TypeName`, `ConstName`, `field-
+name`, `Comment`.
 
 ![Data-types grammar](dt_grammar.svg)
 
@@ -69,6 +75,9 @@ The diagrams are also available as a [PDF](dt_grammar.pdf).
 
 A values file is a sequence of values: numbers, strings, arrays, records, tuples and constructors, written in the
 untagged or tagged forms shown above. A value may also be the name of a const.
+
+A `Tagged` value or a `ConstRef` may have a `Qualifier` in front, as in `bundle::Circle { radius: 1.0 }` or
+`com.example.shapes::origin`, which is described with the types grammar above.
 
 A bare name is a `Tagged` value if it starts with an uppercase letter and a `ConstRef` if it starts with a lowercase
 letter or underscore. A `Tagged` value with no body is a constructor, or a const of that name, and the checker decides
@@ -82,8 +91,8 @@ declared.
 
 The rules are:
 
-`Data_Values`, `Value`, `Tagged`, `ConstRef`, `Record`, `Member`, `Tuple`, `NamedArgument`, `Array`, `Number`, `Nat`,
-`Int`, `Float`, `String`, `TypeName`, `field-name`, `Comment`.
+`Data_Values`, `Value`, `Tagged`, `ConstRef`, `Qualifier`, `Part`, `Record`, `Member`, `Tuple`, `NamedArgument`,
+`Array`, `Number`, `Nat`, `Int`, `Float`, `String`, `TypeName`, `field-name`, `Comment`.
 
 ![Data-values grammar](dv_grammar.svg)
 

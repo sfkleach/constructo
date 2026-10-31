@@ -1,0 +1,7 @@
+# expect: The project example.lib is in two places:
+[project]
+name = "example.lib"
+
+[[import]]
+project-name = "example.lib"
+source = "../other"

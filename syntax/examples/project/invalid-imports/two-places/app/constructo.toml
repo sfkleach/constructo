@@ -1,0 +1,12 @@
+# expect: The project example.lib is in two places:
+[project]
+name = "example.app"
+
+[[import]]
+project-name = "example.lib"
+source = "../one"
+
+[[import]]
+project-name = "example.lib"
+group = "other"
+source = "../two"

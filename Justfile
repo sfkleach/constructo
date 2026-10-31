@@ -121,3 +121,9 @@ init-decisions:
 # Add a new decision record
 add-decision TOPIC:
     python3 ./.local/scripts/decisions.py --add "{{TOPIC}}"
+
+install-bloat:
+    cargo install cargo-bloat
+
+bloat:
+    cargo bloat --release --crates

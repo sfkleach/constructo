@@ -1,0 +1,7 @@
+# expect: The import says the project is named constructo.other but the project at constructo:/prelude is named constructo.prelude
+[project]
+name = "example.app"
+
+[[import]]
+project-name = "constructo.other"
+source = "constructo:/prelude"

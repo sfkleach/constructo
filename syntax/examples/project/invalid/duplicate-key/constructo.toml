@@ -1,0 +1,4 @@
+# expect: duplicate key
+[project]
+name = "a.b"
+name = "c.d"

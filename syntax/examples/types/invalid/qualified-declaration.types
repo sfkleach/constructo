@@ -1,0 +1,2 @@
+// A declaration is never qualified.
+enum bundle::Shape = Circle;

@@ -1,0 +1,7 @@
+# expect: There is no built-in project constructo:/nothing; the built-in projects are constructo:/prelude
+[project]
+name = "example.app"
+
+[[import]]
+project-name = "constructo.nothing"
+source = "constructo:/nothing"

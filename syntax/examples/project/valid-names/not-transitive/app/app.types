@@ -1,0 +1,3 @@
+// The type of a const of lib has a type from base in it, and app does not have to import base to pass it on.
+enum Holder = Holder(lib::Wrapper);
+const held: Holder = Holder(lib::wrapped);

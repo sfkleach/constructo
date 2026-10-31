@@ -1,0 +1,4 @@
+# expect: unknown field `import`, expected one of `name`, `include`, `exclude`
+[project]
+name = "example.app"
+import = ["../lib"]

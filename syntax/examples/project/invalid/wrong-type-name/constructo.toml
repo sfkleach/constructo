@@ -1,0 +1,3 @@
+# expect: invalid type: integer `1`, expected a string
+[project]
+name = 1

@@ -1,2 +1,4 @@
-// The consts of the prelude cannot be redefined.
+// The prelude already declares the const null, so a use of null is ambiguous. It is valid under --no-prelude, with
+// --allow-refs since the use of null is a reference to a const.
 const null: Nat = 0;
+const zero: Nat = null;

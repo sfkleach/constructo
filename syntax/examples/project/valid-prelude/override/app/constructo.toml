@@ -1,0 +1,8 @@
+[project]
+name = "example.app"
+
+# Importing the prelude into another group than local is how a project overrides it.
+[[import]]
+project-name = "constructo.prelude"
+group = "std"
+source = "constructo:/prelude"

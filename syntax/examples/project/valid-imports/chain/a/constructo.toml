@@ -1,0 +1,7 @@
+[project]
+name = "example.a"
+
+[[import]]
+project-name = "example.b"
+group = "b"
+source = "../b"

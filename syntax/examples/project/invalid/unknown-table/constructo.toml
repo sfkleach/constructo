@@ -1,0 +1,5 @@
+# expect: unknown field `imports`, expected `project` or `import`
+[project]
+name = "a.b"
+
+[imports]

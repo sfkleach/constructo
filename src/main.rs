@@ -1,7 +1,10 @@
 use clap::{ArgAction, ArgMatches, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
+use constructo::diagnostics::{Diagnostic, Pos};
 use constructo::{
-    check_sources_with, prelude_source, syntax_error, CheckOptions, Config, Experimental, Outcome, Source, SourceKind,
+    check_in_projects, source_kind, syntax_error, CheckOptions, Config, Experimental, InputFile, Layout, Outcome,
+    Project, ProjectInfo, ProjectSet, Source, SourceKind,
 };
+use std::collections::{HashSet, VecDeque};
 use std::ffi::OsString;
 use std::io::Read;
 use std::path::PathBuf;
@@ -86,7 +89,7 @@ enum Command {
 Settings can also be put in a TOML file that is named with --config=PATH. An option on the command line overrides the \
 file, which overrides the built-in default. To write a template that has every setting, with a comment on each, run:
 
-    constructo check --print-config > constructo.toml
+    constructo check --print-config > constructo-settings.toml
 
 The format of the file is described in
 https://github.com/sfkleach/constructo/blob/main/docs/specs/config-file.md")]
@@ -183,8 +186,12 @@ https://github.com/sfkleach/constructo/blob/main/docs/specs/config-file.md")]
         #[arg(long)]
         print_config: bool,
 
+        /// Check the project in the folder: the types files that its constructo.toml names come first, then FILES
+        #[arg(long, value_name = "FOLDER")]
+        project: Option<PathBuf>,
+
         /// The files to check
-        #[arg(value_name = "FILES", required_unless_present_any = ["stdin", "print_config"])]
+        #[arg(value_name = "FILES", required_unless_present_any = ["stdin", "print_config", "project"])]
         files: Vec<PathBuf>,
     },
 }
@@ -250,6 +257,7 @@ fn main() -> ExitCode {
             verbose,
             no_verbose,
             print_config,
+            project,
             files,
         } => {
             // The subcommand is there, since the command line was parsed into it.
@@ -272,30 +280,94 @@ fn main() -> ExitCode {
                 print!("{}", Config::effective(&options, load_prelude, verbose).to_toml());
                 return ExitCode::SUCCESS;
             }
-            check(stdin, !load_prelude, verbose, &options, &files)
+            // The project is read after the settings, so that a problem with either is reported by itself. There is
+            // always a project: without one named it is a virtual project with nothing but the prelude.
+            let set = match project.as_deref() {
+                Some(folder) => ProjectSet::load(folder, load_prelude),
+                None => Ok(ProjectSet::unnamed(load_prelude)),
+            };
+            let set = match set {
+                Ok(set) => set,
+                Err(e) => {
+                    eprintln!("{}", e);
+                    return ExitCode::from(EXIT_USAGE);
+                }
+            };
+            check(stdin, verbose, &options, &set, &files)
         }
     }
 }
 
-fn check(stdin: bool, no_prelude: bool, verbose: bool, options: &CheckOptions, files: &[PathBuf]) -> ExitCode {
+/// How the sources are divided among the projects. The files of each project come in turn, and these are followed by
+/// the files and the standard input that were given, which are written in the project that was named, as are the
+/// values.
+fn layout(set: &ProjectSet, sources: usize) -> Layout {
+    let projects = set
+        .projects
+        .iter()
+        .map(|project| ProjectInfo {
+            name: project.name.clone(),
+            imports: project
+                .imports
+                .iter()
+                .map(|import| (import.group.clone(), import.target.expect("the set has been loaded")))
+                .collect(),
+            builtin: project.builtin,
+        })
+        .collect();
+    let root = set.projects.len() - 1;
+    let mut owners = Vec::new();
+    for (index, project) in set.projects.iter().enumerate() {
+        owners.extend(std::iter::repeat_n(index, project.files.len()));
+    }
+    // A syntax error can end the reading early, and then there are fewer sources than files.
+    owners.resize(sources, root);
+    Layout { projects, owners, root }
+}
+
+/// Reads an input: the text of a file of a built-in project is with it, and any other file is read from disk.
+fn read_input(file: &InputFile) -> std::io::Result<String> {
+    match file.embedded {
+        Some(text) => Ok(text.to_string()),
+        None => std::fs::read_to_string(&file.path),
+    }
+}
+
+fn check(stdin: bool, verbose: bool, options: &CheckOptions, set: &ProjectSet, files: &[PathBuf]) -> ExitCode {
     // The inputs are read one at a time, and reading stops at the first syntax error. That way an unreadable later
-    // input cannot hide an earlier syntax error, which is the error the run is meant to stop at.
+    // input cannot hide an earlier syntax error, which is the error the run is meant to stop at. The files of the
+    // projects come first, and the project says that they are types files.
+    let given: Vec<InputFile> = files
+        .iter()
+        .map(|path| InputFile {
+            path: path.clone(),
+            embedded: None,
+        })
+        .collect();
+    let from_projects: Vec<&InputFile> = set.projects.iter().flat_map(|project| &project.files).collect();
+    let inputs: Vec<&InputFile> = from_projects.iter().copied().chain(&given).collect();
     let mut sources = Vec::new();
     let mut syntax_failed = false;
-    for file in files {
-        match std::fs::read_to_string(file) {
+    for (index, file) in inputs.into_iter().enumerate() {
+        match read_input(file) {
             Ok(text) => sources.push(Source {
-                name: file.display().to_string(),
+                name: file.path.display().to_string(),
                 text,
             }),
             Err(e) => {
-                eprintln!("ERROR: Cannot read {}: {}", file.display(), e);
+                eprintln!("ERROR: Cannot read {}: {}", file.path.display(), e);
                 return ExitCode::from(EXIT_USAGE);
             }
         }
-        if syntax_error(sources.last().expect("a source was just pushed"), options.experimental).is_some() {
+        let source = sources.last().expect("a source was just pushed");
+        if syntax_error(source, options.experimental).is_some() {
             syntax_failed = true;
             break;
+        }
+        if index < from_projects.len() && source_kind(source, options.experimental) == SourceKind::Values {
+            let message = "The project includes this file as a types file but it holds data-values";
+            eprintln!("{}", Diagnostic::new(&source.name, Pos { line: 1, col: 1 }, message));
+            return ExitCode::from(EXIT_ERRORS);
         }
     }
     if stdin && !syntax_failed {
@@ -310,26 +382,44 @@ fn check(stdin: bool, no_prelude: bool, verbose: bool, options: &CheckOptions, f
         });
     }
 
-    // The prelude is an ordinary source that is checked ahead of the user's inputs.
-    let first_input = usize::from(!no_prelude);
-    if !no_prelude {
-        sources.insert(0, prelude_source());
-    }
-
     // The processing is deliberately independent of the command line so that it is available as a library.
-    let report = check_sources_with(&sources, options);
+    let report = check_in_projects(&sources, &layout(set, sources.len()), options);
     for diagnostic in &report.diagnostics {
         eprintln!("{}", diagnostic);
     }
+    // The files of the projects that are built in are not one of the user's inputs, so they are never reported, and
+    // the project with no name is not either.
+    let mut hidden = HashSet::new();
+    let mut ranges = Vec::new();
+    let mut start = 0;
+    for project in &set.projects {
+        if project.builtin {
+            hidden.extend(start..start + project.files.len());
+        } else if !project.name.is_empty() {
+            ranges.push((start, project));
+        }
+        start += project.files.len();
+    }
     if verbose {
-        // The prelude is not one of the user's inputs, so it is never reported.
-        for (index, ((source, outcome), kind)) in sources
-            .iter()
-            .zip(&report.outcomes)
-            .zip(&report.kinds)
-            .enumerate()
-            .skip(first_input)
-        {
+        // Each project is reported just before its files, and it has failed if any one of them has.
+        let mut pending: VecDeque<(usize, &Project)> = ranges.into();
+        let report_projects = |until: usize, pending: &mut VecDeque<(usize, &Project)>| {
+            while let Some(&(start, project)) = pending.front() {
+                if start > until {
+                    break;
+                }
+                pending.pop_front();
+                let end = (start + project.files.len()).min(report.outcomes.len());
+                let failed = report.outcomes[start.min(end)..end].contains(&Outcome::Failed);
+                let label = if failed { "FAILED" } else { "OK" };
+                println!("{}: {} (project {})", label, project.folder.display(), project.name);
+            }
+        };
+        for (index, ((source, outcome), kind)) in sources.iter().zip(&report.outcomes).zip(&report.kinds).enumerate() {
+            if hidden.contains(&index) {
+                continue;
+            }
+            report_projects(index, &mut pending);
             let label = kind.map(|k| format!(" ({})", k.label())).unwrap_or_default();
             match outcome {
                 Outcome::Ok if report.type_checked && *kind == Some(SourceKind::Values) => {
@@ -347,10 +437,11 @@ fn check(stdin: bool, no_prelude: bool, verbose: bool, options: &CheckOptions, f
                 Outcome::NotChecked => {}
             }
         }
+        report_projects(usize::MAX, &mut pending);
     }
     if report.is_ok() {
         if verbose {
-            println!("OK: checked {} file(s)", sources.len() - first_input);
+            println!("OK: checked {} file(s)", sources.len() - hidden.len());
         }
         ExitCode::SUCCESS
     } else {

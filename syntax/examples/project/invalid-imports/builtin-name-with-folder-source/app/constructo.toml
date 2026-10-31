@@ -1,0 +1,7 @@
+# expect: constructo.prelude is a built-in project, so its source has to be one of constructo:/prelude
+[project]
+name = "example.app"
+
+[[import]]
+project-name = "constructo.prelude"
+source = "../prelude"

@@ -1,0 +1,3 @@
+# expect: unclosed table, expected `]`
+[project
+name = "a.b"

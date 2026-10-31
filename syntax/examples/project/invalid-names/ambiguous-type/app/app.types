@@ -1,0 +1,2 @@
+// expect: The name Shape is ambiguous: it could be example.a::Shape or example.b::Shape
+enum Holder = Holder(Shape);

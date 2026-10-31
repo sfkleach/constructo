@@ -152,9 +152,9 @@ else
 fi
 expect_exit "generic consts are valid, and may use the prelude consts without --allow-refs" 0 \
     check "$EXAMPLES/valid/generic-consts.types"
-expect_exit "a prelude const cannot be redefined" 1 check "$EXAMPLES/parses-but-invalid/redefines-null.types"
+expect_exit "a prelude const that is redefined is ambiguous where it is used" 1 check "$EXAMPLES/parses-but-invalid/redefines-null.types"
 expect_exit "--no-prelude allows redefining a prelude const" 0 \
-    check --no-prelude "$EXAMPLES/parses-but-invalid/redefines-null.types"
+    check --no-prelude --allow-refs "$EXAMPLES/parses-but-invalid/redefines-null.types"
 expect_exit "values may use null, true and false" 0 \
     check "$TYPED/schema.types" "$TYPED/valid/prelude-consts.values"
 err="$("$CONSTRUCTO" check "$EXAMPLES/parses-but-invalid/generic-const-wrong-value.types" 2>&1 >/dev/null || true)"
@@ -301,7 +301,7 @@ trap 'rm -f "$chain" "$doubling" "$doubled_values" "$long_chain"' EXIT
     for i in $(seq 1 50000); do echo "enum E$i = E$i(a: E$(( i - 1 )));"; done
     echo "enum Holder = Holder(x: E50000);"
 } > "$long_chain"
-# The default of a type may need an enum that is declared after the values file, which cannot name it itself.
+# The default of a type may need an enum that only a later types file declares, which the values cannot name.
 forward_types="$(mktemp)"
 forward_later="$(mktemp)"
 forward_values="$(mktemp)"
@@ -309,8 +309,26 @@ trap 'rm -f "$chain" "$doubling" "$doubled_values" "$long_chain" "$forward_types
 echo "enum Holder = Holder(x: Later);" > "$forward_types"
 echo "enum Later = Ready;" > "$forward_later"
 echo "Holder();" > "$forward_values"
-expect_exit "the default may use an enum that is declared after the values" 0 \
-    check "$forward_types" "$forward_values" "$forward_later"
+expect_exit "the default may use an enum that is declared in a later types file" 0 \
+    check "$forward_types" "$forward_later" "$forward_values"
+err="$("$CONSTRUCTO" check "$forward_types" "$forward_values" "$forward_later" 2>&1 >/dev/null || true)"
+if [[ "$err" == *"A types file must come before the values files, but this follows $forward_values ($forward_later, line 1, col 1)"* ]]; then
+    pass "a types file after a values file is reported with the values file"
+else
+    fail "a types file after a values file is reported with the values file (got '$err')"
+fi
+expect_exit "a types file after a values file is an error" 1 check "$forward_types" "$forward_values" "$forward_later"
+expect_exit "the order is still checked without the type-check" 1 \
+    check --no-type-check "$forward_types" "$forward_values" "$forward_later"
+expect_exit "several values files may follow the types files" 0 \
+    check "$forward_types" "$forward_later" "$forward_values" "$forward_values"
+expect_exit "several values files may come first when there are no types" 0 \
+    check --no-prelude --no-type-check "$forward_values" "$forward_values"
+expect_exit "a types file after a values file is an error whatever is given with it" 1 \
+    check --stdin "$forward_values" < "$forward_types"
+echo "// Only a comment." > "$forward_types"
+expect_exit "a file with no declarations may follow a values file" 0 \
+    check --no-type-check "$forward_values" "$forward_types"
 expect_exit "a long chain of defaults is refused, not a crash" 1 check "$long_chain" "$doubled_values"
 expect_exit "a long chain of defaults is accepted within the limit" 0 check --default-limit=1000000 "$long_chain" "$doubled_values"
 echo ""
@@ -319,7 +337,7 @@ echo "--- prelude ---"
 expect_exit "prelude supplies Option" 0 check "$EXAMPLES/valid/mutual.types"
 expect_exit "--no-prelude hides Option" 1 check --no-prelude "$EXAMPLES/valid/mutual.types"
 expect_exit "prelude supplies Bool" 0 check "$EXAMPLES/valid/uses-bool.types"
-expect_exit "prelude names cannot be redeclared" 1 check "$EXAMPLES/parses-but-invalid/redeclares-bool.types"
+expect_exit "a prelude name that is redeclared is ambiguous where it is used" 1 check "$EXAMPLES/parses-but-invalid/redeclares-bool.types"
 expect_exit "--no-prelude allows redeclaring Bool" 0 \
     check --no-prelude "$EXAMPLES/parses-but-invalid/redeclares-bool.types"
 expect_exit "--no-prelude with a self-contained file" 0 check --no-prelude "$EXAMPLES/valid/shapes.types"
@@ -638,6 +656,281 @@ expect_exit "some-query: a bare --no-experimental overrides the file" 1 \
     check --config="$PRE/some-query.toml" --no-experimental --no-type-check "$SOME_QUERY"
 expect_exit "some-query: -x after --no-experimental switches it on again" 0 \
     check --config="$PRE/some-query.toml" --no-experimental -x --no-type-check "$SOME_QUERY"
+echo "--- projects ---"
+PROJECTS="$(dirname "$0")/../syntax/examples/project"
+SHAPES="$PROJECTS/valid/shapes"
+for d in "$PROJECTS"/valid/*/; do
+    d="${d%/}"
+    expect_exit "project/valid/$(basename "$d")" 0 check --project="$d"
+done
+# Each invalid project-file names its expected error, which is reported in the usual form with exit code 2.
+for d in "$PROJECTS"/invalid/*/; do
+    d="${d%/}"
+    [[ -f "$d/constructo.toml" ]] || continue
+    expected="$(sed -n 's|^# expect: ||p' "$d/constructo.toml")"
+    actual=0
+    err="$("$CONSTRUCTO" check --project="$d" 2>&1 >/dev/null)" || actual=$?
+    if [[ "$actual" -eq 2 && "$err" == "ERROR: $expected ($d/constructo.toml, line "* ]]; then
+        pass "project/invalid/$(basename "$d")"
+    else
+        fail "project/invalid/$(basename "$d") (expected exit 2 with '$expected', got exit $actual and '$err')"
+    fi
+done
+expect_exit "a folder with no project-file is a usage error" 2 check --project="$PROJECTS/invalid/no-project-file"
+err="$("$CONSTRUCTO" check --project="$PROJECTS/invalid/no-project-file" 2>&1 >/dev/null || true)"
+if [[ "$err" == "ERROR: Cannot read $PROJECTS/invalid/no-project-file/constructo.toml: "* ]]; then
+    pass "a folder with no project-file is reported"
+else
+    fail "a folder with no project-file is reported (got '$err')"
+fi
+expect_exit "a folder that does not exist is a usage error" 2 check --project=nothing-here
+expect_exit "--project can only be given once" 2 check --project="$SHAPES" --project="$SHAPES"
+expect_exit "--project needs a folder" 2 check --project
+expect_exit "--project is not accepted without a subcommand" 2 --project="$SHAPES"
+
+# The files of the project are the types files that its patterns name, in order, and nothing else.
+listing="$("$CONSTRUCTO" check -v --project="$SHAPES" 2>&1)"
+expected_listing="OK: $SHAPES (project com.example.shapes)
+OK: $SHAPES/circles/shape.types (data-types)
+OK: $SHAPES/root.types (data-types)
+OK: checked 2 file(s)"
+if [[ "$listing" == "$expected_listing" ]]; then
+    pass "project: the types files are listed in order, without hidden, nested or other files"
+else
+    fail "project: the types files are listed in order (got '$listing')"
+fi
+listing="$("$CONSTRUCTO" check -v --project="$PROJECTS/valid/patterns" 2>&1)"
+if [[ "$listing" == *"/lib/b.types"* && "$listing" == *"/src/a.types"* && "$listing" != *"generated"* \
+    && "$listing" != *"other.types"* ]]; then
+    pass "project: include and exclude choose the files"
+else
+    fail "project: include and exclude choose the files (got '$listing')"
+fi
+listing="$("$CONSTRUCTO" check -v --project="$PROJECTS/valid/imports-only" 2>&1)"
+if [[ "$listing" == "OK: $PROJECTS/valid/imports-only (project example.importsonly)
+OK: checked 0 file(s)" ]]; then
+    pass "project: a project with no types files is accepted"
+else
+    fail "project: a project with no types files is accepted (got '$listing')"
+fi
+
+# A file that the project includes as a types file must not hold values.
+err="$("$CONSTRUCTO" check --project="$PROJECTS/rejected/values-in-types" 2>&1 >/dev/null)" && actual=0 || actual=$?
+if [[ "$actual" -eq 1 && "$err" == "ERROR: The project includes this file as a types file but it holds data-values ($PROJECTS/rejected/values-in-types/notes.types, line 1, col 1)" ]]; then
+    pass "project: a values file that the patterns include is reported"
+else
+    fail "project: a values file that the patterns include is reported (got exit $actual and '$err')"
+fi
+
+# Imports: every project that is imported is loaded once, before the project that imports it.
+IMPORTS="$PROJECTS/valid-imports"
+for root in diamond/app two-groups/app chain/a; do
+    expect_exit "project/valid-imports/$root" 0 check --project="$IMPORTS/$root"
+done
+project_names() { "$CONSTRUCTO" check -v --project="$1" 2>&1 | sed -n 's|.*(project \(.*\))$|\1|p' | tr '\n' ' '; }
+order="$(project_names "$IMPORTS/diamond/app")"
+if [[ "$order" == "example.base example.left example.right example.app " ]]; then
+    pass "imports: a project that is imported twice is loaded once, before the projects that import it"
+else
+    fail "imports: a project that is imported twice is loaded once, before the projects that import it (got '$order')"
+fi
+order="$(project_names "$IMPORTS/chain/a")"
+if [[ "$order" == "example.c example.b example.a " ]]; then
+    pass "imports: a project is loaded when it is imported indirectly"
+else
+    fail "imports: a project is loaded when it is imported indirectly (got '$order')"
+fi
+count="$("$CONSTRUCTO" check -v --project="$IMPORTS/two-groups/app" 2>&1 | grep -c '(project ')"
+if [[ "$count" -eq 2 ]]; then
+    pass "imports: one project in several groups is still loaded once"
+else
+    fail "imports: one project in several groups is still loaded once (got $count)"
+fi
+# A relative source is relative to the folder of the project that imports, and not to the current folder.
+if (cd "$IMPORTS/diamond" && "$CONSTRUCTO" check --project=app >/dev/null 2>&1); then
+    pass "imports: a relative source is relative to the importing project"
+else
+    fail "imports: a relative source is relative to the importing project"
+fi
+absolute="$(mktemp -d)"
+printf '[project]\nname = "example.absolute"\n\n[[import]]\nproject-name = "example.lib"\nsource = "%s"\n' \
+    "$(cd "$IMPORTS/two-groups/lib" && pwd)" > "$absolute/constructo.toml"
+expect_exit "imports: a source may be an absolute path" 0 check --project="$absolute"
+rm -f "$absolute/constructo.toml"
+rmdir "$absolute"
+# An error in an imported project is reported against that project.
+broken="$(mktemp -d)"
+mkdir "$broken/lib" "$broken/app"
+printf '[project]\nname = "example.lib"\n' > "$broken/lib/constructo.toml"
+echo "enum Lib = Lib(Missing);" > "$broken/lib/lib.types"
+printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lib"\nsource = "../lib"\n' \
+    > "$broken/app/constructo.toml"
+echo "enum App = App;" > "$broken/app/app.types"
+expect_exit "imports: a type error in an imported project fails the run" 1 check --project="$broken/app"
+listing="$("$CONSTRUCTO" check -v --project="$broken/app" 2>/dev/null || true)"
+if [[ "$listing" == *"FAILED: $broken/app/../lib (project example.lib)"* \
+    && "$listing" == *"OK: $broken/app (project example.app)"* ]]; then
+    pass "imports: the project with the error is the one reported as failed"
+else
+    fail "imports: the project with the error is the one reported as failed (got '$listing')"
+fi
+rm -f "$broken/lib/constructo.toml" "$broken/lib/lib.types" "$broken/app/constructo.toml" "$broken/app/app.types"
+rmdir "$broken/lib" "$broken/app" "$broken"
+# Each invalid import names its expected error, which starts the message, and the exit code is 2.
+for d in "$PROJECTS"/invalid-imports/*/; do
+    d="${d%/}"
+    expected="$(sed -n 's|^# expect: ||p' "$d/app/constructo.toml")"
+    actual=0
+    err="$("$CONSTRUCTO" check --project="$d/app" 2>&1 >/dev/null)" || actual=$?
+    if [[ "$actual" -eq 2 && "$err" == "ERROR: $expected"* ]]; then
+        pass "project/invalid-imports/$(basename "$d")"
+    else
+        fail "project/invalid-imports/$(basename "$d") (expected exit 2 with '$expected', got exit $actual and '$err')"
+    fi
+done
+# Names: each project has its own names, which are written with a group or the full name of the project.
+NAMES="$PROJECTS/valid-names"
+expect_exit "project/valid-names/qualified" 0 check --project="$NAMES/qualified/app" "$NAMES/qualified/app/values.values"
+for case in bundle same-names group; do
+    expect_exit "project/valid-names/$case" 0 check --project="$NAMES/$case/app"
+done
+# A const of another project is a reference to a const, which needs the option as any other does.
+expect_exit "project/valid-names/not-transitive" 0 check --allow-refs --project="$NAMES/not-transitive/app"
+expect_exit "a const of another project is a reference" 1 check --project="$NAMES/not-transitive/app"
+# Each invalid case names its expected error, which starts the message, and the exit code is 1.
+for d in "$PROJECTS"/invalid-names/*/; do
+    d="${d%/}"
+    expected="$(sed -n '1s|^// expect: ||p' "$d/app/app.types")"
+    actual=0
+    err="$("$CONSTRUCTO" check --project="$d/app" 2>&1 >/dev/null)" || actual=$?
+    if [[ "$actual" -eq 1 && "$err" == "ERROR: $expected"* ]]; then
+        pass "project/invalid-names/$(basename "$d")"
+    else
+        fail "project/invalid-names/$(basename "$d") (expected exit 1 with '$expected', got exit $actual and '$err')"
+    fi
+done
+# A name is shown as it would be written in the file the message is about.
+listing="$("$CONSTRUCTO" check -v --project="$NAMES/qualified/app" 2>/dev/null)"
+if [[ "$listing" == *"const unit: example.lib::Shape"* && "$listing" == *"const holder: Holder"* ]]; then
+    pass "names: a type of another project is shown in full, and one of the project itself is bare"
+else
+    fail "names: a type of another project is shown in full, and one of the project itself is bare (got '$listing')"
+fi
+listing="$("$CONSTRUCTO" check -v --project="$NAMES/bundle/app" 2>/dev/null)"
+if [[ "$listing" == *"const c: Shape"* && "$listing" != *"example.lib::"* ]]; then
+    pass "names: a type of a project that is imported into local is bare"
+else
+    fail "names: a type of a project that is imported into local is bare (got '$listing')"
+fi
+# The files given with a project are written in the project's own namespace, with its own imports.
+extra="$(mktemp)"
+echo "enum Extra = Extra(lib::Shape);" > "$extra"
+expect_exit "names: a types file that is given is written in the project" 0 check --project="$NAMES/qualified/app" "$extra"
+echo "enum Holder = Other;" > "$extra"
+expect_exit "names: a type in a given file that the project declares is a duplicate" 1 \
+    check --project="$NAMES/qualified/app" "$extra"
+echo "enum Extra = Extra(example.other::Shape);" > "$extra"
+expect_exit "names: a given file cannot name a project that was not imported" 1 \
+    check --project="$NAMES/qualified/app" "$extra"
+rm -f "$extra"
+# The standard prelude is the built-in project constructo.prelude, which every project imports into local unless it
+# imports it itself.
+PRELUDES="$PROJECTS/valid-prelude"
+for case in override explicit-local full-name no-group; do
+    expect_exit "project/valid-prelude/$case" 0 check --project="$PRELUDES/$case/app"
+done
+# An import of the prelude is the project's own statement, so --no-prelude leaves it alone.
+for case in override explicit-local no-group; do
+    expect_exit "prelude: --no-prelude keeps the explicit import in $case" 0 \
+        check --no-prelude --project="$PRELUDES/$case/app"
+done
+expect_exit "prelude: --no-prelude removes the implicit import" 1 \
+    check --no-prelude --project="$PRELUDES/full-name/app"
+expect_exit "prelude: --prelude gives the implicit import back" 0 \
+    check --config="$CONFIG/precedence/no-prelude.toml" --prelude --project="$PRELUDES/full-name/app"
+expect_exit "prelude: prelude = false in the settings file removes the implicit import" 1 \
+    check --config="$CONFIG/precedence/no-prelude.toml" --project="$PRELUDES/full-name/app"
+# The imported projects get the prelude as well, so they can use Option and Bool.
+nested="$(mktemp -d)"
+mkdir "$nested/lib" "$nested/app"
+printf '[project]\nname = "example.lib"\n' > "$nested/lib/constructo.toml"
+echo "enum Lib = Lib(Option<Bool>);" > "$nested/lib/lib.types"
+printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lib"\nsource = "../lib"\n' \
+    > "$nested/app/constructo.toml"
+echo "enum App = App;" > "$nested/app/app.types"
+expect_exit "prelude: an imported project has the prelude too" 0 check --project="$nested/app"
+expect_exit "prelude: --no-prelude removes it from the imported project as well" 1 \
+    check --no-prelude --project="$nested/app"
+rm -f "$nested/lib/constructo.toml" "$nested/lib/lib.types" "$nested/app/constructo.toml" "$nested/app/app.types"
+rmdir "$nested/lib" "$nested/app" "$nested"
+# The built-in project is never reported, and its file is shown by its URI.
+listing="$("$CONSTRUCTO" check -v --project="$PRELUDES/explicit-local/app" 2>/dev/null)"
+if [[ "$listing" != *"constructo"* && "$listing" == *"(project example.app)"* ]]; then
+    pass "prelude: the built-in project is not reported"
+else
+    fail "prelude: the built-in project is not reported (got '$listing')"
+fi
+expect_exit "prelude: the reserved prefix is refused in a project-file" 2 check --project="$PROJECTS/invalid/reserved-name"
+echo "enum Bool = No, Yes;" > "$forward_types"
+expect_exit "prelude: files without a project may declare a name that the prelude has" 0 check "$forward_types"
+echo "enum Bool = No, Yes; const b: Bool = Yes;" > "$forward_types"
+err="$("$CONSTRUCTO" check "$forward_types" 2>&1 >/dev/null || true)"
+if [[ "$err" == *"The name Bool is ambiguous: it could be the Bool declared in the files given or constructo.prelude::Bool"* ]]; then
+    pass "prelude: files without a project are a project like any other"
+else
+    fail "prelude: files without a project are a project like any other (got '$err')"
+fi
+expect_exit "prelude: --no-prelude is the way out for files without a project" 0 check --no-prelude "$forward_types"
+# The values to check come after the project, and a failed project is reported as such.
+expect_exit "project: values are type-checked against the project" 0 check --project="$SHAPES" "$SHAPES/values/shapes.values"
+echo "Circle { radius: \"wide\" }" > "$forward_values"
+expect_exit "project: a type error in the values fails" 1 check --project="$SHAPES" "$forward_values"
+expect_exit "project: --stdin is checked against the project" 0 check --project="$SHAPES" --stdin < "$SHAPES/values/shapes.values"
+expect_exit "project: more types files may follow on the command line" 0 \
+    check --project="$SHAPES" "$EXAMPLES/valid/message.types" "$SHAPES/values/shapes.values"
+expect_exit "project: but not after a values file" 1 \
+    check --project="$SHAPES" "$SHAPES/values/shapes.values" "$EXAMPLES/valid/message.types"
+expect_exit "project: --no-type-check applies" 0 check --no-type-check --project="$SHAPES" "$forward_values"
+verbose="$("$CONSTRUCTO" check -v --project="$SHAPES" "$forward_values" 2>/dev/null || true)"
+verbose="${verbose%%$'\n'*}"
+if [[ "$verbose" == "OK: $SHAPES (project com.example.shapes)" ]]; then
+    pass "project: verbose mode reports the project"
+else
+    fail "project: verbose mode reports the project (got '$verbose')"
+fi
+# The prelude is added ahead of the project as for plain files, so a project that declares Bool needs --no-prelude.
+bool_project="$(mktemp -d)"
+printf '[project]\nname = "example.ownbool"\n' > "$bool_project/constructo.toml"
+printf 'enum Bool = No, Yes;\nconst flag: Bool = Yes;\n' > "$bool_project/bool.types"
+expect_exit "project: its own Bool is ambiguous with the prelude where it is used" 1 check --project="$bool_project"
+err="$("$CONSTRUCTO" check --project="$bool_project" 2>&1 >/dev/null || true)"
+if [[ "$err" == "ERROR: The name Bool is ambiguous: it could be example.ownbool::Bool or constructo.prelude::Bool"* ]]; then
+    pass "project: the ambiguity names both candidates"
+else
+    fail "project: the ambiguity names both candidates (got '$err')"
+fi
+expect_exit "project: its own Bool is fine with --no-prelude" 0 check --no-prelude --project="$bool_project"
+# Settings come from --config and the arguments only, never from the project-file.
+expect_exit "project: --config still applies" 0 check --config="$CONFIG/precedence/no-prelude.toml" --project="$bool_project"
+expect_exit "project: --prelude overrides --config" 1 \
+    check --config="$CONFIG/precedence/no-prelude.toml" --prelude --project="$bool_project"
+verbose="$("$CONSTRUCTO" check -v --project="$bool_project" 2>/dev/null || true)"
+verbose="${verbose%%$'\n'*}"
+if [[ "$verbose" == "FAILED: $bool_project (project example.ownbool)" ]]; then
+    pass "project: a project whose file fails is reported as failed"
+else
+    fail "project: a project whose file fails is reported as failed (got '$verbose')"
+fi
+rm -f "$bool_project/constructo.toml" "$bool_project/bool.types"
+rmdir "$bool_project"
+printed="$("$CONSTRUCTO" check --print-config --project="$SHAPES")"
+if [[ "$printed" == "$("$CONSTRUCTO" check --print-config)" ]]; then
+    pass "project: the project-file does not change the settings"
+else
+    fail "project: the project-file does not change the settings"
+fi
+echo ""
+
 echo "--- printing the effective settings ---"
 printed() { "$CONSTRUCTO" check --print-config "$@"; }
 # True if the printed settings contain the line, which is a key and its value.
@@ -681,7 +974,7 @@ else
     fail "print-config: every key has a comment"
 fi
 help="$("$CONSTRUCTO" check --help)"
-if [[ "$help" == *"--print-config > constructo.toml"* && "$help" == *"docs/specs/config-file.md"* ]]; then
+if [[ "$help" == *"--print-config > constructo-settings.toml"* && "$help" == *"docs/specs/config-file.md"* ]]; then
     pass "--help says how to write a config file"
 else
     fail "--help says how to write a config file"

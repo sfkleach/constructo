@@ -1,0 +1,2 @@
+// expect: Unknown group base
+enum Holder = Holder(base::Item);

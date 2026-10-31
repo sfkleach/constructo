@@ -1,0 +1,2 @@
+// expect: Unknown group libs
+enum Holder = Holder(libs::Shape);

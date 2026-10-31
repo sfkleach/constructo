@@ -1,2 +1,3 @@
-// The prelude already declares Bool, and its constructors True and False.
+// The prelude already declares Bool, so a use of Bool is ambiguous. It is valid under --no-prelude.
 enum Bool = Yes, No;
+const flag: Bool = Yes;
