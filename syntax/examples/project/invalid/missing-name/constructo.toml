@@ -1,0 +1,3 @@
+# expect: missing field `name`
+[project]
+include = ["**/*.types"]

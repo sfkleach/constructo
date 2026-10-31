@@ -1,0 +1,4 @@
+# expect: Invalid pattern "[": invalid range pattern
+[project]
+name = "a"
+exclude = ["old/*", "["]

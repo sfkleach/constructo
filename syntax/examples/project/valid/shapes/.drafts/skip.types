@@ -1,0 +1,2 @@
+// A types file that is skipped, because it is in a hidden folder.
+enum Shape = Duplicate;

@@ -26,6 +26,13 @@
 - `types/valid/array-variants.types`, the `array-variant-*` examples and `values/valid/tagged-array.values` show the
   array variant `Users[User]` and its values `Users[u1, u2]`. `values/typed/valid/tagged-arrays.values` and the
   `*array-variant*` and `*-for-array-variant*` files in `values/typed/invalid` are checked against the schema.
+- `project`: folders for `--project=FOLDER`. Each has a `constructo.toml`. `valid/` projects must check. `invalid/` ones
+  must be rejected with exit code 2, and the first line of each `constructo.toml` is `# expect: <message>`, which the
+  functional test requires the error to start with. `invalid/no-project-file` has no project-file at all.
+  `rejected/` has a project whose patterns include a values file, which is exit code 1. `valid/shapes` has a hidden
+  folder, a nested project, a values file and a text file, all of which must be ignored, because the types files in
+  the first two clash with `circles/shape.types`. `valid/patterns` uses `include` and `exclude`, and
+  `valid/imports-only` has no types files.
 - `config`: configuration files for `--config`, which are TOML and not Constructo. `valid/` must load, and `invalid/`
   must be rejected with exit code 2. Each invalid file has a `# expect: <message>` line, and the functional test
   requires that the error starts with exactly that. `precedence/` has the files that the functional tests combine with

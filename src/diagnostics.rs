@@ -9,6 +9,16 @@ pub struct Pos {
     pub col: u32,
 }
 
+impl Pos {
+    /// The position of a byte offset in a text, counting characters. An offset past the end is the end.
+    pub fn at(text: &str, offset: usize) -> Pos {
+        let before = &text[..offset.min(text.len())];
+        let line = before.matches('\n').count() as u32 + 1;
+        let col = before.rsplit('\n').next().map_or(0, |last| last.chars().count()) as u32 + 1;
+        Pos { line, col }
+    }
+}
+
 impl fmt::Display for Pos {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "line {}, col {}", self.line, self.col)

@@ -1,0 +1,3 @@
+# expect: Invalid project name "a..b": each dot-separated part must have a name
+[project]
+name = "a..b"

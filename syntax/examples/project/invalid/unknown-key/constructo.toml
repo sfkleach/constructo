@@ -1,0 +1,4 @@
+# expect: unknown field `version`, expected one of `name`, `include`, `exclude`
+[project]
+name = "a"
+version = "1"
