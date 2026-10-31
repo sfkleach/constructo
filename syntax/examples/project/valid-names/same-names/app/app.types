@@ -1,0 +1,4 @@
+// Two projects can both declare Shape and Middle, because they are different types.
+enum Pair = Pair(a::Shape, b::Shape);
+const pair: Pair = Pair(a::Middle, b::Middle);
+const own: Pair = Pair(a::Circle, b::Square);

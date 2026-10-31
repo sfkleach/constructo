@@ -1,0 +1,2 @@
+// expect: Unknown const missing in local
+local::missing

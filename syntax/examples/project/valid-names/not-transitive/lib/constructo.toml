@@ -1,0 +1,7 @@
+[project]
+name = "example.lib"
+
+[[import]]
+project-name = "example.base"
+group = "base"
+source = "../base"

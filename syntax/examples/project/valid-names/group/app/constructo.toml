@@ -1,0 +1,12 @@
+[project]
+name = "example.app"
+
+[[import]]
+project-name = "example.a"
+group = "both"
+source = "../a"
+
+[[import]]
+project-name = "example.b"
+group = "both"
+source = "../b"

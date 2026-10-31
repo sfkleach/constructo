@@ -1,0 +1,2 @@
+// expect: Unknown constructor Triangle in lib
+const x: lib::Shape = lib::Triangle;

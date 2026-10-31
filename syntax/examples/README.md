@@ -40,9 +40,16 @@
   has a first line `# expect: <message>`, and the functional test requires that the error starts with it, with exit
   code 2. A cycle, a project name that does not match, two projects with one name, a duplicate import and every kind of
   bad key are there.
-- `values/valid/qualified-names.values` and the `qualif*` examples show names that are qualified with a group or the
-  full name of a project. They are only checked for being well-formed (`--no-type-check`), and the `invalid/` examples
-  show a qualifier without a name, a dotted name with no `::`, and a qualified declaration.
+- `project/valid-names` and `project/invalid-names`: projects whose names refer to other projects. `valid-names`
+  shows a group, a full name, an import into `local`, two projects with the same names, a group of two projects, and a
+  project that is not imported by the one that passes on its const. Each `invalid-names/CASE/app/app.types` has a first
+  line `// expect: <message>`, and the functional test requires that the error starts with it, with exit code 1. The
+  cases are an ambiguous name, a name in a group, a project or group that is not known, a project that is not imported,
+  the prelude, and a message that shows a name in full.
+- `values/typed/valid/qualified-names.values` and the `unknown-*` examples beside it use `local::`, which is the only
+  group that files without a project have.
+- The `qualif*` examples in `types/invalid` and `values/invalid` show a qualifier without a name, a dotted name with no
+  `::`, and a qualified declaration, which are syntax errors.
 - `config`: configuration files for `--config`, which are TOML and not Constructo. `valid/` must load, and `invalid/`
   must be rejected with exit code 2. Each invalid file has a `# expect: <message>` line, and the functional test
   requires that the error starts with exactly that. `precedence/` has the files that the functional tests combine with

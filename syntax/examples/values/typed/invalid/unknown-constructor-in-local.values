@@ -1,0 +1,2 @@
+// expect: Unknown constructor Triangle in local
+local::Triangle

@@ -1,8 +1,8 @@
 use clap::{ArgAction, ArgMatches, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use constructo::diagnostics::{Diagnostic, Pos};
 use constructo::{
-    check_sources_with, prelude_source, source_kind, syntax_error, CheckOptions, Config, Experimental, Outcome,
-    Project, ProjectSet, Source, SourceKind,
+    check_in_projects, check_sources_with, prelude_source, source_kind, syntax_error, CheckOptions, Config,
+    Experimental, Layout, Outcome, Owner, Project, ProjectInfo, ProjectSet, Source, SourceKind,
 };
 use std::collections::VecDeque;
 use std::ffi::OsString;
@@ -293,6 +293,33 @@ fn main() -> ExitCode {
     }
 }
 
+/// How the sources are divided among the projects. The prelude, if there is one, is the first source. Then come the
+/// files of each project in turn, and these are followed by the files and the standard input that were given, which
+/// are written in the project that was named, as are the values.
+fn layout(set: &ProjectSet, sources: usize, first_input: usize) -> Layout {
+    let projects = set
+        .projects
+        .iter()
+        .map(|project| ProjectInfo {
+            name: project.name.clone(),
+            imports: project
+                .imports
+                .iter()
+                .map(|import| (import.group.clone(), import.target.expect("the set has been loaded")))
+                .collect(),
+        })
+        .collect();
+    let root = set.projects.len() - 1;
+    let mut owners = vec![Owner::Prelude; first_input];
+    for (index, project) in set.projects.iter().enumerate() {
+        owners.extend(std::iter::repeat_n(Owner::Project(index), project.files.len()));
+    }
+    // A syntax error can end the reading early, and then there are fewer sources than files.
+    owners.resize(sources, Owner::Project(root));
+    owners.truncate(sources);
+    Layout { projects, owners, root }
+}
+
 fn check(
     stdin: bool,
     no_prelude: bool,
@@ -353,7 +380,10 @@ fn check(
     }
 
     // The processing is deliberately independent of the command line so that it is available as a library.
-    let report = check_sources_with(&sources, options);
+    let report = match project {
+        Some(set) => check_in_projects(&sources, &layout(set, sources.len(), first_input), options),
+        None => check_sources_with(&sources, options),
+    };
     for diagnostic in &report.diagnostics {
         eprintln!("{}", diagnostic);
     }
