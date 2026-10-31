@@ -52,7 +52,7 @@ impl Config {
     pub fn parse(text: &str, name: &str) -> Result<Config, Diagnostic> {
         toml::from_str(text).map_err(|e| {
             let offset = e.span().map_or(0, |span| span.start);
-            Diagnostic::new(name, position(text, offset), e.message())
+            Diagnostic::new(name, Pos::at(text, offset), e.message())
         })
     }
 
@@ -191,14 +191,6 @@ impl Key {
             value: value.to_string(),
         }
     }
-}
-
-/// The line and column of a byte offset in a text, counting characters.
-fn position(text: &str, offset: usize) -> Pos {
-    let before = &text[..offset.min(text.len())];
-    let line = before.matches('\n').count() as u32 + 1;
-    let col = before.rsplit('\n').next().map_or(0, |last| last.chars().count()) as u32 + 1;
-    Pos { line, col }
 }
 
 #[cfg(test)]

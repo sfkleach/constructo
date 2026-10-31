@@ -656,6 +656,116 @@ expect_exit "some-query: a bare --no-experimental overrides the file" 1 \
     check --config="$PRE/some-query.toml" --no-experimental --no-type-check "$SOME_QUERY"
 expect_exit "some-query: -x after --no-experimental switches it on again" 0 \
     check --config="$PRE/some-query.toml" --no-experimental -x --no-type-check "$SOME_QUERY"
+echo "--- projects ---"
+PROJECTS="$(dirname "$0")/../syntax/examples/project"
+SHAPES="$PROJECTS/valid/shapes"
+for d in "$PROJECTS"/valid/*/; do
+    d="${d%/}"
+    expect_exit "project/valid/$(basename "$d")" 0 check --project="$d"
+done
+# Each invalid project-file names its expected error, which is reported in the usual form with exit code 2.
+for d in "$PROJECTS"/invalid/*/; do
+    d="${d%/}"
+    [[ -f "$d/constructo.toml" ]] || continue
+    expected="$(sed -n 's|^# expect: ||p' "$d/constructo.toml")"
+    actual=0
+    err="$("$CONSTRUCTO" check --project="$d" 2>&1 >/dev/null)" || actual=$?
+    if [[ "$actual" -eq 2 && "$err" == "ERROR: $expected ($d/constructo.toml, line "* ]]; then
+        pass "project/invalid/$(basename "$d")"
+    else
+        fail "project/invalid/$(basename "$d") (expected exit 2 with '$expected', got exit $actual and '$err')"
+    fi
+done
+expect_exit "a folder with no project-file is a usage error" 2 check --project="$PROJECTS/invalid/no-project-file"
+err="$("$CONSTRUCTO" check --project="$PROJECTS/invalid/no-project-file" 2>&1 >/dev/null || true)"
+if [[ "$err" == "ERROR: Cannot read $PROJECTS/invalid/no-project-file/constructo.toml: "* ]]; then
+    pass "a folder with no project-file is reported"
+else
+    fail "a folder with no project-file is reported (got '$err')"
+fi
+expect_exit "a folder that does not exist is a usage error" 2 check --project=nothing-here
+expect_exit "--project can only be given once" 2 check --project="$SHAPES" --project="$SHAPES"
+expect_exit "--project needs a folder" 2 check --project
+expect_exit "--project is not accepted without a subcommand" 2 --project="$SHAPES"
+
+# The files of the project are the types files that its patterns name, in order, and nothing else.
+listing="$("$CONSTRUCTO" check -v --project="$SHAPES" 2>&1)"
+expected_listing="OK: $SHAPES (project com.example.shapes)
+OK: $SHAPES/circles/shape.types (data-types)
+OK: $SHAPES/root.types (data-types)
+OK: checked 2 file(s)"
+if [[ "$listing" == "$expected_listing" ]]; then
+    pass "project: the types files are listed in order, without hidden, nested or other files"
+else
+    fail "project: the types files are listed in order (got '$listing')"
+fi
+listing="$("$CONSTRUCTO" check -v --project="$PROJECTS/valid/patterns" 2>&1)"
+if [[ "$listing" == *"/lib/b.types"* && "$listing" == *"/src/a.types"* && "$listing" != *"generated"* \
+    && "$listing" != *"other.types"* ]]; then
+    pass "project: include and exclude choose the files"
+else
+    fail "project: include and exclude choose the files (got '$listing')"
+fi
+listing="$("$CONSTRUCTO" check -v --project="$PROJECTS/valid/imports-only" 2>&1)"
+if [[ "$listing" == "OK: $PROJECTS/valid/imports-only (project imports-only)
+OK: checked 0 file(s)" ]]; then
+    pass "project: a project with no types files is accepted"
+else
+    fail "project: a project with no types files is accepted (got '$listing')"
+fi
+
+# A file that the project includes as a types file must not hold values.
+err="$("$CONSTRUCTO" check --project="$PROJECTS/rejected/values-in-types" 2>&1 >/dev/null)" && actual=0 || actual=$?
+if [[ "$actual" -eq 1 && "$err" == "ERROR: The project includes this file as a types file but it holds data-values ($PROJECTS/rejected/values-in-types/notes.types, line 1, col 1)" ]]; then
+    pass "project: a values file that the patterns include is reported"
+else
+    fail "project: a values file that the patterns include is reported (got exit $actual and '$err')"
+fi
+
+# The values to check come after the project, and a failed project is reported as such.
+expect_exit "project: values are type-checked against the project" 0 check --project="$SHAPES" "$SHAPES/values/shapes.values"
+echo "Circle { radius: \"wide\" }" > "$forward_values"
+expect_exit "project: a type error in the values fails" 1 check --project="$SHAPES" "$forward_values"
+expect_exit "project: --stdin is checked against the project" 0 check --project="$SHAPES" --stdin < "$SHAPES/values/shapes.values"
+expect_exit "project: more types files may follow on the command line" 0 \
+    check --project="$SHAPES" "$EXAMPLES/valid/message.types" "$SHAPES/values/shapes.values"
+expect_exit "project: but not after a values file" 1 \
+    check --project="$SHAPES" "$SHAPES/values/shapes.values" "$EXAMPLES/valid/message.types"
+expect_exit "project: --no-type-check applies" 0 check --no-type-check --project="$SHAPES" "$forward_values"
+verbose="$("$CONSTRUCTO" check -v --project="$SHAPES" "$forward_values" 2>/dev/null || true)"
+verbose="${verbose%%$'\n'*}"
+if [[ "$verbose" == "OK: $SHAPES (project com.example.shapes)" ]]; then
+    pass "project: verbose mode reports the project"
+else
+    fail "project: verbose mode reports the project (got '$verbose')"
+fi
+# The prelude is added ahead of the project as for plain files, so a project that declares Bool needs --no-prelude.
+bool_project="$(mktemp -d)"
+printf '[project]\nname = "own-bool"\n' > "$bool_project/constructo.toml"
+echo "enum Bool = No, Yes;" > "$bool_project/bool.types"
+expect_exit "project: its own Bool clashes with the prelude" 1 check --project="$bool_project"
+expect_exit "project: its own Bool is fine with --no-prelude" 0 check --no-prelude --project="$bool_project"
+# Settings come from --config and the arguments only, never from the project-file.
+expect_exit "project: --config still applies" 0 check --config="$CONFIG/precedence/no-prelude.toml" --project="$bool_project"
+expect_exit "project: --prelude overrides --config" 1 \
+    check --config="$CONFIG/precedence/no-prelude.toml" --prelude --project="$bool_project"
+verbose="$("$CONSTRUCTO" check -v --project="$bool_project" 2>/dev/null || true)"
+verbose="${verbose%%$'\n'*}"
+if [[ "$verbose" == "FAILED: $bool_project (project own-bool)" ]]; then
+    pass "project: a project whose file fails is reported as failed"
+else
+    fail "project: a project whose file fails is reported as failed (got '$verbose')"
+fi
+rm -f "$bool_project/constructo.toml" "$bool_project/bool.types"
+rmdir "$bool_project"
+printed="$("$CONSTRUCTO" check --print-config --project="$SHAPES")"
+if [[ "$printed" == "$("$CONSTRUCTO" check --print-config)" ]]; then
+    pass "project: the project-file does not change the settings"
+else
+    fail "project: the project-file does not change the settings"
+fi
+echo ""
+
 echo "--- printing the effective settings ---"
 printed() { "$CONSTRUCTO" check --print-config "$@"; }
 # True if the printed settings contain the line, which is a key and its value.
@@ -699,7 +809,7 @@ else
     fail "print-config: every key has a comment"
 fi
 help="$("$CONSTRUCTO" check --help)"
-if [[ "$help" == *"--print-config > constructo.toml"* && "$help" == *"docs/specs/config-file.md"* ]]; then
+if [[ "$help" == *"--print-config > constructo-settings.toml"* && "$help" == *"docs/specs/config-file.md"* ]]; then
     pass "--help says how to write a config file"
 else
     fail "--help says how to write a config file"

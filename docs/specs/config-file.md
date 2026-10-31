@@ -9,7 +9,7 @@ A configuration file gives the settings that the command-line options would. It 
 without checking anything. It needs no input files. So a template that has every setting is made with:
 
 ```sh
-constructo check --print-config > constructo.toml
+constructo check --print-config > constructo-settings.toml
 ```
 
 The output is itself a valid configuration file. Options given on the same command line are part of what is printed,
@@ -66,6 +66,10 @@ subcommand. Today there is one subcommand, `check`.
 A limit is a whole number that is not negative.
 
 ## What is not in the file
+
+This file is not the project-file. A project is described by `constructo.toml` in the project folder, which `--project`
+reads (see decision 24), and it holds no settings. The settings file is only ever read when `--config` names it, and
+`--print-config` writes one, conventionally named `constructo-settings.toml`.
 
 The inputs (the files to check and `--stdin`) are never taken from the file, and nor are `--config`, `--print-config`,
 `--help` and `--version`. `--config` can be given once in all, whether it is before or after the subcommand.

@@ -7,6 +7,7 @@ pub mod config;
 pub mod diagnostics;
 pub mod lexer;
 pub mod parser;
+pub mod project;
 pub mod typecheck;
 pub mod validate;
 
@@ -18,6 +19,7 @@ use validate::{validate, ParsedFile};
 
 pub use config::Config;
 pub use parser::{Experimental, SourceKind};
+pub use project::Project;
 pub use typecheck::{DEFAULT_INFER_LIMIT, DEFAULT_VALUE_LIMIT};
 
 /// The standard prelude: declarations that are available to every types file unless the prelude is disabled.
@@ -105,6 +107,12 @@ pub fn syntax_error(source: &Source, experimental: Experimental) -> Option<Diagn
         .1
         .err()
         .map(|e| syntax_diagnostic(source, e))
+}
+
+/// Whether the source is a types file or a values file, which its first token decides. A file that fails to parse is
+/// still classified by its first token.
+pub fn source_kind(source: &Source, experimental: Experimental) -> SourceKind {
+    parse_file(&source.text, experimental).0
 }
 
 /// The options that change how sources are checked.
