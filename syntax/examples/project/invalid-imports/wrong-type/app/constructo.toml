@@ -1,0 +1,7 @@
+# expect: invalid type: integer `5`, expected a string
+[project]
+name = "example.app"
+
+[[import]]
+project-name = "example.lib"
+source = 5

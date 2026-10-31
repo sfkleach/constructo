@@ -1,0 +1,8 @@
+# expect: Invalid group name "a.b": a group name has no dot, because a dot makes it the full name of a project
+[project]
+name = "example.app"
+
+[[import]]
+project-name = "example.lib"
+group = "a.b"
+source = "../lib"

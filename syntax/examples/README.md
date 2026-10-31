@@ -33,6 +33,13 @@
   folder, a nested project, a values file and a text file, all of which must be ignored, because the types files in
   the first two clash with `circles/shape.types`. `valid/patterns` uses `include` and `exclude`, and
   `valid/imports-only` has no types files.
+- `project/valid-imports` and `project/invalid-imports`: projects with `[[import]]`. In each case the project to check
+  is the `app` folder or the folder named in the functional test, and the others are its imports.
+  `valid-imports/diamond` imports one project through two others, `two-groups` has one project in several groups, and
+  `chain` shows that a project is loaded when it is imported indirectly. Each `invalid-imports/CASE/app/constructo.toml`
+  has a first line `# expect: <message>`, and the functional test requires that the error starts with it, with exit
+  code 2. A cycle, a project name that does not match, two projects with one name, a duplicate import and every kind of
+  bad key are there.
 - `values/valid/qualified-names.values` and the `qualif*` examples show names that are qualified with a group or the
   full name of a project. They are only checked for being well-formed (`--no-type-check`), and the `invalid/` examples
   show a qualifier without a name, a dotted name with no `::`, and a qualified declaration.

@@ -1,0 +1,8 @@
+# expect: Invalid group name "": a group name cannot be empty
+[project]
+name = "example.app"
+
+[[import]]
+project-name = "example.lib"
+group = ""
+source = "../lib"

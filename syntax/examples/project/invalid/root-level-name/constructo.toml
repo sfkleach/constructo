@@ -1,2 +1,2 @@
-# expect: unknown field `name`, expected `project`
+# expect: unknown field `name`, expected `project` or `import`
 name = "a.b"

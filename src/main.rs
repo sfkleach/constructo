@@ -2,8 +2,9 @@ use clap::{ArgAction, ArgMatches, CommandFactory, FromArgMatches, Parser, Subcom
 use constructo::diagnostics::{Diagnostic, Pos};
 use constructo::{
     check_sources_with, prelude_source, source_kind, syntax_error, CheckOptions, Config, Experimental, Outcome,
-    Project, Source, SourceKind,
+    Project, ProjectSet, Source, SourceKind,
 };
+use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::io::Read;
 use std::path::PathBuf;
@@ -280,7 +281,7 @@ fn main() -> ExitCode {
                 return ExitCode::SUCCESS;
             }
             // The project is read after the settings, so that a problem with either is reported by itself.
-            let project = match project.as_deref().map(Project::load).transpose() {
+            let project = match project.as_deref().map(ProjectSet::load).transpose() {
                 Ok(project) => project,
                 Err(e) => {
                     eprintln!("{}", e);
@@ -297,16 +298,16 @@ fn check(
     no_prelude: bool,
     verbose: bool,
     options: &CheckOptions,
-    project: Option<&Project>,
+    project: Option<&ProjectSet>,
     files: &[PathBuf],
 ) -> ExitCode {
     // The inputs are read one at a time, and reading stops at the first syntax error. That way an unreadable later
     // input cannot hide an earlier syntax error, which is the error the run is meant to stop at. The files of the
     // project come first, and the project says that they are types files.
-    let from_project = project.map_or(0, |project| project.files.len());
+    let from_project = project.map_or(0, |set| set.projects.iter().map(|project| project.files.len()).sum());
     let inputs: Vec<&PathBuf> = project
-        .map_or(&[][..], |project| &project.files[..])
-        .iter()
+        .into_iter()
+        .flat_map(|set| set.projects.iter().flat_map(|project| &project.files))
         .chain(files)
         .collect();
     let mut sources = Vec::new();
@@ -357,12 +358,26 @@ fn check(
         eprintln!("{}", diagnostic);
     }
     if verbose {
-        if let Some(project) = project {
-            // The project has failed if any one of its files has.
-            let failed = report.outcomes[first_input..first_input + from_project].contains(&Outcome::Failed);
-            let label = if failed { "FAILED" } else { "OK" };
-            println!("{}: {} (project {})", label, project.folder.display(), project.name);
+        // Each project is reported just before its files, and it has failed if any one of them has.
+        let mut starts = Vec::new();
+        let mut start = first_input;
+        for project in project.into_iter().flat_map(|set| &set.projects) {
+            starts.push((start, project));
+            start += project.files.len();
         }
+        let mut pending: VecDeque<(usize, &Project)> = starts.into();
+        let report_projects = |until: usize, pending: &mut VecDeque<(usize, &Project)>| {
+            while let Some(&(start, project)) = pending.front() {
+                if start > until {
+                    break;
+                }
+                pending.pop_front();
+                let end = (start + project.files.len()).min(report.outcomes.len());
+                let failed = report.outcomes[start.min(end)..end].contains(&Outcome::Failed);
+                let label = if failed { "FAILED" } else { "OK" };
+                println!("{}: {} (project {})", label, project.folder.display(), project.name);
+            }
+        };
         // The prelude is not one of the user's inputs, so it is never reported.
         for (index, ((source, outcome), kind)) in sources
             .iter()
@@ -371,6 +386,7 @@ fn check(
             .enumerate()
             .skip(first_input)
         {
+            report_projects(index, &mut pending);
             let label = kind.map(|k| format!(" ({})", k.label())).unwrap_or_default();
             match outcome {
                 Outcome::Ok if report.type_checked && *kind == Some(SourceKind::Values) => {
@@ -388,6 +404,7 @@ fn check(
                 Outcome::NotChecked => {}
             }
         }
+        report_projects(usize::MAX, &mut pending);
     }
     if report.is_ok() {
         if verbose {

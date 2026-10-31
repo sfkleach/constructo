@@ -1,0 +1,6 @@
+[project]
+name = "example.b"
+
+[[import]]
+project-name = "example.app"
+source = "../app"

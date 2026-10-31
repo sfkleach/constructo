@@ -6,6 +6,7 @@
 use crate::diagnostics::{Diagnostic, Pos};
 use glob::{MatchOptions, Pattern};
 use serde::Deserialize;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use toml::Spanned;
@@ -20,6 +21,8 @@ pub const DEFAULT_INCLUDE: &str = "**/*.types";
 #[serde(deny_unknown_fields)]
 struct ProjectFile {
     project: ProjectTable,
+    #[serde(default)]
+    import: Vec<ImportTable>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -30,12 +33,37 @@ struct ProjectTable {
     exclude: Option<Vec<Spanned<String>>>,
 }
 
-/// A project that has been loaded: its name, and the types files that it holds.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+struct ImportTable {
+    project_name: Spanned<String>,
+    source: Spanned<String>,
+    group: Option<Spanned<String>>,
+}
+
+/// An `[[import]]` of a project-file: a project that is brought in, and the group that it is put into.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Import {
+    /// The full name that the project-file says the imported project has.
+    pub project_name: String,
+    /// The group the project is put into. Without one the project can only be named by its full name.
+    pub group: Option<String>,
+    /// The folder of the imported project, as the importing folder joined to the `source`.
+    pub folder: PathBuf,
+    /// The index of the imported project in the `ProjectSet`. This is `None` until the set has been loaded.
+    pub target: Option<usize>,
+    name_pos: Pos,
+    source_pos: Pos,
+}
+
+/// A project that has been loaded: its name, its imports and the types files that it holds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Project {
     pub name: String,
     /// The folder as it was given, so the paths below are as the user would type them.
     pub folder: PathBuf,
+    /// The projects that this one imports, in the order in the project-file.
+    pub imports: Vec<Import>,
     /// The types files of the project, each as the folder joined to the path within it, sorted by that path.
     pub files: Vec<PathBuf>,
 }
@@ -67,28 +95,43 @@ const MATCH: MatchOptions = MatchOptions {
     require_literal_leading_dot: false,
 };
 
+/// What a project-file says, with the patterns compiled.
+struct ParsedFile {
+    name: String,
+    include: Vec<Pattern>,
+    exclude: Vec<Pattern>,
+    imports: Vec<Import>,
+}
+
 impl Project {
-    /// Reads the project-file in the folder and finds the types files that it names.
+    /// Reads the project-file in the folder and finds the types files that it names. The imports are read but the
+    /// projects that they name are not loaded, which `ProjectSet::load` does.
     pub fn load(folder: &Path) -> Result<Project, ProjectError> {
         let path = folder.join(PROJECT_FILE);
         let text = std::fs::read_to_string(&path)
             .map_err(|e| ProjectError::Cannot(format!("Cannot read {}: {}", path.display(), e)))?;
-        let (name, include, exclude) = Project::parse_file(&text, &path.display().to_string())?;
+        let parsed = Project::parse_file(&text, &path.display().to_string(), folder)?;
         let mut found = Vec::new();
-        walk(folder, "", true, &include, &exclude, &mut found)
+        walk(folder, "", true, &parsed.include, &parsed.exclude, &mut found)
             .map_err(|e| ProjectError::Cannot(format!("Cannot read {}: {}", folder.display(), e)))?;
         found.sort();
         let files = found.iter().map(|relative| folder.join(relative)).collect();
         Ok(Project {
-            name,
+            name: parsed.name,
             folder: folder.to_path_buf(),
+            imports: parsed.imports,
             files,
         })
     }
 
-    /// Reads the text of a project-file, returning the name and the include and exclude patterns. `file` is the name of
-    /// the file in diagnostics.
-    fn parse_file(text: &str, file: &str) -> Result<(String, Vec<Pattern>, Vec<Pattern>), ProjectError> {
+    /// The name of the project-file in diagnostics.
+    fn project_file(&self) -> String {
+        self.folder.join(PROJECT_FILE).display().to_string()
+    }
+
+    /// Reads the text of a project-file. `file` is the name of the file in diagnostics, and a relative `source` of an
+    /// import is relative to `folder`.
+    fn parse_file(text: &str, file: &str, folder: &Path) -> Result<ParsedFile, ProjectError> {
         let at = |offset: usize| Pos::at(text, offset);
         let invalid =
             |offset: usize, message: String| ProjectError::Invalid(Diagnostic::new(file, at(offset), message));
@@ -120,7 +163,186 @@ impl Project {
         };
         let include = patterns(table.include, &[DEFAULT_INCLUDE])?;
         let exclude = patterns(table.exclude, &[])?;
-        Ok((table.name.into_inner(), include, exclude))
+        let mut imports = Vec::new();
+        for entry in parsed.import {
+            let name = entry.project_name.get_ref();
+            if let Err(reason) = check_name(name) {
+                let message = format!("Invalid project name \"{}\": {}", name, reason);
+                return Err(invalid(entry.project_name.span().start, message));
+            }
+            if let Some(group) = &entry.group {
+                if let Err(reason) = check_group(group.get_ref()) {
+                    let message = format!("Invalid group name \"{}\": {}", group.get_ref(), reason);
+                    return Err(invalid(group.span().start, message));
+                }
+            }
+            if entry.source.get_ref().is_empty() {
+                return Err(invalid(
+                    entry.source.span().start,
+                    "The source of an import is empty".to_string(),
+                ));
+            }
+            imports.push(Import {
+                project_name: name.clone(),
+                group: entry.group.map(Spanned::into_inner),
+                folder: folder.join(entry.source.get_ref()),
+                target: None,
+                name_pos: at(entry.project_name.span().start),
+                source_pos: at(entry.source.span().start),
+            });
+        }
+        Ok(ParsedFile {
+            name: table.name.into_inner(),
+            include,
+            exclude,
+            imports,
+        })
+    }
+}
+
+/// The projects that a run uses: the one that was named, and every project that it imports, directly or not.
+///
+/// The projects are in dependency order, so a project comes after every project that it imports and the one that was
+/// named is last. Each project is in the set once, however many times it is imported. Imports are not transitive for
+/// the names that a project can use, but all of them are loaded and checked, because a project's types can name those
+/// of the projects that it imports.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectSet {
+    pub projects: Vec<Project>,
+}
+
+impl ProjectSet {
+    /// Loads the project in the folder and, following the imports to any depth, the projects that it imports.
+    pub fn load(folder: &Path) -> Result<ProjectSet, ProjectError> {
+        let mut loader = Loader::default();
+        let root = Project::load(folder)?;
+        loader.visit(root)?;
+        Ok(ProjectSet {
+            projects: loader.projects,
+        })
+    }
+
+    /// The project that was named, which is the last.
+    pub fn root(&self) -> &Project {
+        self.projects
+            .last()
+            .expect("a set holds at least the project that was named")
+    }
+}
+
+#[derive(Default)]
+struct Loader {
+    /// The projects that are finished, in dependency order.
+    projects: Vec<Project>,
+    /// The index in `projects` of each finished project, by its folder once it has been made absolute.
+    done: HashMap<PathBuf, usize>,
+    /// The projects that are being loaded now, outermost first, with the name of each, to find a cycle.
+    stack: Vec<(PathBuf, String)>,
+    /// The folder of each project name that has been seen, so that one name is not two projects.
+    names: HashMap<String, PathBuf>,
+}
+
+impl Loader {
+    /// Loads the imports of a project and then adds the project to the set, returning its index.
+    fn visit(&mut self, mut project: Project) -> Result<usize, ProjectError> {
+        let canonical = absolute(&project.folder)
+            .map_err(|e| ProjectError::Cannot(format!("Cannot read {}: {}", project.folder.display(), e)))?;
+        self.names.insert(project.name.clone(), canonical.clone());
+        self.stack.push((canonical, project.name.clone()));
+        let file = project.project_file();
+        let mut seen: HashSet<(PathBuf, Option<String>)> = HashSet::new();
+        for index in 0..project.imports.len() {
+            let import = &project.imports[index];
+            let (name_pos, source_pos) = (import.name_pos, import.source_pos);
+            let problem = |pos: Pos, message: String| ProjectError::Invalid(Diagnostic::new(&file, pos, message));
+            let child_canonical = absolute(&import.folder).map_err(|e| {
+                problem(
+                    source_pos,
+                    format!("Cannot read the project at {}: {}", import.folder.display(), e),
+                )
+            })?;
+            if !seen.insert((child_canonical.clone(), import.group.clone())) {
+                let message = match &import.group {
+                    Some(group) => format!(
+                        "{} is imported into the group {} more than once",
+                        import.project_name, group
+                    ),
+                    None => format!("{} is imported with no group more than once", import.project_name),
+                };
+                return Err(problem(source_pos, message));
+            }
+            let target = if let Some(&done) = self.done.get(&child_canonical) {
+                self.check_name_of(&file, import, name_pos, &self.projects[done].name)?;
+                done
+            } else if let Some(at) = self.stack.iter().position(|(path, _)| *path == child_canonical) {
+                let mut names: Vec<&str> = self.stack[at..].iter().map(|(_, name)| name.as_str()).collect();
+                names.push(&self.stack[at].1);
+                return Err(problem(
+                    source_pos,
+                    format!("The imports form a cycle: {}", names.join(" -> ")),
+                ));
+            } else {
+                let child = Project::load(&import.folder)?;
+                self.check_name_of(&file, import, name_pos, &child.name)?;
+                if let Some(other) = self.names.get(&child.name) {
+                    if *other != child_canonical {
+                        let message = format!(
+                            "The project {} is in two places: {} and {}",
+                            child.name,
+                            other.display(),
+                            child_canonical.display()
+                        );
+                        return Err(problem(source_pos, message));
+                    }
+                }
+                self.visit(child)?
+            };
+            project.imports[index].target = Some(target);
+        }
+        let (canonical, _) = self.stack.pop().expect("this project was pushed above");
+        self.projects.push(project);
+        self.done.insert(canonical, self.projects.len() - 1);
+        Ok(self.projects.len() - 1)
+    }
+
+    /// Checks that the project that an import found has the name that the import says.
+    fn check_name_of(&self, file: &str, import: &Import, pos: Pos, found: &str) -> Result<(), ProjectError> {
+        if import.project_name == found {
+            return Ok(());
+        }
+        let message = format!(
+            "The import says the project is named {} but the project at {} is named {}",
+            import.project_name,
+            import.folder.display(),
+            found
+        );
+        Err(ProjectError::Invalid(Diagnostic::new(file, pos, message)))
+    }
+}
+
+/// The folder as an absolute path with no links or `..`, which is the identity of a project.
+fn absolute(folder: &Path) -> std::io::Result<PathBuf> {
+    std::fs::canonicalize(folder)
+}
+
+/// Checks that the group name is a single part, which starts with a letter and has letters, digits and `_`. The
+/// reason is returned if it is not valid.
+fn check_group(group: &str) -> Result<(), String> {
+    if group.contains('.') {
+        return Err("a group name has no dot, because a dot makes it the full name of a project".to_string());
+    }
+    let mut chars = group.chars();
+    match chars.next() {
+        None => return Err("a group name cannot be empty".to_string()),
+        Some(first) if !first.is_ascii_alphabetic() => return Err("it must start with a letter".to_string()),
+        Some(_) => {}
+    }
+    match chars.find(|c| !(c.is_ascii_alphanumeric() || *c == '_')) {
+        Some(bad) => Err(format!(
+            "it has '{}', but only letters, digits and '_' are allowed",
+            bad
+        )),
+        None => Ok(()),
     }
 }
 
@@ -193,13 +415,74 @@ mod tests {
     use super::*;
 
     fn parse(text: &str) -> Result<(String, Vec<Pattern>, Vec<Pattern>), ProjectError> {
-        Project::parse_file(text, "constructo.toml")
+        let parsed = Project::parse_file(text, "constructo.toml", Path::new("here"))?;
+        Ok((parsed.name, parsed.include, parsed.exclude))
+    }
+
+    fn imports(text: &str) -> Vec<Import> {
+        Project::parse_file(text, "constructo.toml", Path::new("here"))
+            .unwrap()
+            .imports
     }
 
     fn error(text: &str) -> (u32, u32, String) {
         match parse(text).unwrap_err() {
             ProjectError::Invalid(d) => (d.pos.line, d.pos.col, d.message),
             other => panic!("not a diagnostic: {}", other),
+        }
+    }
+
+    const ONE: &str = "[project]\nname = \"a.b\"\n";
+
+    #[test]
+    fn an_import_has_a_name_a_source_and_perhaps_a_group() {
+        let text = [
+            ONE,
+            "\n[[import]]\nproject-name = \"P.Q.R\"\ngroup = \"pqrxyz\"\nsource = \"../sister\"\n",
+            "\n[[import]]\nproject-name = \"x.y\"\nsource = \"/abs/x\"\n",
+        ]
+        .concat();
+        let imports = imports(&text);
+        assert_eq!(imports.len(), 2);
+        assert_eq!(imports[0].project_name, "P.Q.R");
+        assert_eq!(imports[0].group.as_deref(), Some("pqrxyz"));
+        // A relative source is relative to the importing folder, and an absolute one is not.
+        assert_eq!(imports[0].folder, Path::new("here/../sister"));
+        assert_eq!(imports[1].group, None);
+        assert_eq!(imports[1].folder, Path::new("/abs/x"));
+        assert_eq!(imports[0].target, None);
+        assert_eq!((imports[0].name_pos.line, imports[0].source_pos.line), (5, 7));
+    }
+
+    #[test]
+    fn an_import_is_strict() {
+        let bad = |entry: &str| error(&format!("{}\n[[import]]\n{}", ONE, entry));
+        assert!(bad("source = \"x\"\n").2.contains("missing field `project-name`"));
+        assert!(bad("project-name = \"x.y\"\n").2.contains("missing field `source`"));
+        let (line, _, message) = bad("project-name = \"x.y\"\nsource = \"s\"\nversion = 1\n");
+        assert_eq!(line, 7);
+        assert!(message.contains("unknown field `version`"), "{}", message);
+        assert!(bad("project-name = 1\nsource = \"s\"\n").2.contains("invalid type"));
+        assert!(bad("project-name = \"xy\"\nsource = \"s\"\n")
+            .2
+            .contains("Invalid project name \"xy\""));
+        assert!(bad("project-name = \"x.y\"\nsource = \"\"\n")
+            .2
+            .contains("source of an import is empty"));
+        let (line, col, message) = bad("project-name = \"x.y\"\nsource = \"s\"\ngroup = \"a.b\"\n");
+        assert_eq!((line, col), (7, 9));
+        assert!(message.contains("a group name has no dot"), "{}", message);
+        // An `import` that is not an array of tables is not accepted either.
+        assert!(!error("[project]\nname = \"a.b\"\nimport = 1\n").2.is_empty());
+    }
+
+    #[test]
+    fn a_group_name_is_a_single_part() {
+        for good in ["a", "local", "pqrxyz", "G1", "x_y", "A"] {
+            assert!(check_group(good).is_ok(), "{}", good);
+        }
+        for bad in ["", "a.b", "1a", "_a", "a-b", "a b", "a:", "é"] {
+            assert!(check_group(bad).is_err(), "{}", bad);
         }
     }
 
