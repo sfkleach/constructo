@@ -3,110 +3,120 @@
 ## Overview
 
 So far every run of `constructo check` is given its inputs on the command line,
-and all of them share one namespace. That does not scale to data-types that are
+and all of them share one namespace. That will not scale to data-types that are
 shared between teams or published for others to use. This task introduces
 *projects*.
 
 A project is a folder that contains:
 
 - data-type files, which may also hold consts, and
-- a project-file that describes the projects it transitively includes, along with other meta-details such as checksums.
+- a project-file that describes the projects it transitively includes, along
+  with other meta-details such as checksums.
 - a local configuration file; note that not all options may appear in this file.
 
-The aim is that the types a project needs can be found, pinned to known content,
-and checked as one namespace without listing every file by hand.
+The idea is that a project provides data-type files that may reference the
+data-types of other projects. Projects are required to be uniquely named and
+together the (project name * local name) acts as a canonical reference.
+
+Unlike a normal package/module mechanism, the emphasis is not on selective
+hiding because the identifiers are constructors and consts, which typically need
+to be globally available! Instead we are concerned about making the system easy
+to use and understand.
 
 This is a draft. The questions in each step are to be settled before the step is
 implemented, and the steps are in the order that I expect to build them.
 
 ### Note: Structured names
 
-Projects may import other projects. Each import is given a 'nickname' that 
-is used to refer to identifiers in the namespace of the imported project.
-For example, foo::bar refers to the identifer `bar` from the import `foo`.
+There are three kinds of names that we support:
 
-- Imports may allow the nickname to be required or optional.
-- Imports may allow or forbid the shadowing of identifiers.
-- Imports may be included into the importing namespace, and hence 
-  transitively visible, or not included and hence only visible locally.
+- local names, which are simply normal identifiers e.g. `Data`
+- full names, which is the dot-separated project name followed by the
+  local name e.g. `com.steelypip.common::Data`
+- standard names, which is a group-name followed by the local name
+  e.g. `common::Data`.
 
-For example
-```
-Import{
-  nickname: "foo",
-  project: Path(...),
-  implicit: true,
-  shadowing: true,
-  include: false
-}
-```
+Group names are local to a project. They a shortend synonym for one-or-more
+project names. The current project is automatically put inside the `local`
+group. And local names such as `Foo` are considered to be equivalent to the
+standard name `local::Foo`. But, as we will see, there is a many-to-many
+relationship between groups and projects.
+
+Resolving a standard name means mapping it to its full-name. And it is 
+required that there is only one such full-name. To illustrate this, let us
+suppose that project P.Q.R contains three constructors `Left`, `Middle` and `Right`
+and project X.Y.Z contains three constructors `Down`, `Middle`, and `Up` but
+both projects were in group `pqrxyz`. 
+
+- `pqrxyz::Left` is uniquely `P.Q.R::Left`
+- `pqrxyz::Up` is uniquely `X.Y.Z::Up`
+- but `pqrxyz::Middle` is an invalid reference because it could refer to
+  `P.Q.R::Middle` or `X.Y.Z::Middle`.
+
+
+## Step 0: Type files then values files
+
+In this step, we require that all data-type files are presented before the 
+any data-values file is parsed. The idea of mixing files in any order is now
+rescinded.
 
 ## Step 1: The project-file
 
-Define the project-file, which sits at the root of a project folder.
+The project-file is a TOML file called `constructo.toml` and sits in the root of
+the project folder. It defines:
 
-- Its name and location. For example `constructo.project` at the root of the
-  folder.
-- Its syntax. The preference is to reuse Constructo itself, so that the
-  project-file is a data-values file that is checked against a data-types file
-  that is built in to the tool, as the prelude is. The alternatives are JSON or
-  TOML, which would need a dependency or a second parser.
-- Its contents, for the project itself:
-  - the name and version of the project,
-  - the data-type files that belong to it, or a rule for finding them (every
-    `*.types` file in the folder?), and
-  - the checksum of each of those files.
-- Its contents, for each included project:
-  - the name and version,
-  - where to find it (a relative path to a folder, for a start), and
-  - the checksum of the included project.
-- A `constructo check` of a project-file alone reports its errors in the usual
-  `ERROR:` form, with the file, line and column.
+- The canonical name of the project
+- A pattern for discovering the data-types files, defaulting to `**/*.types`
 
-Questions:
-
-- What is the checksum of? One file is easy. A project needs a defined digest of
-  its files: a sorted list of names and file digests, say. Line endings and the
-  order of files must not change it.
-- Which hash? SHA-256 is the default choice. A hash function needs a dependency
-  or a hand-written implementation, and the project has no dependencies except
-  for `clap`.
-- Is the version a number the tool understands, or only a label? If the tool
-  does not compare versions then two projects of the same name but different
-  versions can only be reported as a conflict.
-
-## Step 2: Find and load a project
-
-Add `constructo check --project FOLDER`, which loads a project and checks it.
+Note that other projects is out of scope at this point in development. Now
+implement `constructo check --project FOLDER`, which loads a project and checks it.
 
 - Read the project-file in the folder, then the data-type files that it names.
-- Follow the included projects, and the projects that they include, to any
-  depth. Each project is loaded once, however many times it is included.
-- All the files of all the projects form one namespace, as with files on the
-  command line (decision 1), and duplicates are errors. The diagnostics name the
-  project as well as the file.
-- Cycles of inclusion are an error and the diagnostic gives the path around the
-  cycle.
-- The standard prelude is still loaded first, unless `--no-prelude` is set.
-- The order of the sources is fixed: the included projects first, in dependency
-  order, and the project's own files last. That matters because a values file
-  sees only the types that come before it.
+- Act as if the standard prelude was one of those files (this simplification
+  will be removed shortly)
 - A project may also be given values files to check, as now: `constructo check
   --project FOLDER FILES...`.
 
-Questions:
+### Notes
 
-- What if two included projects have the same name? The same name and version
-  from two places is one project if the checksums agree and a conflict if they
-  do not. The same name with two versions is a conflict for now.
-- Is a project's namespace flat, so that all the names are visible everywhere,
-  or does a project hide the names that it includes? Flat is the simplest and
-  agrees with decision 1. It means that a project cannot use a name that an
-  included project already has, even if the project was only a distant
-  dependency.
-- Can a project hold values files, or only types?
+- A project can hold other types of files, including data-values files, but
+  they are ignored by the `--project` option.
+
+## Step 2: Implement Imports
+
+Implement imports that are included in the `contructo.toml` file. Each import
+defines:
+
+- the name of the group it belongs to
+- the source of the project, which at this stage is an absolute or relative
+  path to the constructo.toml file.
+
+The TOML imports should look somthing like this. The project-name is strictly
+speaking redundant but is there to assist with searching and explicitly stating
+the intention.
+```toml
+[[import]]
+project-name = P.Q.R
+group = pqrxyz
+source = ../sister-data-types
+```
+
+### Group names and Long names
+
+Within the data-values file, in addition to local names, full-names and 
+group names are supported as well.  
+
+### Notes
+
+- The imports are followed transitively to any depth.
+- Although any project is only loaded once, it may be imported many times.
+- Cycles of inclusion are an error and the diagnostic gives the path around the
+  cycle.
 
 ## Step 3: Verify the checksums
+
+Checksums of imports are calculated as the hashed digest of the files. They
+should be retained in the constructo.lock file.
 
 - Compare the checksum recorded for each file, and for each included project,
   with the content that was found. A mismatch is an error, and the diagnostic
@@ -114,13 +124,14 @@ Questions:
 - A missing file, or a file in the folder that the project-file does not list,
   is an error when the files are listed explicitly. (Not applicable if the rule
   is to take every file.)
-- Add a way to write the checksums: `constructo project update [FOLDER]` or
-  similar, which regenerates the project-file's checksums and leaves the rest as
-  it was. Whether the tool should rewrite a hand-written file is a question to
-  be settled, since it may lose comments and layout.
+- Add a way to generate the checksums: `constructo project update [FOLDER]` or
+  similar, which (re)generates the project-file's checksums and leaves the rest as
+  it was.
 - `constructo check` never changes any file.
 
-Questions:
+- Verification of the checksums automatically happens during `constructo check`
+  - But verification of the local files can be disabled with the `-d,--dev` option.
+  - 
 
 - Are the checksums required, or may they be left out for a project under
   development?
@@ -136,7 +147,24 @@ Questions:
 - Every diagnostic from a file in an included project says which project it is
   from.
 
-## Step 5: Consistency pass
+## Step 5: Support remote projects
+
+Allow the project source to be a specified version from a remote git-repo. 
+N.B. We need a Q&A session to elaborate this step.
+
+## Step 6: Spec files
+
+Add a description of the project and lock format files in
+`docs/specs/project-file-format.md` and `docs/specs/local-file-format.md`
+respectively.
+
+The lock-file document should included a description of the checksum algorithms.
+
+The resolution algorithm should be documented in
+`docs/specs/resolving-identifiers.md`
+
+
+## Step 7: Consistency pass
 
 - Update `docs/vision.md` and the README to describe projects.
 - Record the design decisions (the project-file format, the digest, the
@@ -144,10 +172,10 @@ Questions:
 - Update the grammar files if the project-file is written in Constructo, the
   examples in `syntax/examples/`, the functional tests and the CHANGELOG.
 
+
 ## Out of scope for this task
 
-- Fetching a project from a remote location, such as a Git repository or a
-  registry. The checksums are there so that this can be added later without
-  changing the format.
 - Version ranges and any solving of version constraints.
 - Publishing a project.
+
+
