@@ -10,8 +10,8 @@ shared between teams or published for others to use. This task introduces
 A project is a folder that contains:
 
 - data-type files, which may also hold consts, and
-- a project-file that describes the projects it transitively includes, along
-  with other meta-details such as checksums.
+- a project-file that describes the projects it transitively includes.
+- a lock file that records checksums.
 - a local configuration file; note that not all options may appear in this file.
 
 The idea is that a project provides data-type files that may reference the
@@ -131,7 +131,7 @@ should be retained in the constructo.lock file.
 
 - Verification of the checksums automatically happens during `constructo check`
   - But verification of the local files can be disabled with the `-d,--dev` option.
-  - 
+
 
 - Are the checksums required, or may they be left out for a project under
   development?
@@ -155,7 +155,7 @@ N.B. We need a Q&A session to elaborate this step.
 ## Step 6: Spec files
 
 Add a description of the project and lock format files in
-`docs/specs/project-file-format.md` and `docs/specs/local-file-format.md`
+`docs/specs/project-file-format.md` and `docs/specs/lock-file-format.md`
 respectively.
 
 The lock-file document should included a description of the checksum algorithms.
