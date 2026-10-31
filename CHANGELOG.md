@@ -113,6 +113,9 @@ Following the style in https://keepachangelog.com/en/1.0.0/
 
 ### Changed
 
+- Every types file must now come before every values file (decision 23). A types file that follows a values file is an
+  error, `A types file must come before the values files, but this follows FILE`, with exit code 1. A file with no
+  declarations is exempt. Before this a values file saw only the types files that came before it.
 - The prelude declares `enum Bool = False, True;` and not `True, False`, so that the default of a `Bool` parameter
   that is left out is `false`.
 - Data values are separated by semi-colons, with an optional trailing one. This resolves the ambiguity of a

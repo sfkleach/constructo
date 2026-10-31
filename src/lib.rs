@@ -11,7 +11,7 @@ pub mod typecheck;
 pub mod validate;
 
 use ast::{ConstDecl, TypesFile};
-use diagnostics::Diagnostic;
+use diagnostics::{Diagnostic, Pos};
 use parser::{parse_file, Parsed};
 use typecheck::{check_consts, check_value, Env};
 use validate::{validate, ParsedFile};
@@ -155,9 +155,11 @@ pub fn check_sources(sources: &[Source]) -> Report {
 /// checking without them would report spurious unknown names. The types files share one namespace and the post-parse
 /// checks report every error they find.
 ///
-/// Unless disabled, the values are then checked against the types. A values file sees only the types files that come
-/// before it. That step is skipped if the types have errors, since the declarations cannot be relied on. The first type
-/// error stops the run, unless `continue_after_error` is set, in which case there is one error per top-level value.
+/// Every types file must come before every values file, so a types file after a values file is an error. (A file with
+/// no declarations is the exception, since it cannot affect anything.) Unless disabled, the values are then checked
+/// against the types. That step is skipped if the types have errors, since the declarations cannot be relied on. The
+/// first type error stops the run, unless `continue_after_error` is set, in which case there is one error per
+/// top-level value.
 pub fn check_sources_with(sources: &[Source], options: &CheckOptions) -> Report {
     let mut kinds = vec![None; sources.len()];
     let mut parsed_sources = Vec::new();
@@ -199,6 +201,10 @@ pub fn check_sources_with(sources: &[Source], options: &CheckOptions) -> Report 
             });
         }
     }
+    for (index, diagnostic) in types_after_values(sources, &parsed_sources) {
+        outcomes[index] = Outcome::Failed;
+        diagnostics.push(diagnostic);
+    }
     for (file, diagnostic) in validate(&files, options.allow_refs) {
         outcomes[indexes[file]] = Outcome::Failed;
         diagnostics.push(diagnostic);
@@ -215,6 +221,27 @@ pub fn check_sources_with(sources: &[Source], options: &CheckOptions) -> Report 
         type_checked,
         consts,
     }
+}
+
+/// The types files that come after a values file, each with the index of its source and a diagnostic. A types file
+/// with no declarations, such as one with only comments, is not reported: it could not change what the values see.
+fn types_after_values(sources: &[Source], parsed_sources: &[Parsed]) -> Vec<(usize, Diagnostic)> {
+    let mut first_values: Option<&Source> = None;
+    let mut late = Vec::new();
+    for (index, (source, parsed)) in sources.iter().zip(parsed_sources).enumerate() {
+        match (parsed, first_values) {
+            (Parsed::Values(_), None) => first_values = Some(source),
+            (Parsed::Types(file), Some(values)) if !file.enums.is_empty() || !file.consts.is_empty() => {
+                let message = format!(
+                    "A types file must come before the values files, but this follows {}",
+                    values.name
+                );
+                late.push((index, Diagnostic::new(&source.name, Pos { line: 1, col: 1 }, message)));
+            }
+            _ => {}
+        }
+    }
+    late
 }
 
 /// Type-checks the consts and then the values, and describes the type of each const.
@@ -257,19 +284,18 @@ fn type_check_values(
     }
     let infos = describe_consts(&everything, &all_consts);
 
-    // A values file sees only the types files that come before it.
-    let mut visible_enums = Vec::new();
-    let mut visible_consts = Vec::new();
+    // Every types file comes before the values files, or else there would be a diagnostic and no type-check, so the
+    // values see all of the declarations.
+    let env = Env::new(
+        types_files.iter().flat_map(|(_, file)| &file.enums),
+        types_files.iter().flat_map(|(_, file)| &file.consts),
+    )
+    .with_inferred_from(&everything);
     for (index, parsed) in parsed_sources.iter().enumerate() {
         match parsed {
-            Parsed::Types(file) => {
-                visible_enums.extend(&file.enums);
-                visible_consts.extend(&file.consts);
-            }
+            Parsed::Types(_) => {}
             Parsed::Values(_) if stopped => outcomes[index] = Outcome::NotChecked,
             Parsed::Values(values) => {
-                let env = Env::new(visible_enums.iter().copied(), visible_consts.iter().copied())
-                    .with_inferred_from(&everything);
                 for value in values {
                     if let Err(e) = check_value(&env, options.widening, value) {
                         diagnostics.push(Diagnostic::new(&sources[index].name, e.pos, e.message));
@@ -435,17 +461,47 @@ mod tests {
 
     #[test]
     fn checks_types_and_values_files_in_one_run() {
-        let report = check_sources(&sources(&["enum A = X;", "X; X;", "enum B = Y(A);"]));
+        let report = check_sources(&sources(&["enum A = X;", "enum B = Y(A);", "X; X;"]));
         assert!(report.is_ok());
         assert_eq!(report.outcomes, vec![Outcome::Ok; 3]);
         assert_eq!(
             report.kinds,
             vec![
                 Some(SourceKind::Types),
-                Some(SourceKind::Values),
-                Some(SourceKind::Types)
+                Some(SourceKind::Types),
+                Some(SourceKind::Values)
             ]
         );
+    }
+
+    #[test]
+    fn a_types_file_after_a_values_file_is_an_error() {
+        let report = check_sources(&sources(&["enum A = X;", "X", "enum B = Y;"]));
+        assert_eq!(
+            messages(&report),
+            vec!["ERROR: A types file must come before the values files, but this follows f1 (f2, line 1, col 1)"]
+        );
+        assert_eq!(report.outcomes, vec![Outcome::Ok, Outcome::Ok, Outcome::Failed]);
+        // The error is reported even if the values are not type-checked, and a const counts as a declaration.
+        let unchecked = CheckOptions {
+            type_check: false,
+            ..CheckOptions::default()
+        };
+        assert!(!check_sources_with(&sources(&["X", "const n: Nat = 1;"]), &unchecked).is_ok());
+        // A values file by itself, or after only the types, is fine, and so are several values files together.
+        assert!(check_sources(&sources(&["enum A = X;", "X", "[X]"])).is_ok());
+    }
+
+    #[test]
+    fn a_types_file_without_declarations_may_follow_a_values_file() {
+        assert!(check_sources(&sources(&["enum A = X;", "X", "// Only a comment.\n", ""])).is_ok());
+    }
+
+    #[test]
+    fn every_types_file_after_a_values_file_is_reported() {
+        let report = check_sources(&sources(&["1", "enum A = X;", "enum B = Y;"]));
+        assert_eq!(messages(&report).len(), 2);
+        assert_eq!(report.outcomes, vec![Outcome::Ok, Outcome::Failed, Outcome::Failed]);
     }
 
     #[test]
@@ -461,8 +517,8 @@ mod tests {
     fn the_default_of_a_type_can_use_an_enum_that_is_declared_later() {
         let report = check_sources(&sources(&[
             "enum Holder = Holder(x: Later);",
-            "Holder()",
             "enum Later = Ready;",
+            "Holder()",
         ]));
         assert!(report.is_ok(), "{:?}", report.diagnostics);
     }
@@ -513,8 +569,6 @@ mod tests {
             vec!["ERROR: Unknown constructor Unrelated (f1, line 1, col 1)"]
         );
         assert_eq!(report.outcomes, vec![Outcome::Ok, Outcome::Failed]);
-        // The types come after the values, so they are not in scope.
-        assert!(!check_sources(&sources(&["X", "enum A = X;"])).is_ok());
         assert!(check_sources(&sources(&["enum A = X;", "X"])).is_ok());
     }
 
@@ -529,12 +583,12 @@ mod tests {
 
     #[test]
     fn a_type_error_stops_the_run_unless_continuing() {
-        let texts = ["enum A = X;", "Y; Z; X", "W", "enum B = V;"];
+        let texts = ["enum A = X;", "enum B = V;", "Y; Z; X", "W"];
         let report = check_sources(&sources(&texts));
         assert_eq!(report.diagnostics.len(), 1);
         assert_eq!(
             report.outcomes,
-            vec![Outcome::Ok, Outcome::Failed, Outcome::NotChecked, Outcome::Ok]
+            vec![Outcome::Ok, Outcome::Ok, Outcome::Failed, Outcome::NotChecked]
         );
         let options = CheckOptions {
             continue_after_error: true,
@@ -544,9 +598,9 @@ mod tests {
         assert_eq!(
             report.diagnostics.iter().map(|d| d.to_string()).collect::<Vec<_>>(),
             vec![
-                "ERROR: Unknown constructor Y (f1, line 1, col 1)",
-                "ERROR: Unknown constructor Z (f1, line 1, col 4)",
-                "ERROR: Unknown constructor W (f2, line 1, col 1)",
+                "ERROR: Unknown constructor Y (f2, line 1, col 1)",
+                "ERROR: Unknown constructor Z (f2, line 1, col 4)",
+                "ERROR: Unknown constructor W (f3, line 1, col 1)",
             ]
         );
     }
@@ -716,8 +770,6 @@ mod tests {
             messages(&report),
             vec!["ERROR: Unknown const missing (f1, line 1, col 1)"]
         );
-        // As for types, a values file sees only the consts that come before it.
-        assert_eq!(check_sources(&sources(&[ok, &types])).diagnostics.len(), 1);
     }
 
     #[test]
