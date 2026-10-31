@@ -202,6 +202,7 @@ Diagram(
 Diagram(
     Comment('TypeRef'),
     Sequence(
+        Optional(NonTerminal('Qualifier')),
         NonTerminal('TypeName'),
         Optional(
             Sequence(
@@ -216,6 +217,30 @@ Diagram(
                 Terminal('>')
             )
         )
+    )
+)
+
+// Qualifier
+Diagram(
+    Comment('Qualifier'),
+    Sequence(
+        NonTerminal('Part'),
+        ZeroOrMore(
+            Sequence(
+                Terminal('.'),
+                NonTerminal('Part')
+            )
+        ),
+        Terminal('::')
+    )
+)
+
+// Part
+Diagram(
+    Comment('Part'),
+    Sequence(
+        NonTerminal('[A-Za-z_]'),
+        ZeroOrMore(NonTerminal('[A-Za-z0-9_]'))
     )
 )
 

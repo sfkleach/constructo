@@ -33,6 +33,9 @@
   folder, a nested project, a values file and a text file, all of which must be ignored, because the types files in
   the first two clash with `circles/shape.types`. `valid/patterns` uses `include` and `exclude`, and
   `valid/imports-only` has no types files.
+- `values/valid/qualified-names.values` and the `qualif*` examples show names that are qualified with a group or the
+  full name of a project. They are only checked for being well-formed (`--no-type-check`), and the `invalid/` examples
+  show a qualifier without a name, a dotted name with no `::`, and a qualified declaration.
 - `config`: configuration files for `--config`, which are TOML and not Constructo. `valid/` must load, and `invalid/`
   must be rejected with exit code 2. Each invalid file has a `# expect: <message>` line, and the functional test
   requires that the error starts with exactly that. `precedence/` has the files that the functional tests combine with

@@ -22,6 +22,10 @@ pub enum Tok {
     LBracket,
     RBracket,
     Colon,
+    /// `::`, which follows the group or the full name of a project in a qualified name.
+    ColonColon,
+    /// `.`, which separates the parts of the full name of a project in a qualified name.
+    Dot,
     /// The postfix `?`, which is shorthand for `Option` in a type and for `Some` in a value.
     Question,
     /// An unsigned integer literal, such as `42`, with its text unchanged.
@@ -112,6 +116,13 @@ pub fn lex(text: &str) -> Vec<Token> {
                 Tok::Name(word)
             };
             tokens.push(Token { tok, pos });
+        } else if c == ':' && chars.get(i + 1) == Some(&':') {
+            tokens.push(Token {
+                tok: Tok::ColonColon,
+                pos,
+            });
+            i += 2;
+            col += 2;
         } else {
             let tok = match c {
                 '=' => Tok::Eq,
@@ -126,6 +137,7 @@ pub fn lex(text: &str) -> Vec<Token> {
                 '[' => Tok::LBracket,
                 ']' => Tok::RBracket,
                 ':' => Tok::Colon,
+                '.' => Tok::Dot,
                 '?' => Tok::Question,
                 other => Tok::Invalid(other),
             };
@@ -272,6 +284,30 @@ mod tests {
 
     fn toks(text: &str) -> Vec<Tok> {
         lex(text).into_iter().map(|t| t.tok).collect()
+    }
+
+    #[test]
+    fn lexes_the_parts_of_a_qualified_name() {
+        assert_eq!(
+            toks("acme.Shapes::Foo x: y a::b"),
+            vec![
+                Tok::Name("acme".into()),
+                Tok::Dot,
+                Tok::TypeName("Shapes".into()),
+                Tok::ColonColon,
+                Tok::TypeName("Foo".into()),
+                Tok::Name("x".into()),
+                Tok::Colon,
+                Tok::Name("y".into()),
+                Tok::Name("a".into()),
+                Tok::ColonColon,
+                Tok::Name("b".into()),
+                Tok::Eof
+            ]
+        );
+        // Three colons are `::` and then `:`, and a dot inside a number is part of the number.
+        assert_eq!(toks(":::")[..2], [Tok::ColonColon, Tok::Colon]);
+        assert_eq!(toks("1.5")[0], Tok::Float("1.5".into()));
     }
 
     #[test]

@@ -1,4 +1,4 @@
 [project]
-name = "patterns"
+name = "example.patterns"
 include = ["src/**/*.types", "lib/*.types"]
 exclude = ["**/generated/*"]

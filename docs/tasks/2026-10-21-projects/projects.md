@@ -74,8 +74,9 @@ include = ["**/*.types"]
 exclude = []
 ```
 
-- `name` is required: a quoted string of one or more dot-separated segments.
-  Each segment starts with a letter and has letters, digits, `_` and `-`.
+- `name` is required: a quoted string of two or more dot-separated segments.
+  Each segment starts with a letter and has letters, digits and `_`. (Step 2
+  tightened this from one or more segments and allowing `-`; see there.)
 - `include` and `exclude` are lists of glob patterns relative to the project
   folder. A file belongs to the project if it matches an `include` and no
   `exclude`. They default to `["**/*.types"]` and `[]`.
@@ -140,34 +141,99 @@ returns only the project's own files, and nothing may depend on it being there.
 
 ## Step 2: Implement Imports
 
-Implement imports that are included in the `contructo.toml` file. Each import
-defines:
+Implement imports that are included in the `constructo.toml` file. Each
+`[[import]]` has:
 
-- the name of the group it belongs to
-- the source of the project, which at this stage is an absolute or relative
-  path to the constructo.toml file.
+- `project-name`: required. The full name of the project that is imported. It is
+  there to assist with searching and to state the intention, and it must equal
+  the `name` in the project-file that is found at `source`; a difference is an
+  error that shows both.
+- `source`: required. The folder of the project, as `--project=FOLDER` takes
+  one. A relative path is relative to the folder of the project that has the
+  `[[import]]`, not to the current folder, and an absolute path is allowed.
+- `group`: optional. The group the project is put into. Without one the project
+  can only be named by its full name.
 
-The TOML imports should look somthing like this. The project-name is strictly
-speaking redundant but is there to assist with searching and explicitly stating
-the intention.
 ```toml
 [[import]]
-project-name = P.Q.R
-group = pqrxyz
-source = ../sister-data-types
+project-name = "P.Q.R"
+group = "pqrxyz"
+source = "../sister-data-types"
 ```
 
-### Group names and Long names
+One `[[import]]` puts a project in one group. To have a project in two groups,
+write two entries with the same `source`. The same project is still loaded once.
 
-Within the data-values file, in addition to local names, full-names and 
-group names are supported as well.  
+### Names
+
+The names are as in the structured-names note above, with these rules.
+
+- A full project name has at least one `.`, and a group name has none. So
+  the two can never be mistaken for each other. This changes Step 1, where a
+  name with no dot was allowed.
+- The parts of a project name, and a group name, start with a letter and are
+  letters, digits and `_`, of either case. There is no `-`, because a name has to
+  be written in source text, where `-` begins a number. This also changes
+  Step 1. A later task revises the case rules (see
+  `docs/tasks/todo/2026-10-25-case-convention-selection`).
+- A qualified name is written `group::Name` or `full.name::Name`, in a types
+  file or a values file, wherever a type, constructor or const is used. A
+  declaration is never qualified. The lexer gains `.` and `::`.
+- The group `local` holds the project itself, and an import may put a project
+  into it with `group = "local"`. That is how a project brings unqualified names
+  into its own namespace, and is the way to build a bundle of namespaces.
+- A bare `Foo` is `local::Foo`. A name is resolved to its full name, and there
+  must be exactly one. Two projects in `local` that both have `Foo`, one of them
+  the project itself, make a bare `Foo` an error at the use, naming the
+  candidates. Nothing is checked at the declaration.
+- Types, and constructors with consts, are separate namespaces (decision 4), and
+  a qualified name resolves in the namespace that its use needs.
+- A group name may not equal the full name of a project that the same project
+  imports, and an unknown group or an unknown name in a group is an error at
+  the use.
+
+### Imports are not transitive
+
+If A imports B and B imports C, then C is loaded and checked, because B's types
+may name C's. But A can name only its own declarations and those of the projects
+in its own `[[import]]` list, by group or by full name. To name C, A must import
+C. Inherited imports are a later task and do not appear in this step.
+
+### Resolution
+
+- Every declaration has a canonical name, the project's full name and the local
+  name, such as `P.Q.R::Left`. Two projects can both have a `Middle` and they are
+  different types. Duplicates are checked within one project, as they are today
+  for all the files.
+- A values file given to `check --project=P` is resolved in the context of P.
+  With no project, `local` holds every file given, as it does now, and there are
+  no other groups.
+- Diagnostics show a name as it would be written bare in the project of the file
+  with the error, and any other name in full, such as `acme.shapes::Shape`. Plain
+  `check FILES` keeps all its present messages. If two different types would be
+  printed the same, both are shown in full.
 
 ### Notes
 
-- The imports are followed transitively to any depth.
-- Although any project is only loaded once, it may be imported many times.
+- Imports are loaded transitively to any depth, each project once, whatever
+  the number of imports of it. A project is the same project if it has the same
+  folder once it has been made absolute. Two different folders with the same
+  project name are an error naming both.
+- The projects are loaded in dependency order, depth-first in the order of the
+  `[[import]]` entries, and each project's files are sorted as in Step 1. Then
+  come `FILES` and `--stdin`.
 - Cycles of inclusion are an error and the diagnostic gives the path around the
-  cycle.
+  cycle, as `a.b -> c.d -> a.b`. Like every other problem with an import it is
+  reported at the `[[import]]` in the project-file, with a line and column.
+- Everything in `[[import]]` is strict, as the rest of the project-file is: an
+  unknown key, a missing `project-name` or `source`, a value of the wrong type,
+  or a folder that cannot be read.
+- The prelude stays as in Step 1 to the user, with the same behaviour for
+  `--no-prelude` and for a project that declares `Bool`. Inside, it is a built-in
+  entry of `local` for every project, so that the imported projects can use
+  `Option` too. Making it a real virtual project that a project can override is
+  the next step.
+- A decision record covers the above.
 
 ## Step 3: Verify the checksums
 

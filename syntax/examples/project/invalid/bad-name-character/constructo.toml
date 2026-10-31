@@ -1,3 +1,3 @@
-# expect: Invalid project name "a/b": the part "a/b" has '/', but only letters, digits, '_' and '-' are allowed
+# expect: Invalid project name "a.b/c": the part "b/c" has '/', but only letters, digits and '_' are allowed
 [project]
-name = "a/b"
+name = "a.b/c"
