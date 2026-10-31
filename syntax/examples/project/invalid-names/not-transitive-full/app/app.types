@@ -1,0 +1,2 @@
+// expect: Unknown project example.base: a project can name itself and the projects it imports
+enum Holder = Holder(example.base::Item);

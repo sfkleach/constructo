@@ -1,0 +1,3 @@
+// expect: The name Shape is ambiguous: it could be example.app::Shape or example.lib::Shape
+enum Shape = Square;
+enum Holder = Holder(Shape);

@@ -1,0 +1,2 @@
+// expect: Unknown const missing in lib
+const x: lib::Shape = lib::missing;

@@ -1,0 +1,2 @@
+// expect: Unknown project com.example.shapes: a project can name itself and the projects it imports
+com.example.shapes::Dot

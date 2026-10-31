@@ -1,0 +1,6 @@
+// A group and a full name both name a type, a constructor and a const of the project that was imported.
+enum Holder = Holder(lib::Shape), Full(example.lib::Shape);
+const unit: lib::Shape = lib::Circle { radius: 1.0 };
+const same: example.lib::Shape = example.lib::Dot;
+const holder: Holder = Holder(lib::Dot);
+const full: Holder = Full(example.lib::Circle { radius: 2.0 });

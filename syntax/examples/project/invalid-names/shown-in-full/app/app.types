@@ -1,0 +1,3 @@
+// expect: Expected Shape but found example.lib::Circle of type example.lib::Shape
+enum Shape = Square;
+const x: Shape = lib::Circle { radius: 1.0 };

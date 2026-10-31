@@ -1,0 +1,2 @@
+enum Wrapper = Wrapper(base::Item);
+const wrapped: Wrapper = Wrapper(base::Item);

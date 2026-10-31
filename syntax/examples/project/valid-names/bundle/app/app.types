@@ -1,0 +1,5 @@
+// The names of a project that is imported into local are bare, and are still qualified by local.
+enum Holder = Holder(Shape), Other(local::Shape);
+const c: Shape = Circle { radius: 1.0 };
+const h: Holder = Holder(local::Dot);
+const o: local::Shape = Dot;

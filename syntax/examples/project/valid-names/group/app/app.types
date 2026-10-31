@@ -1,0 +1,4 @@
+// A group can hold several projects, and a name that only one has is not ambiguous.
+enum Holder = Holder(both::Left, both::Up);
+const own: example.app::Holder = example.app::Holder(both::Left, both::Up);
+const bare: Holder = Holder(both::Left, both::Up);

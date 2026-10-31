@@ -788,6 +788,51 @@ for d in "$PROJECTS"/invalid-imports/*/; do
         fail "project/invalid-imports/$(basename "$d") (expected exit 2 with '$expected', got exit $actual and '$err')"
     fi
 done
+# Names: each project has its own names, which are written with a group or the full name of the project.
+NAMES="$PROJECTS/valid-names"
+expect_exit "project/valid-names/qualified" 0 check --project="$NAMES/qualified/app" "$NAMES/qualified/app/values.values"
+for case in bundle same-names group; do
+    expect_exit "project/valid-names/$case" 0 check --project="$NAMES/$case/app"
+done
+# A const of another project is a reference to a const, which needs the option as any other does.
+expect_exit "project/valid-names/not-transitive" 0 check --allow-refs --project="$NAMES/not-transitive/app"
+expect_exit "a const of another project is a reference" 1 check --project="$NAMES/not-transitive/app"
+# Each invalid case names its expected error, which starts the message, and the exit code is 1.
+for d in "$PROJECTS"/invalid-names/*/; do
+    d="${d%/}"
+    expected="$(sed -n '1s|^// expect: ||p' "$d/app/app.types")"
+    actual=0
+    err="$("$CONSTRUCTO" check --project="$d/app" 2>&1 >/dev/null)" || actual=$?
+    if [[ "$actual" -eq 1 && "$err" == "ERROR: $expected"* ]]; then
+        pass "project/invalid-names/$(basename "$d")"
+    else
+        fail "project/invalid-names/$(basename "$d") (expected exit 1 with '$expected', got exit $actual and '$err')"
+    fi
+done
+# A name is shown as it would be written in the file the message is about.
+listing="$("$CONSTRUCTO" check -v --project="$NAMES/qualified/app" 2>/dev/null)"
+if [[ "$listing" == *"const unit: example.lib::Shape"* && "$listing" == *"const holder: Holder"* ]]; then
+    pass "names: a type of another project is shown in full, and one of the project itself is bare"
+else
+    fail "names: a type of another project is shown in full, and one of the project itself is bare (got '$listing')"
+fi
+listing="$("$CONSTRUCTO" check -v --project="$NAMES/bundle/app" 2>/dev/null)"
+if [[ "$listing" == *"const c: Shape"* && "$listing" != *"example.lib::"* ]]; then
+    pass "names: a type of a project that is imported into local is bare"
+else
+    fail "names: a type of a project that is imported into local is bare (got '$listing')"
+fi
+# The files given with a project are written in the project's own namespace, with its own imports.
+extra="$(mktemp)"
+echo "enum Extra = Extra(lib::Shape);" > "$extra"
+expect_exit "names: a types file that is given is written in the project" 0 check --project="$NAMES/qualified/app" "$extra"
+echo "enum Holder = Other;" > "$extra"
+expect_exit "names: a type in a given file that the project declares is a duplicate" 1 \
+    check --project="$NAMES/qualified/app" "$extra"
+echo "enum Extra = Extra(example.other::Shape);" > "$extra"
+expect_exit "names: a given file cannot name a project that was not imported" 1 \
+    check --project="$NAMES/qualified/app" "$extra"
+rm -f "$extra"
 # The values to check come after the project, and a failed project is reported as such.
 expect_exit "project: values are type-checked against the project" 0 check --project="$SHAPES" "$SHAPES/values/shapes.values"
 echo "Circle { radius: \"wide\" }" > "$forward_values"

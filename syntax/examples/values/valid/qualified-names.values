@@ -1,6 +1,0 @@
-// Names may be qualified with a group, or with the full name of a project, in front of a constructor or a const.
-bundle::Circle { radius: 1.0 };
-com.example.shapes::Dot;
-P.Q.R::Left(1, name: acme::origin);
-local::Users[acme.shapes::first, local::second];
-bundle::max_width

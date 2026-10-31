@@ -8,6 +8,7 @@ pub mod diagnostics;
 pub mod lexer;
 pub mod parser;
 pub mod project;
+pub mod resolve;
 pub mod typecheck;
 pub mod validate;
 
@@ -20,6 +21,7 @@ use validate::{validate, ParsedFile};
 pub use config::Config;
 pub use parser::{Experimental, SourceKind};
 pub use project::{Project, ProjectSet};
+pub use resolve::{Layout, Owner, ProjectInfo};
 pub use typecheck::{DEFAULT_INFER_LIMIT, DEFAULT_VALUE_LIMIT};
 
 /// The standard prelude: declarations that are available to every types file unless the prelude is disabled.
@@ -169,6 +171,17 @@ pub fn check_sources(sources: &[Source]) -> Report {
 /// first type error stops the run, unless `continue_after_error` is set, in which case there is one error per
 /// top-level value.
 pub fn check_sources_with(sources: &[Source], options: &CheckOptions) -> Report {
+    check_with_layout(sources, None, options)
+}
+
+/// Checks a set of sources that belong to projects, as described by the layout. The checks are those of
+/// `check_sources_with`, except that a name is resolved in the project that the file belongs to, so that two projects
+/// can both declare a `Shape`. A name in a message is shown as it would be written in the file the message is about.
+pub fn check_in_projects(sources: &[Source], layout: &Layout, options: &CheckOptions) -> Report {
+    check_with_layout(sources, Some(layout), options)
+}
+
+fn check_with_layout(sources: &[Source], layout: Option<&Layout>, options: &CheckOptions) -> Report {
     let mut kinds = vec![None; sources.len()];
     let mut parsed_sources = Vec::new();
     for (index, source) in sources.iter().enumerate() {
@@ -194,7 +207,25 @@ pub fn check_sources_with(sources: &[Source], options: &CheckOptions) -> Report 
         }
     }
     let mut outcomes = vec![Outcome::Ok; sources.len()];
-    let mut diagnostics = Vec::new();
+    // Each diagnostic is kept with the index of its source until the end, so that the names in it can be shown.
+    let mut found: Vec<(usize, Diagnostic)> = Vec::new();
+    for (index, diagnostic) in types_after_values(sources, &parsed_sources) {
+        outcomes[index] = Outcome::Failed;
+        found.push((index, diagnostic));
+    }
+    let resolution = resolve::resolve(sources, &mut parsed_sources, layout);
+    // The names in a types file are unreliable if some could not be resolved, so the validity checks are skipped, as
+    // they are for a syntax error. The names in the values are only looked at when the values are type-checked.
+    let is_values = |index: usize| matches!(parsed_sources[index], Parsed::Values(_));
+    let mut unresolved = false;
+    for (index, diagnostic) in &resolution.diagnostics {
+        if is_values(*index) && !options.type_check {
+            continue;
+        }
+        unresolved |= !is_values(*index);
+        outcomes[*index] = Outcome::Failed;
+        found.push((*index, diagnostic.clone()));
+    }
     // Values files take no part in validation, so each parsed types file is kept with the index of its source.
     let mut indexes = Vec::new();
     let mut files = Vec::new();
@@ -206,22 +237,34 @@ pub fn check_sources_with(sources: &[Source], options: &CheckOptions) -> Report 
                 decls: file.enums.clone(),
                 consts: file.consts.clone(),
                 prelude: sources[index].name == PRELUDE_NAME,
+                visible_types: resolution.visible_types[index].clone(),
             });
         }
     }
-    for (index, diagnostic) in types_after_values(sources, &parsed_sources) {
-        outcomes[index] = Outcome::Failed;
-        diagnostics.push(diagnostic);
+    if !unresolved {
+        for (file, diagnostic) in validate(&files, options.allow_refs) {
+            outcomes[indexes[file]] = Outcome::Failed;
+            found.push((indexes[file], diagnostic));
+        }
     }
-    for (file, diagnostic) in validate(&files, options.allow_refs) {
-        outcomes[indexes[file]] = Outcome::Failed;
-        diagnostics.push(diagnostic);
-    }
-    let type_checked = diagnostics.is_empty() && options.type_check;
+    let type_checked = found.is_empty() && options.type_check;
     let mut consts = Vec::new();
     if type_checked {
-        consts = type_check_values(sources, &parsed_sources, options, &mut outcomes, &mut diagnostics);
+        consts = type_check_values(sources, &parsed_sources, options, &mut outcomes, &mut found);
     }
+    let show = |index: usize, text: &str| resolution.show(index, text);
+    for info in &mut consts {
+        info.name = show(info.source, &info.name);
+        info.ty = show(info.source, &info.ty);
+    }
+    let diagnostics = found
+        .into_iter()
+        .map(|(index, mut diagnostic)| {
+            diagnostic.message = show(index, &diagnostic.message);
+            diagnostic.note = diagnostic.note.map(|note| show(index, &note));
+            diagnostic
+        })
+        .collect();
     Report {
         diagnostics,
         outcomes,
@@ -258,7 +301,7 @@ fn type_check_values(
     parsed_sources: &[Parsed],
     options: &CheckOptions,
     outcomes: &mut [Outcome],
-    diagnostics: &mut Vec<Diagnostic>,
+    diagnostics: &mut Vec<(usize, Diagnostic)>,
 ) -> Vec<ConstInfo> {
     // The declarations of a types file are all in scope in the whole of it, whatever their order, and in every types
     // file, so the consts are checked against all of them.
@@ -286,7 +329,7 @@ fn type_check_values(
     for (index, e) in errors {
         outcomes[index] = Outcome::Failed;
         if !stopped {
-            diagnostics.push(Diagnostic::new(&sources[index].name, e.pos, e.message));
+            diagnostics.push((index, Diagnostic::new(&sources[index].name, e.pos, e.message)));
             stopped = !options.continue_after_error;
         }
     }
@@ -306,7 +349,7 @@ fn type_check_values(
             Parsed::Values(values) => {
                 for value in values {
                     if let Err(e) = check_value(&env, options.widening, value) {
-                        diagnostics.push(Diagnostic::new(&sources[index].name, e.pos, e.message));
+                        diagnostics.push((index, Diagnostic::new(&sources[index].name, e.pos, e.message)));
                         outcomes[index] = Outcome::Failed;
                         if !options.continue_after_error {
                             stopped = true;

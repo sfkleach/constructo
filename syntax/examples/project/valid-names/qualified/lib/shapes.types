@@ -1,0 +1,2 @@
+enum Shape = Circle { radius: Float }, Dot;
+const origin: Shape = Dot;

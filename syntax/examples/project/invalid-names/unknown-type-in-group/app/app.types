@@ -1,0 +1,2 @@
+// expect: Unknown type Missing in lib
+enum Holder = Holder(lib::Missing);

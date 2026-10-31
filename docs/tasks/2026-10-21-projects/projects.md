@@ -235,7 +235,17 @@ C. Inherited imports are a later task and do not appear in this step.
   the next step.
 - A decision record covers the above.
 
-## Step 3: Verify the checksums
+## Step 3: Standard Prelude
+
+With the advent of imports, the standard prelude can now be re-interpreted as an
+implicit import of a virtual project into group `local`. We reserve the
+`constructo` prefix for build in packages. And the standard prelude
+will use `constructo.prelude` as the project name.
+
+The source of this virtual package is a distinctive URI such as 
+`constructo:/prelude.types`. Let's explore design options for this.
+
+## Step 4: Verify the checksums
 
 Checksums of imports are calculated as the hashed digest of the files. They
 should be retained in the constructo.lock file.
@@ -260,7 +270,7 @@ should be retained in the constructo.lock file.
 - What does a user do to accept a changed dependency? Probably they run the
   update command and review the difference.
 
-## Step 4: Verbose mode and diagnostics
+## Step 5: Verbose mode and diagnostics
 
 - In verbose mode `check` reports each project that it loaded, with its version
   and where it was found, in the same style as the files: `OK: ../shared
@@ -269,12 +279,12 @@ should be retained in the constructo.lock file.
 - Every diagnostic from a file in an included project says which project it is
   from.
 
-## Step 5: Support remote projects
+## Step 6: Support remote projects
 
 Allow the project source to be a specified version from a remote git-repo. 
 N.B. We need a Q&A session to elaborate this step.
 
-## Step 6: Spec files
+## Step 7: Spec files
 
 Add a description of the project and lock format files in
 `docs/specs/project-file-format.md` and `docs/specs/lock-file-format.md`
@@ -286,7 +296,7 @@ The resolution algorithm should be documented in
 `docs/specs/resolving-identifiers.md`
 
 
-## Step 7: Consistency pass
+## Step 8: Consistency pass
 
 - Update `docs/vision.md` and the README to describe projects.
 - Record the design decisions (the project-file format, the digest, the
