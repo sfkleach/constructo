@@ -1,5 +1,5 @@
 # expect: unknown field `imports`, expected `project`
 [project]
-name = "a"
+name = "a.b"
 
 [imports]

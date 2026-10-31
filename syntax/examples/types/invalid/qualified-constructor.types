@@ -1,0 +1,2 @@
+// A constructor in a declaration is never qualified.
+enum Shape = bundle::Circle;

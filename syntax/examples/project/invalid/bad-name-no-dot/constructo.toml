@@ -1,0 +1,3 @@
+# expect: Invalid project name "shapes": a project name needs a dot, as in "com.example", to tell it from a group name
+[project]
+name = "shapes"

@@ -1,3 +1,3 @@
-# expect: Invalid project name "1st": the part "1st" must start with a letter
+# expect: Invalid project name "1st.x": the part "1st" must start with a letter
 [project]
-name = "1st"
+name = "1st.x"

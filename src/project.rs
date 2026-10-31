@@ -124,9 +124,13 @@ impl Project {
     }
 }
 
-/// Checks that the name is one or more segments separated by dots, where a segment starts with a letter and has
-/// letters, digits, `_` and `-`. The reason is returned if it is not.
+/// Checks that the name is two or more segments separated by dots, where a segment starts with a letter and has
+/// letters, digits and `_`, of either case. A name has to be written in source text, so `-` is not allowed, and the
+/// dot tells a project name from a group name, which has none. The reason is returned if it is not valid.
 fn check_name(name: &str) -> Result<(), String> {
+    if !name.contains('.') {
+        return Err("a project name needs a dot, as in \"com.example\", to tell it from a group name".to_string());
+    }
     for segment in name.split('.') {
         let mut chars = segment.chars();
         match chars.next() {
@@ -136,9 +140,9 @@ fn check_name(name: &str) -> Result<(), String> {
             }
             Some(_) => {}
         }
-        if let Some(bad) = chars.find(|c| !(c.is_ascii_alphanumeric() || *c == '_' || *c == '-')) {
+        if let Some(bad) = chars.find(|c| !(c.is_ascii_alphanumeric() || *c == '_')) {
             return Err(format!(
-                "the part \"{}\" has '{}', but only letters, digits, '_' and '-' are allowed",
+                "the part \"{}\" has '{}', but only letters, digits and '_' are allowed",
                 segment, bad
             ));
         }
@@ -212,22 +216,24 @@ mod tests {
 
     #[test]
     fn the_patterns_can_be_given() {
-        let text = "[project]\nname = \"a\"\ninclude = [\"src/*.types\", \"x/**/*.types\"]\nexclude = [\"**/old/*\"]\n";
+        let text =
+            "[project]\nname = \"a.b\"\ninclude = [\"src/*.types\", \"x/**/*.types\"]\nexclude = [\"**/old/*\"]\n";
         let (_, include, exclude) = parse(text).unwrap();
         assert_eq!(include.len(), 2);
         assert_eq!(exclude.len(), 1);
         // An empty include list takes nothing, which is not the same as leaving it out.
-        let (_, include, _) = parse("[project]\nname = \"a\"\ninclude = []\n").unwrap();
+        let (_, include, _) = parse("[project]\nname = \"a.b\"\ninclude = []\n").unwrap();
         assert!(include.is_empty());
     }
 
     #[test]
     fn the_name_follows_the_rule() {
-        for good in ["a", "A1", "com.example", "x_y.z-w.q9"] {
+        for good in ["a.b", "A1.B", "com.example", "x_y.z_w.q9", "P.Q.R"] {
             assert!(check_name(good).is_ok(), "{}", good);
         }
         for bad in [
-            "", ".a", "a.", "a..b", "1a", "a.1b", "a b", "a/b", "a:b", "é", "_a", "-a",
+            "", "a", "shapes", ".a", "a.", "a..b", "1a.b", "a.1b", "a b.c", "a.b/c", "a:b.c", "é.a", "_a.b", "-a.b",
+            "a.my-lib",
         ] {
             assert!(check_name(bad).is_err(), "{}", bad);
         }
@@ -235,28 +241,28 @@ mod tests {
 
     #[test]
     fn a_bad_name_is_reported_where_it_is_written() {
-        let (line, col, message) = error("[project]\nname = \"1st\"\n");
+        let (line, col, message) = error("[project]\nname = \"1st.x\"\n");
         assert_eq!((line, col), (2, 8));
-        assert!(message.contains("Invalid project name \"1st\""), "{}", message);
+        assert!(message.contains("Invalid project name \"1st.x\""), "{}", message);
     }
 
     #[test]
     fn everything_is_strict() {
-        let (line, col, message) = error("[project]\nname = \"a\"\nversion = \"1\"\n");
+        let (line, col, message) = error("[project]\nname = \"a.b\"\nversion = \"1\"\n");
         assert_eq!((line, col), (3, 1));
         assert!(
             message.contains("unknown field `version`") && message.contains("`name`"),
             "{}",
             message
         );
-        assert!(error("[project]\nname = \"a\"\n[extra]\n")
+        assert!(error("[project]\nname = \"a.b\"\n[extra]\n")
             .2
             .contains("unknown field `extra`"));
         assert!(error("[project]\n").2.contains("missing field `name`"));
-        assert!(error("name = \"a\"\n").2.contains("unknown field `name`"));
+        assert!(error("name = \"a.b\"\n").2.contains("unknown field `name`"));
         assert!(error("").2.contains("missing field `project`"));
         assert!(error("[project]\nname = 1\n").2.contains("invalid type"));
-        assert!(error("[project]\nname = \"a\"\ninclude = \"x\"\n")
+        assert!(error("[project]\nname = \"a.b\"\ninclude = \"x\"\n")
             .2
             .contains("invalid type"));
         assert_eq!(error("[project\n").0, 1);
@@ -264,7 +270,7 @@ mod tests {
 
     #[test]
     fn a_pattern_that_is_not_valid_is_reported_where_it_is_written() {
-        let (line, col, message) = error("[project]\nname = \"a\"\nexclude = [\"fine\", \"[\"]\n");
+        let (line, col, message) = error("[project]\nname = \"a.b\"\nexclude = [\"fine\", \"[\"]\n");
         assert_eq!((line, col), (3, 20));
         assert!(message.contains("Invalid pattern \"[\""), "{}", message);
     }

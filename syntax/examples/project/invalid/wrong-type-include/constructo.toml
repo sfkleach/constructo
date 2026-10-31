@@ -1,4 +1,4 @@
 # expect: invalid type: string "**/*.types", expected a sequence
 [project]
-name = "a"
+name = "a.b"
 include = "**/*.types"

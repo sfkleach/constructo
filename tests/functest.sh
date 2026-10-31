@@ -707,7 +707,7 @@ else
     fail "project: include and exclude choose the files (got '$listing')"
 fi
 listing="$("$CONSTRUCTO" check -v --project="$PROJECTS/valid/imports-only" 2>&1)"
-if [[ "$listing" == "OK: $PROJECTS/valid/imports-only (project imports-only)
+if [[ "$listing" == "OK: $PROJECTS/valid/imports-only (project example.importsonly)
 OK: checked 0 file(s)" ]]; then
     pass "project: a project with no types files is accepted"
 else
@@ -741,7 +741,7 @@ else
 fi
 # The prelude is added ahead of the project as for plain files, so a project that declares Bool needs --no-prelude.
 bool_project="$(mktemp -d)"
-printf '[project]\nname = "own-bool"\n' > "$bool_project/constructo.toml"
+printf '[project]\nname = "example.ownbool"\n' > "$bool_project/constructo.toml"
 echo "enum Bool = No, Yes;" > "$bool_project/bool.types"
 expect_exit "project: its own Bool clashes with the prelude" 1 check --project="$bool_project"
 expect_exit "project: its own Bool is fine with --no-prelude" 0 check --no-prelude --project="$bool_project"
@@ -751,7 +751,7 @@ expect_exit "project: --prelude overrides --config" 1 \
     check --config="$CONFIG/precedence/no-prelude.toml" --prelude --project="$bool_project"
 verbose="$("$CONSTRUCTO" check -v --project="$bool_project" 2>/dev/null || true)"
 verbose="${verbose%%$'\n'*}"
-if [[ "$verbose" == "FAILED: $bool_project (project own-bool)" ]]; then
+if [[ "$verbose" == "FAILED: $bool_project (project example.ownbool)" ]]; then
     pass "project: a project whose file fails is reported as failed"
 else
     fail "project: a project whose file fails is reported as failed (got '$verbose')"

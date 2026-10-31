@@ -14,8 +14,9 @@ the format of the project-file, how its files are found, and how it relates to t
   (decision 21), which is a separate file that is read only when it is named. So the project-file holds no settings, and
   `--print-config` now suggests the name `constructo-settings.toml`.
 - The file has a `[project]` table with `name`, which is required, and `include` and `exclude`, which are lists of glob
-  patterns and default to `["**/*.types"]` and `[]`. A name is one or more dot-separated parts, each starting with a
-  letter and holding letters, digits, `_` and `-`.
+  patterns and default to `["**/*.types"]` and `[]`. A name is two or more dot-separated parts, each starting with a
+  letter and holding letters, digits and `_`. (This was one or more parts, allowing `-`, until the imports of the same
+  task: the name has to be written in source text, where `-` begins a number, and the dot tells a name from a group.)
 - The file is strict. An unknown key or table, a missing name, a bad name, a value of the wrong type and a pattern that
   is not valid are errors with a line and a column in the file, and exit code 2, as for the configuration file. So are a
   folder or project-file that cannot be read.

@@ -1,2 +1,2 @@
 # expect: unknown field `name`, expected `project`
-name = "a"
+name = "a.b"

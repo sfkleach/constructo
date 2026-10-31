@@ -1,0 +1,3 @@
+# expect: Invalid project name "acme.my-lib": the part "my-lib" has '-', but only letters, digits and '_' are allowed
+[project]
+name = "acme.my-lib"
