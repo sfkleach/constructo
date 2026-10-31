@@ -1,0 +1,6 @@
+# expect: missing field `project-name`
+[project]
+name = "example.app"
+
+[[import]]
+source = "../lib"

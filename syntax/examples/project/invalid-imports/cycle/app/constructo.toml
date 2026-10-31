@@ -1,0 +1,7 @@
+# expect: The imports form a cycle: example.app -> example.b -> example.app
+[project]
+name = "example.app"
+
+[[import]]
+project-name = "example.b"
+source = "../b"

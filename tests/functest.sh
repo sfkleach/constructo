@@ -722,6 +722,72 @@ else
     fail "project: a values file that the patterns include is reported (got exit $actual and '$err')"
 fi
 
+# Imports: every project that is imported is loaded once, before the project that imports it.
+IMPORTS="$PROJECTS/valid-imports"
+for root in diamond/app two-groups/app chain/a; do
+    expect_exit "project/valid-imports/$root" 0 check --project="$IMPORTS/$root"
+done
+project_names() { "$CONSTRUCTO" check -v --project="$1" 2>&1 | sed -n 's|.*(project \(.*\))$|\1|p' | tr '\n' ' '; }
+order="$(project_names "$IMPORTS/diamond/app")"
+if [[ "$order" == "example.base example.left example.right example.app " ]]; then
+    pass "imports: a project that is imported twice is loaded once, before the projects that import it"
+else
+    fail "imports: a project that is imported twice is loaded once, before the projects that import it (got '$order')"
+fi
+order="$(project_names "$IMPORTS/chain/a")"
+if [[ "$order" == "example.c example.b example.a " ]]; then
+    pass "imports: a project is loaded when it is imported indirectly"
+else
+    fail "imports: a project is loaded when it is imported indirectly (got '$order')"
+fi
+count="$("$CONSTRUCTO" check -v --project="$IMPORTS/two-groups/app" 2>&1 | grep -c '(project ')"
+if [[ "$count" -eq 2 ]]; then
+    pass "imports: one project in several groups is still loaded once"
+else
+    fail "imports: one project in several groups is still loaded once (got $count)"
+fi
+# A relative source is relative to the folder of the project that imports, and not to the current folder.
+if (cd "$IMPORTS/diamond" && "$CONSTRUCTO" check --project=app >/dev/null 2>&1); then
+    pass "imports: a relative source is relative to the importing project"
+else
+    fail "imports: a relative source is relative to the importing project"
+fi
+absolute="$(mktemp -d)"
+printf '[project]\nname = "example.absolute"\n\n[[import]]\nproject-name = "example.lib"\nsource = "%s"\n' \
+    "$(cd "$IMPORTS/two-groups/lib" && pwd)" > "$absolute/constructo.toml"
+expect_exit "imports: a source may be an absolute path" 0 check --project="$absolute"
+rm -f "$absolute/constructo.toml"
+rmdir "$absolute"
+# An error in an imported project is reported against that project.
+broken="$(mktemp -d)"
+mkdir "$broken/lib" "$broken/app"
+printf '[project]\nname = "example.lib"\n' > "$broken/lib/constructo.toml"
+echo "enum Lib = Lib(Missing);" > "$broken/lib/lib.types"
+printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lib"\nsource = "../lib"\n' \
+    > "$broken/app/constructo.toml"
+echo "enum App = App;" > "$broken/app/app.types"
+expect_exit "imports: a type error in an imported project fails the run" 1 check --project="$broken/app"
+listing="$("$CONSTRUCTO" check -v --project="$broken/app" 2>/dev/null || true)"
+if [[ "$listing" == *"FAILED: $broken/app/../lib (project example.lib)"* \
+    && "$listing" == *"OK: $broken/app (project example.app)"* ]]; then
+    pass "imports: the project with the error is the one reported as failed"
+else
+    fail "imports: the project with the error is the one reported as failed (got '$listing')"
+fi
+rm -f "$broken/lib/constructo.toml" "$broken/lib/lib.types" "$broken/app/constructo.toml" "$broken/app/app.types"
+rmdir "$broken/lib" "$broken/app" "$broken"
+# Each invalid import names its expected error, which starts the message, and the exit code is 2.
+for d in "$PROJECTS"/invalid-imports/*/; do
+    d="${d%/}"
+    expected="$(sed -n 's|^# expect: ||p' "$d/app/constructo.toml")"
+    actual=0
+    err="$("$CONSTRUCTO" check --project="$d/app" 2>&1 >/dev/null)" || actual=$?
+    if [[ "$actual" -eq 2 && "$err" == "ERROR: $expected"* ]]; then
+        pass "project/invalid-imports/$(basename "$d")"
+    else
+        fail "project/invalid-imports/$(basename "$d") (expected exit 2 with '$expected', got exit $actual and '$err')"
+    fi
+done
 # The values to check come after the project, and a failed project is reported as such.
 expect_exit "project: values are type-checked against the project" 0 check --project="$SHAPES" "$SHAPES/values/shapes.values"
 echo "Circle { radius: \"wide\" }" > "$forward_values"

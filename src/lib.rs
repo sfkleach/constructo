@@ -19,7 +19,7 @@ use validate::{validate, ParsedFile};
 
 pub use config::Config;
 pub use parser::{Experimental, SourceKind};
-pub use project::Project;
+pub use project::{Project, ProjectSet};
 pub use typecheck::{DEFAULT_INFER_LIMIT, DEFAULT_VALUE_LIMIT};
 
 /// The standard prelude: declarations that are available to every types file unless the prelude is disabled.

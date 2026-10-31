@@ -1,0 +1,21 @@
+[project]
+name = "example.app"
+
+[[import]]
+project-name = "example.lib"
+group = "one"
+source = "../lib"
+
+[[import]]
+project-name = "example.lib"
+group = "two"
+source = "../lib"
+
+[[import]]
+project-name = "example.lib"
+source = "../lib"
+
+[[import]]
+project-name = "example.lib"
+group = "local"
+source = "../lib/../lib"

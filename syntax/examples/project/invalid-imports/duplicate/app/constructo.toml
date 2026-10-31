@@ -1,0 +1,13 @@
+# expect: example.lib is imported into the group g more than once
+[project]
+name = "example.app"
+
+[[import]]
+project-name = "example.lib"
+group = "g"
+source = "../lib"
+
+[[import]]
+project-name = "example.lib"
+group = "g"
+source = "../lib/."

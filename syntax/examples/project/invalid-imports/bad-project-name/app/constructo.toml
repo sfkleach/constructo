@@ -1,0 +1,7 @@
+# expect: Invalid project name "lib": a project name needs a dot, as in "com.example", to tell it from a group name
+[project]
+name = "example.app"
+
+[[import]]
+project-name = "lib"
+source = "../lib"

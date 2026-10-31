@@ -1,0 +1,7 @@
+# expect: The import says the project is named example.wrong but the project at
+[project]
+name = "example.app"
+
+[[import]]
+project-name = "example.wrong"
+source = "../lib"

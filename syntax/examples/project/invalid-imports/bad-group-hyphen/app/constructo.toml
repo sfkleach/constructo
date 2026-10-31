@@ -1,0 +1,8 @@
+# expect: Invalid group name "my-group": it has '-', but only letters, digits and '_' are allowed
+[project]
+name = "example.app"
+
+[[import]]
+project-name = "example.lib"
+group = "my-group"
+source = "../lib"
