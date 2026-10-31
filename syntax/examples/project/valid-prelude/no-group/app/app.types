@@ -1,0 +1,3 @@
+enum Bool = No, Yes;
+const mine: Bool = Yes;
+const theirs: constructo.prelude::Bool = constructo.prelude::False;

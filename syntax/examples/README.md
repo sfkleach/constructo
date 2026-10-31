@@ -46,6 +46,12 @@
   line `// expect: <message>`, and the functional test requires that the error starts with it, with exit code 1. The
   cases are an ambiguous name, a name in a group, a project or group that is not known, a project that is not imported,
   the prelude, and a message that shows a name in full.
+- `project/valid-prelude`: projects that override the prelude, which is the built-in project `constructo.prelude` that
+  every project imports into `local` unless it imports it itself. `override` imports it into the group `std`,
+  `explicit-local` into `local`, `no-group` with no group, and `full-name` uses the default import.
+  `invalid-names/prelude-clash` and `override-needs-option` show a project that declares a name of the prelude and one
+  that overrides it and then uses the question mark, and `invalid-imports/builtin-*` and `unknown-builtin*` show the
+  errors for a built-in project.
 - `values/typed/valid/qualified-names.values` and the `unknown-*` examples beside it use `local::`, which is the only
   group that files without a project have.
 - The `qualif*` examples in `types/invalid` and `values/invalid` show a qualifier without a name, a dotted name with no

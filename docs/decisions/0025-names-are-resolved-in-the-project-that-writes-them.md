@@ -36,9 +36,9 @@ name refers to, which projects a project can name, how a clash is settled, and h
 - A name that cannot be resolved in a types file stops the validity checks, as a syntax error does, because the names
   can no longer be relied on. The names in a values file are only resolved and reported when the values are
   type-checked.
-- The prelude is still a stopgap. It is in `local` of every project, and a project that declares a name that the
-  prelude has gets the duplicate error at the declaration, as before, and not an ambiguity at each use. Making the
-  prelude a project that can be overridden is the next step.
+- The prelude was a stopgap when this was written: it was in `local` of every project, and a project that declared a
+  name that the prelude has got the duplicate error at the declaration. Decision 26 makes it a project that can be
+  overridden, and then a clash is an ambiguity at each use, as for any project in `local`.
 - A const of another project is a reference to a const, so it needs `--allow-refs` like any other.
 
 ## Consequences

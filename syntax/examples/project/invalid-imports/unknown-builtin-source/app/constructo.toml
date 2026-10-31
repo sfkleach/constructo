@@ -1,0 +1,7 @@
+# expect: The source constructo:/ is a built-in project, so the project name has to be a built-in one
+[project]
+name = "example.app"
+
+[[import]]
+project-name = "example.lib"
+source = "constructo:/"

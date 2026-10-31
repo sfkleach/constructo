@@ -1,71 +1,54 @@
 //! Resolution of names between projects.
 //!
 //! Every declaration has a canonical name, which is the local name followed by `@` and the full name of its project,
-//! such as `Shape@com.example.shapes`. The prelude, and the files that were given without a project, are the
-//! exceptions: their names are bare, which is what the rest of the checker has always seen. A reference is rewritten to
-//! the canonical name of the declaration it refers to, so that after this pass a name identifies one declaration
-//! wherever it is written, and the validity checks and the type-check need not know about projects at all.
+//! such as `Shape@com.example.shapes`. The files that were given without a project are the exception: the project that
+//! they make has no name, and its names are bare. A reference is rewritten to the canonical name of the declaration it
+//! refers to, so that after this pass a name identifies one declaration wherever it is written, and the validity checks
+//! and the type-check need not know about projects at all.
 //!
 //! A name is resolved in the scope of the project whose file it is written in. A bare `Foo` is `local::Foo`, and the
-//! group `local` holds the project itself, the prelude, and any project that was imported into `local`. A qualified
-//! `group::Foo` or `full.name::Foo` is looked up in the projects of that group, or in the project of that name, which
-//! must be the project itself or one that it imports. Imports are not transitive, so those are the only projects that a
-//! project can name.
+//! group `local` holds the project itself and any project that was imported into `local`, which is the standard prelude
+//! unless the project says otherwise. A qualified `group::Foo` or `full.name::Foo` is looked up in the projects of that
+//! group, or in the project of that name, which must be the project itself or one that it imports. Imports are not
+//! transitive, so those are the only projects that a project can name.
 
-use crate::ast::{ConstDecl, EnumDecl, Type, TypesFile, Value, ValueKind, VariantBody};
+use crate::ast::{ConstDecl, EnumDecl, TaggedBody, Type, TypesFile, Value, ValueKind, VariantBody};
 use crate::diagnostics::{Diagnostic, Pos};
 use crate::parser::Parsed;
 use crate::validate::BASIC_TYPES;
 use crate::Source;
 use std::collections::{HashMap, HashSet};
 
-/// The project that a source belongs to, which decides where its declarations are and how its names are resolved.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Owner {
-    /// The standard prelude.
-    Prelude,
-    /// A project, by its index in the `Layout`.
-    Project(usize),
-}
-
 /// A project as the resolution sees it: its name, and what it imports.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectInfo {
+    /// The full name, which is empty for the files that were given without a project.
     pub name: String,
     /// Each import as the group it is put into, if any, and the index of the project that it brings in.
     pub imports: Vec<(Option<String>, usize)>,
+    /// True for a project that is built in.
+    pub builtin: bool,
 }
 
-/// How the sources are divided into projects. Without one, all of the sources are in a single project that has no name
-/// and no imports, apart from the prelude.
+/// How the sources are divided into projects.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Layout {
     pub projects: Vec<ProjectInfo>,
-    /// The owner of each source. The values files are checked in the context of the project that `root` names.
-    pub owners: Vec<Owner>,
+    /// The index of the project that each source belongs to, which is the project that it is written in. The values
+    /// files are checked in the context of the project that `root` names. A source with no owner is taken to be in
+    /// the root project, which is only a defensive check that stops the index from running off the end of the list.
+    pub owners: Vec<usize>,
     pub root: usize,
 }
 
-/// The place where a declaration is written.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum Home {
-    Prelude,
-    /// The files that were given with no project.
-    Plain,
-    Named(usize),
-}
+/// The place where a declaration is written, which is the index of a project in the layout.
+type Home = usize;
 
 /// The two namespaces: types, and constructors with consts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Ns {
     Type,
     Value,
-}
-
-/// A declared name, and where it was first written.
-struct Declared {
-    source: usize,
-    pos: Pos,
 }
 
 /// What the resolution found.
@@ -77,64 +60,40 @@ pub struct Resolution {
     names: Names,
 }
 
-pub struct Resolver<'a> {
-    layout: Option<&'a Layout>,
+struct Resolver<'a> {
+    layout: &'a Layout,
     homes: Vec<Home>,
-    declared: HashMap<(Home, Ns), HashMap<String, Declared>>,
-    prelude: bool,
+    declared: HashMap<(Home, Ns), HashSet<String>>,
 }
 
 /// What is needed to show a canonical name as it would be written in a file.
 struct Names {
-    layout: Option<Layout>,
+    layout: Layout,
     homes: Vec<Home>,
     declared: HashMap<(Home, Ns), HashSet<String>>,
-    prelude: bool,
 }
 
 /// The canonical name of a declaration.
-fn key(layout: Option<&Layout>, home: Home, name: &str) -> String {
-    match (home, layout) {
-        (Home::Named(index), Some(layout)) => format!("{}@{}", name, layout.projects[index].name),
-        _ => name.to_string(),
+fn key(layout: &Layout, home: Home, name: &str) -> String {
+    match layout.projects[home].name.as_str() {
+        "" => name.to_string(),
+        project => format!("{}@{}", name, project),
     }
 }
 
 /// Resolves the names in the parsed sources, in place, and reports the names that cannot be resolved.
-pub fn resolve(sources: &[Source], parsed: &mut [Parsed], layout: Option<&Layout>) -> Resolution {
-    let prelude_name = crate::PRELUDE_NAME;
-    let homes: Vec<Home> = match layout {
-        // A source with no owner is taken to be written in the root project. A caller should give every source an
-        // owner, so this is only a defensive check that stops the index from running off the end of the list.
-        Some(layout) => (0..sources.len())
-            .map(|index| match layout.owners.get(index) {
-                Some(Owner::Prelude) => Home::Prelude,
-                Some(Owner::Project(project)) => Home::Named(*project),
-                None => Home::Named(layout.root),
-            })
-            .collect(),
-        None => sources
-            .iter()
-            .map(|source| {
-                if source.name == prelude_name {
-                    Home::Prelude
-                } else {
-                    Home::Plain
-                }
-            })
-            .collect(),
-    };
-    let prelude = homes.contains(&Home::Prelude);
+pub fn resolve(sources: &[Source], parsed: &mut [Parsed], layout: &Layout) -> Resolution {
+    let homes: Vec<Home> = (0..sources.len())
+        .map(|index| layout.owners.get(index).copied().unwrap_or(layout.root))
+        .collect();
     let mut resolver = Resolver {
         layout,
         homes,
         declared: HashMap::new(),
-        prelude,
     };
     resolver.collect(parsed);
     let mut diagnostics = Vec::new();
     let mut visible_types = vec![HashSet::new(); sources.len()];
-    resolver.clash_with_prelude(sources, parsed, &mut diagnostics);
     for (index, file) in parsed.iter_mut().enumerate() {
         let home = resolver.homes[index];
         let mut context = Context {
@@ -156,14 +115,9 @@ pub fn resolve(sources: &[Source], parsed: &mut [Parsed], layout: Option<&Layout
         }
     }
     let names = Names {
-        layout: layout.cloned(),
+        layout: layout.clone(),
         homes: resolver.homes.clone(),
-        declared: resolver
-            .declared
-            .iter()
-            .map(|(k, v)| (*k, v.keys().cloned().collect()))
-            .collect(),
-        prelude: resolver.prelude,
+        declared: resolver.declared.clone(),
     };
     Resolution {
         diagnostics,
@@ -193,76 +147,28 @@ impl<'a> Resolver<'a> {
             let Parsed::Types(file) = file else { continue };
             let home = self.homes[index];
             for decl in &file.enums {
-                self.add(home, Ns::Type, &decl.name, index, decl.pos);
+                self.add(home, Ns::Type, &decl.name);
                 for variant in &decl.variants {
-                    self.add(home, Ns::Value, &variant.name, index, variant.pos);
+                    self.add(home, Ns::Value, &variant.name);
                 }
             }
             for constant in &file.consts {
-                self.add(home, Ns::Value, &constant.name, index, constant.pos);
+                self.add(home, Ns::Value, &constant.name);
             }
         }
     }
 
-    fn add(&mut self, home: Home, ns: Ns, name: &str, source: usize, pos: Pos) {
-        self.declared
-            .entry((home, ns))
-            .or_default()
-            .entry(name.to_string())
-            .or_insert(Declared { source, pos });
+    fn add(&mut self, home: Home, ns: Ns, name: &str) {
+        self.declared.entry((home, ns)).or_default().insert(name.to_string());
     }
 
-    /// A name that a project declares and the prelude does too is a duplicate, as it has always been. The prelude is
-    /// to become a project that can be overridden, but until then this keeps the behaviour of a project the same as
-    /// that of a list of files. Only a named project needs this, since in the other files the two share a name.
-    fn clash_with_prelude(&self, sources: &[Source], parsed: &[Parsed], diagnostics: &mut Vec<(usize, Diagnostic)>) {
-        if !self.prelude {
-            return;
-        }
-        for (index, file) in parsed.iter().enumerate() {
-            let Parsed::Types(file) = file else { continue };
-            if !matches!(self.homes[index], Home::Named(_)) {
-                continue;
-            }
-            let mut check = |ns: Ns, name: &str, label: &str, pos: Pos| {
-                if let Some(first) = self
-                    .declared
-                    .get(&(Home::Prelude, ns))
-                    .and_then(|names| names.get(name))
-                {
-                    let note = format!("first declared at {}, {}", sources[first.source].name, first.pos);
-                    let message = format!("Duplicate {} {}", label, name);
-                    diagnostics.push((
-                        index,
-                        Diagnostic::new(&sources[index].name, pos, message).with_note(note),
-                    ));
-                }
-            };
-            for decl in &file.enums {
-                check(Ns::Type, &decl.name, "type", decl.pos);
-                for variant in &decl.variants {
-                    check(Ns::Value, &variant.name, "constructor", variant.pos);
-                }
-            }
-            for constant in &file.consts {
-                check(Ns::Value, &constant.name, "const", constant.pos);
-            }
-        }
-    }
-
-    /// The homes in the group `local` of a home: the project itself, then the projects imported into `local`, then the
-    /// prelude.
+    /// The homes in the group `local` of a home: the project itself, then the projects imported into `local`.
     fn local_homes(&self, home: Home) -> Vec<Home> {
         let mut homes = vec![home];
-        if let (Home::Named(index), Some(layout)) = (home, self.layout) {
-            for (group, target) in &layout.projects[index].imports {
-                if group.as_deref() == Some("local") && !homes.contains(&Home::Named(*target)) {
-                    homes.push(Home::Named(*target));
-                }
+        for (group, target) in &self.layout.projects[home].imports {
+            if group.as_deref() == Some("local") && !homes.contains(target) {
+                homes.push(*target);
             }
-        }
-        if self.prelude && home != Home::Prelude {
-            homes.push(Home::Prelude);
         }
         homes
     }
@@ -272,13 +178,10 @@ impl<'a> Resolver<'a> {
         if group == "local" {
             return Some(self.local_homes(home));
         }
-        let (Home::Named(index), Some(layout)) = (home, self.layout) else {
-            return None;
-        };
         let mut homes = Vec::new();
-        for (name, target) in &layout.projects[index].imports {
-            if name.as_deref() == Some(group) && !homes.contains(&Home::Named(*target)) {
-                homes.push(Home::Named(*target));
+        for (name, target) in &self.layout.projects[home].imports {
+            if name.as_deref() == Some(group) && !homes.contains(target) {
+                homes.push(*target);
             }
         }
         (!homes.is_empty()).then_some(homes)
@@ -286,23 +189,18 @@ impl<'a> Resolver<'a> {
 
     /// The project that a full name refers to: the project itself, or one that it imports.
     fn full_home(&self, home: Home, full: &str) -> Option<Home> {
-        let (Home::Named(index), Some(layout)) = (home, self.layout) else {
-            return None;
-        };
-        if layout.projects[index].name == full {
+        if self.layout.projects[home].name == full {
             return Some(home);
         }
-        layout.projects[index]
+        self.layout.projects[home]
             .imports
             .iter()
-            .find(|(_, target)| layout.projects[*target].name == full)
-            .map(|(_, target)| Home::Named(*target))
+            .find(|(_, target)| self.layout.projects[*target].name == full)
+            .map(|(_, target)| *target)
     }
 
     fn declares(&self, home: Home, ns: Ns, name: &str) -> bool {
-        self.declared
-            .get(&(home, ns))
-            .is_some_and(|names| names.contains_key(name))
+        self.declared.get(&(home, ns)).is_some_and(|names| names.contains(name))
     }
 
     fn visible_types(&self, home: Home) -> HashSet<String> {
@@ -312,15 +210,15 @@ impl<'a> Resolver<'a> {
                 self.declared
                     .get(&(h, Ns::Type))
                     .into_iter()
-                    .flat_map(|names| names.keys().cloned())
+                    .flat_map(|names| names.iter().cloned())
             })
             .collect()
     }
 
     fn candidate(&self, home: Home, name: &str) -> String {
-        match (home, self.layout) {
-            (Home::Named(index), Some(layout)) => format!("{}::{}", layout.projects[index].name, name),
-            _ => name.to_string(),
+        match self.layout.projects[home].name.as_str() {
+            "" => format!("the {} declared in the files given", name),
+            project => format!("{}::{}", project, name),
         }
     }
 
@@ -351,11 +249,7 @@ impl<'a> Resolver<'a> {
                 None => return (written.to_string(), Some(format!("Unknown group {}", qualifier))),
             },
         };
-        let mut found: Vec<Home> = homes.into_iter().filter(|h| self.declares(*h, ns, name)).collect();
-        // A name that the project declares and the prelude declares too has been reported as a duplicate already.
-        if qualifier.is_none() && found.len() == 2 && found[0] == home && found[1] == Home::Prelude {
-            found.pop();
-        }
+        let found: Vec<Home> = homes.into_iter().filter(|h| self.declares(*h, ns, name)).collect();
         match found.as_slice() {
             [] => match qualifier {
                 None => (written.to_string(), None),
@@ -444,7 +338,6 @@ impl<'a> Resolver<'a> {
                     context.error(value.pos, message);
                 }
                 *name = resolved;
-                use crate::ast::TaggedBody;
                 match body {
                     Some(TaggedBody::Record(members)) => {
                         members.iter_mut().for_each(|m| self.value(context, &mut m.value))
@@ -508,22 +401,21 @@ impl Names {
     /// The way to write a name in a file: bare if it resolves to the same declaration there, and in full if not.
     fn show(&self, file: usize, local: &str, project: &str) -> String {
         let full = format!("{}::{}", project, local);
-        let (Some(layout), Some(home)) = (&self.layout, self.homes.get(file)) else {
+        let Some(home) = self.homes.get(file) else {
             return full;
         };
-        let Some(target) = layout.projects.iter().position(|p| p.name == project) else {
+        let Some(target) = self.layout.projects.iter().position(|p| p.name == project) else {
             return full;
         };
         let resolver = Resolver {
-            layout: Some(layout),
+            layout: &self.layout,
             homes: Vec::new(),
             declared: HashMap::new(),
-            prelude: self.prelude,
         };
         // The name is bare if, in the namespace that declares it, nothing but the target has the name in `local`.
         for ns in [Ns::Type, Ns::Value] {
             let declares = |h: Home| self.declared.get(&(h, ns)).is_some_and(|names| names.contains(local));
-            if !declares(Home::Named(target)) {
+            if !declares(target) {
                 continue;
             }
             let found: Vec<Home> = resolver
@@ -531,7 +423,7 @@ impl Names {
                 .into_iter()
                 .filter(|h| declares(*h))
                 .collect();
-            if found == [Home::Named(target)] {
+            if found == [target] {
                 return local.to_string();
             }
         }
@@ -544,27 +436,38 @@ mod tests {
     use super::*;
     use crate::{check_in_projects, check_sources, CheckOptions, Report};
 
-    /// Projects `a` and `b` and an `app` that imports both in the groups that are given. The sources are the prelude,
-    /// the text of `a`, the text of `b`, and then the text of `app`, followed by values in the context of `app`.
-    fn run(groups: (Option<&str>, Option<&str>), a: &str, b: &str, app: &str, values: Option<&str>) -> Report {
-        let info = |name: &str, imports: Vec<(Option<String>, usize)>| ProjectInfo {
+    /// The group that the prelude is imported into by default.
+    const LOCAL: Option<&str> = Some("local");
+
+    /// The prelude and the projects `a` and `b`, and an `app` that imports the prelude into the group given first
+    /// (or not at all), and `a` and `b` into the groups given next. The sources are the prelude, the text of `a`, the
+    /// text of `b`, and then the text of `app`, followed by values in the context of `app`.
+    fn with_prelude(
+        prelude: Option<&str>,
+        groups: (Option<&str>, Option<&str>),
+        a: &str,
+        b: &str,
+        app: &str,
+        values: Option<&str>,
+    ) -> Report {
+        let info = |name: &str, imports: Vec<(Option<String>, usize)>, builtin: bool| ProjectInfo {
             name: name.to_string(),
             imports,
+            builtin,
         };
+        let mut imports = vec![(groups.0.map(String::from), 1), (groups.1.map(String::from), 2)];
+        if prelude.is_some() {
+            imports.insert(0, (prelude.map(String::from), 0));
+        }
         let layout_of = Layout {
             projects: vec![
-                info("example.a", vec![]),
-                info("example.b", vec![]),
-                info(
-                    "example.app",
-                    vec![(groups.0.map(String::from), 0), (groups.1.map(String::from), 1)],
-                ),
+                info("constructo.prelude", vec![], true),
+                info("example.a", vec![(Some("local".to_string()), 0)], false),
+                info("example.b", vec![(Some("local".to_string()), 0)], false),
+                info("example.app", imports, false),
             ],
-            owners: [Owner::Prelude, Owner::Project(0), Owner::Project(1), Owner::Project(2)]
-                .into_iter()
-                .chain(values.map(|_| Owner::Project(2)))
-                .collect(),
-            root: 2,
+            owners: [0, 1, 2, 3].into_iter().chain(values.map(|_| 3)).collect(),
+            root: 3,
         };
         let mut sources = vec![crate::prelude_source()];
         for (name, text) in [("a.types", a), ("b.types", b), ("app.types", app)] {
@@ -580,6 +483,11 @@ mod tests {
             });
         }
         check_in_projects(&sources, &layout_of, &CheckOptions::default())
+    }
+
+    /// As `with_prelude`, with the prelude imported into `local` as it is by default.
+    fn run(groups: (Option<&str>, Option<&str>), a: &str, b: &str, app: &str, values: Option<&str>) -> Report {
+        with_prelude(LOCAL, groups, a, b, app, values)
     }
 
     fn messages(report: &Report) -> Vec<String> {
@@ -740,12 +648,76 @@ mod tests {
     }
 
     #[test]
-    fn a_project_cannot_declare_what_the_prelude_declares() {
+    fn a_project_that_declares_a_name_of_the_prelude_makes_it_ambiguous_where_used() {
+        // Declaring the name is fine, and a use of it is ambiguous.
         let report = run((None, None), "enum A = X;", "enum B = Y;", "enum Bool = No, Yes;", None);
+        assert!(report.is_ok(), "{:?}", messages(&report));
+        let report = run(
+            (None, None),
+            "enum A = X;",
+            "enum B = Y;",
+            "enum Bool = No, Yes;\nconst b: Bool = Yes;",
+            None,
+        );
         assert_eq!(
             messages(&report),
-            vec!["ERROR: Duplicate type Bool (app.types, line 1, col 6); first declared at <prelude>, line 1, col 6"]
+            vec![concat!(
+                "ERROR: The name Bool is ambiguous: it could be example.app::Bool or constructo.prelude::Bool ",
+                "(app.types, line 2, col 10)"
+            )]
         );
+    }
+
+    #[test]
+    fn a_project_can_override_the_prelude_by_importing_it_into_another_group() {
+        let app = "enum Bool = No, Yes;\nconst b: Bool = Yes;\nconst c: std::Bool = std::True;";
+        let report = with_prelude(Some("std"), (None, None), "enum A = X;", "enum B = Y;", app, None);
+        assert!(report.is_ok(), "{:?}", messages(&report));
+        // The question mark is Option in the scope, so it needs an Option there.
+        let report = with_prelude(
+            Some("std"),
+            (None, None),
+            "enum A = X;",
+            "enum B = Y;",
+            "enum E = E(Nat?);",
+            None,
+        );
+        assert_eq!(report.diagnostics.len(), 1);
+        assert!(
+            messages(&report)[0].starts_with("ERROR: Unknown type Option"),
+            "{:?}",
+            messages(&report)
+        );
+    }
+
+    #[test]
+    fn a_project_without_the_prelude_does_not_have_its_names() {
+        let report = with_prelude(
+            None,
+            (None, None),
+            "enum A = X;",
+            "enum B = Y;",
+            "const b: Bool = True;",
+            None,
+        );
+        assert_eq!(report.diagnostics.len(), 1);
+        assert!(
+            messages(&report)[0].starts_with("ERROR: Unknown type Bool"),
+            "{:?}",
+            messages(&report)
+        );
+    }
+
+    #[test]
+    fn the_prelude_can_be_named_by_its_full_name() {
+        let report = run(
+            (None, None),
+            "enum A = X;",
+            "enum B = Y;",
+            "const b: constructo.prelude::Bool = constructo.prelude::True;",
+            None,
+        );
+        assert!(report.is_ok(), "{:?}", messages(&report));
     }
 
     #[test]
@@ -821,9 +793,14 @@ mod tests {
         );
         let resolution = {
             let sources: Vec<Source> = vec![];
-            resolve(&sources, &mut [], None)
+            let layout = Layout {
+                projects: vec![],
+                owners: vec![],
+                root: 0,
+            };
+            resolve(&sources, &mut [], &layout)
         };
-        // Without a layout every name is shown in full, and text without a canonical name is untouched.
+        // Text without a canonical name is untouched.
         assert_eq!(
             resolution.show(0, "no names here, not even a.b or x@"),
             "no names here, not even a.b or x@"

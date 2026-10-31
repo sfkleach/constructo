@@ -152,9 +152,9 @@ else
 fi
 expect_exit "generic consts are valid, and may use the prelude consts without --allow-refs" 0 \
     check "$EXAMPLES/valid/generic-consts.types"
-expect_exit "a prelude const cannot be redefined" 1 check "$EXAMPLES/parses-but-invalid/redefines-null.types"
+expect_exit "a prelude const that is redefined is ambiguous where it is used" 1 check "$EXAMPLES/parses-but-invalid/redefines-null.types"
 expect_exit "--no-prelude allows redefining a prelude const" 0 \
-    check --no-prelude "$EXAMPLES/parses-but-invalid/redefines-null.types"
+    check --no-prelude --allow-refs "$EXAMPLES/parses-but-invalid/redefines-null.types"
 expect_exit "values may use null, true and false" 0 \
     check "$TYPED/schema.types" "$TYPED/valid/prelude-consts.values"
 err="$("$CONSTRUCTO" check "$EXAMPLES/parses-but-invalid/generic-const-wrong-value.types" 2>&1 >/dev/null || true)"
@@ -337,7 +337,7 @@ echo "--- prelude ---"
 expect_exit "prelude supplies Option" 0 check "$EXAMPLES/valid/mutual.types"
 expect_exit "--no-prelude hides Option" 1 check --no-prelude "$EXAMPLES/valid/mutual.types"
 expect_exit "prelude supplies Bool" 0 check "$EXAMPLES/valid/uses-bool.types"
-expect_exit "prelude names cannot be redeclared" 1 check "$EXAMPLES/parses-but-invalid/redeclares-bool.types"
+expect_exit "a prelude name that is redeclared is ambiguous where it is used" 1 check "$EXAMPLES/parses-but-invalid/redeclares-bool.types"
 expect_exit "--no-prelude allows redeclaring Bool" 0 \
     check --no-prelude "$EXAMPLES/parses-but-invalid/redeclares-bool.types"
 expect_exit "--no-prelude with a self-contained file" 0 check --no-prelude "$EXAMPLES/valid/shapes.types"
@@ -833,6 +833,54 @@ echo "enum Extra = Extra(example.other::Shape);" > "$extra"
 expect_exit "names: a given file cannot name a project that was not imported" 1 \
     check --project="$NAMES/qualified/app" "$extra"
 rm -f "$extra"
+# The standard prelude is the built-in project constructo.prelude, which every project imports into local unless it
+# imports it itself.
+PRELUDES="$PROJECTS/valid-prelude"
+for case in override explicit-local full-name no-group; do
+    expect_exit "project/valid-prelude/$case" 0 check --project="$PRELUDES/$case/app"
+done
+# An import of the prelude is the project's own statement, so --no-prelude leaves it alone.
+for case in override explicit-local no-group; do
+    expect_exit "prelude: --no-prelude keeps the explicit import in $case" 0 \
+        check --no-prelude --project="$PRELUDES/$case/app"
+done
+expect_exit "prelude: --no-prelude removes the implicit import" 1 \
+    check --no-prelude --project="$PRELUDES/full-name/app"
+expect_exit "prelude: --prelude gives the implicit import back" 0 \
+    check --config="$CONFIG/precedence/no-prelude.toml" --prelude --project="$PRELUDES/full-name/app"
+expect_exit "prelude: prelude = false in the settings file removes the implicit import" 1 \
+    check --config="$CONFIG/precedence/no-prelude.toml" --project="$PRELUDES/full-name/app"
+# The imported projects get the prelude as well, so they can use Option and Bool.
+nested="$(mktemp -d)"
+mkdir "$nested/lib" "$nested/app"
+printf '[project]\nname = "example.lib"\n' > "$nested/lib/constructo.toml"
+echo "enum Lib = Lib(Option<Bool>);" > "$nested/lib/lib.types"
+printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lib"\nsource = "../lib"\n' \
+    > "$nested/app/constructo.toml"
+echo "enum App = App;" > "$nested/app/app.types"
+expect_exit "prelude: an imported project has the prelude too" 0 check --project="$nested/app"
+expect_exit "prelude: --no-prelude removes it from the imported project as well" 1 \
+    check --no-prelude --project="$nested/app"
+rm -f "$nested/lib/constructo.toml" "$nested/lib/lib.types" "$nested/app/constructo.toml" "$nested/app/app.types"
+rmdir "$nested/lib" "$nested/app" "$nested"
+# The built-in project is never reported, and its file is shown by its URI.
+listing="$("$CONSTRUCTO" check -v --project="$PRELUDES/explicit-local/app" 2>/dev/null)"
+if [[ "$listing" != *"constructo"* && "$listing" == *"(project example.app)"* ]]; then
+    pass "prelude: the built-in project is not reported"
+else
+    fail "prelude: the built-in project is not reported (got '$listing')"
+fi
+expect_exit "prelude: the reserved prefix is refused in a project-file" 2 check --project="$PROJECTS/invalid/reserved-name"
+echo "enum Bool = No, Yes;" > "$forward_types"
+expect_exit "prelude: files without a project may declare a name that the prelude has" 0 check "$forward_types"
+echo "enum Bool = No, Yes; const b: Bool = Yes;" > "$forward_types"
+err="$("$CONSTRUCTO" check "$forward_types" 2>&1 >/dev/null || true)"
+if [[ "$err" == *"The name Bool is ambiguous: it could be the Bool declared in the files given or constructo.prelude::Bool"* ]]; then
+    pass "prelude: files without a project are a project like any other"
+else
+    fail "prelude: files without a project are a project like any other (got '$err')"
+fi
+expect_exit "prelude: --no-prelude is the way out for files without a project" 0 check --no-prelude "$forward_types"
 # The values to check come after the project, and a failed project is reported as such.
 expect_exit "project: values are type-checked against the project" 0 check --project="$SHAPES" "$SHAPES/values/shapes.values"
 echo "Circle { radius: \"wide\" }" > "$forward_values"
@@ -853,8 +901,14 @@ fi
 # The prelude is added ahead of the project as for plain files, so a project that declares Bool needs --no-prelude.
 bool_project="$(mktemp -d)"
 printf '[project]\nname = "example.ownbool"\n' > "$bool_project/constructo.toml"
-echo "enum Bool = No, Yes;" > "$bool_project/bool.types"
-expect_exit "project: its own Bool clashes with the prelude" 1 check --project="$bool_project"
+printf 'enum Bool = No, Yes;\nconst flag: Bool = Yes;\n' > "$bool_project/bool.types"
+expect_exit "project: its own Bool is ambiguous with the prelude where it is used" 1 check --project="$bool_project"
+err="$("$CONSTRUCTO" check --project="$bool_project" 2>&1 >/dev/null || true)"
+if [[ "$err" == "ERROR: The name Bool is ambiguous: it could be example.ownbool::Bool or constructo.prelude::Bool"* ]]; then
+    pass "project: the ambiguity names both candidates"
+else
+    fail "project: the ambiguity names both candidates (got '$err')"
+fi
 expect_exit "project: its own Bool is fine with --no-prelude" 0 check --no-prelude --project="$bool_project"
 # Settings come from --config and the arguments only, never from the project-file.
 expect_exit "project: --config still applies" 0 check --config="$CONFIG/precedence/no-prelude.toml" --project="$bool_project"
