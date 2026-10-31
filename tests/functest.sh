@@ -301,7 +301,7 @@ trap 'rm -f "$chain" "$doubling" "$doubled_values" "$long_chain"' EXIT
     for i in $(seq 1 50000); do echo "enum E$i = E$i(a: E$(( i - 1 )));"; done
     echo "enum Holder = Holder(x: E50000);"
 } > "$long_chain"
-# The default of a type may need an enum that is declared after the values file, which cannot name it itself.
+# The default of a type may need an enum that only a later types file declares, which the values cannot name.
 forward_types="$(mktemp)"
 forward_later="$(mktemp)"
 forward_values="$(mktemp)"
@@ -309,8 +309,26 @@ trap 'rm -f "$chain" "$doubling" "$doubled_values" "$long_chain" "$forward_types
 echo "enum Holder = Holder(x: Later);" > "$forward_types"
 echo "enum Later = Ready;" > "$forward_later"
 echo "Holder();" > "$forward_values"
-expect_exit "the default may use an enum that is declared after the values" 0 \
-    check "$forward_types" "$forward_values" "$forward_later"
+expect_exit "the default may use an enum that is declared in a later types file" 0 \
+    check "$forward_types" "$forward_later" "$forward_values"
+err="$("$CONSTRUCTO" check "$forward_types" "$forward_values" "$forward_later" 2>&1 >/dev/null || true)"
+if [[ "$err" == *"A types file must come before the values files, but this follows $forward_values ($forward_later, line 1, col 1)"* ]]; then
+    pass "a types file after a values file is reported with the values file"
+else
+    fail "a types file after a values file is reported with the values file (got '$err')"
+fi
+expect_exit "a types file after a values file is an error" 1 check "$forward_types" "$forward_values" "$forward_later"
+expect_exit "the order is still checked without the type-check" 1 \
+    check --no-type-check "$forward_types" "$forward_values" "$forward_later"
+expect_exit "several values files may follow the types files" 0 \
+    check "$forward_types" "$forward_later" "$forward_values" "$forward_values"
+expect_exit "several values files may come first when there are no types" 0 \
+    check --no-prelude --no-type-check "$forward_values" "$forward_values"
+expect_exit "a types file after a values file is an error whatever is given with it" 1 \
+    check --stdin "$forward_values" < "$forward_types"
+echo "// Only a comment." > "$forward_types"
+expect_exit "a file with no declarations may follow a values file" 0 \
+    check --no-type-check "$forward_values" "$forward_types"
 expect_exit "a long chain of defaults is refused, not a crash" 1 check "$long_chain" "$doubled_values"
 expect_exit "a long chain of defaults is accepted within the limit" 0 check --default-limit=1000000 "$long_chain" "$doubled_values"
 echo ""
