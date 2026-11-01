@@ -59,7 +59,8 @@ parts of a qualifier are identifiers of either case separated by dots, and what 
 the names are resolved, which is described with the projects.
 
 The `Value` of a const is the one defined in the [data-values grammar](#data-values-grammar). A const name may have
-either case. The names `enum` and `const` are reserved, and cannot be used as the name of a const or a field.
+either case. The names `enum` and `const` are reserved, and cannot be used as the name of a const or a field, but they can be
+parts of a qualifier, as in `const::Shape`.
 
 The rules are:
 

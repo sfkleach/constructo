@@ -1,0 +1,6 @@
+// The keywords can be parts of a qualifier, in a group and in the full name of a project.
+enum Holder = Holder(const::Shape), Full(example.enum::Shape);
+const unit: const::Shape = const::Circle { radius: 1.0 };
+const same: example.enum::Shape = example.enum::Dot;
+const holder: Holder = Holder(const::Dot);
+const full: Holder = Full(example.enum::Circle { radius: 2.0 });
