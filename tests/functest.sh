@@ -734,7 +734,7 @@ listing="$("$CONSTRUCTO" check -v --dev --project="$SHAPES" 2>&1)"
 expected_listing="OK: $SHAPES (project com.example.shapes)
 OK: $SHAPES/circles/shape.types (data-types)
 OK: $SHAPES/root.types (data-types)
-OK: checked 2 file(s)"
+OK: checked 2 file(s) in 1 project(s)"
 if [[ "$listing" == "$expected_listing" ]]; then
     pass "project: the types files are listed in order, without hidden, nested or other files"
 else
@@ -749,7 +749,7 @@ else
 fi
 listing="$("$CONSTRUCTO" check -v --dev --project="$PROJECTS/valid/imports-only" 2>&1)"
 if [[ "$listing" == "OK: $PROJECTS/valid/imports-only (project example.importsonly)
-OK: checked 0 file(s)" ]]; then
+OK: checked 0 file(s) in 1 project(s)" ]]; then
     pass "project: a project with no types files is accepted"
 else
     fail "project: a project with no types files is accepted (got '$listing')"
@@ -768,7 +768,7 @@ IMPORTS="$PROJECTS/valid-imports"
 for root in diamond/app two-groups/app chain/a; do
     expect_exit "project/valid-imports/$root" 0 check --dev --project="$IMPORTS/$root"
 done
-project_names() { "$CONSTRUCTO" check -v --dev --project="$1" 2>&1 | sed -n 's|.*(project \(.*\))$|\1|p' | tr '\n' ' '; }
+project_names() { "$CONSTRUCTO" check -v --dev --project="$1" 2>&1 | sed -n 's|.*(project \([^,)]*\)[,)].*$|\1|p' | tr '\n' ' '; }
 order="$(project_names "$IMPORTS/diamond/app")"
 if [[ "$order" == "example.base example.left example.right example.app " ]]; then
     pass "imports: a project that is imported twice is loaded once, before the projects that import it"
@@ -809,7 +809,7 @@ printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.l
 echo "enum App = App;" > "$broken/app/app.types"
 expect_exit "imports: a type error in an imported project fails the run" 1 check --dev --project="$broken/app"
 listing="$("$CONSTRUCTO" check -v --dev --project="$broken/app" 2>/dev/null || true)"
-if [[ "$listing" == *"FAILED: $broken/app/../lib (project example.lib)"* \
+if [[ "$listing" == *"FAILED: $broken/app/../lib (project example.lib, unverified)"* \
     && "$listing" == *"OK: $broken/app (project example.app)"* ]]; then
     pass "imports: the project with the error is the one reported as failed"
 else
@@ -1124,6 +1124,26 @@ if prints "dev = false" && prints "dev = true" --dev && prints "dev = true" --co
     pass "lock: print-config shows dev"
 else
     fail "lock: print-config shows dev"
+fi
+# Verbose mode says which projects were verified, and counts the projects.
+write_lock
+loud="$("$CONSTRUCTO" check -v --project="$lk/app" 2>&1)"
+expected_loud="OK: $lk/app/../lib (project example.lib, verified)
+OK: $lk/app/../lib/shapes.types (data-types)
+OK: $lk/app (project example.app)
+OK: $lk/app/app.types (data-types)
+OK: checked 2 file(s) in 2 project(s)"
+if [[ "$loud" == "$expected_loud" ]]; then
+    pass "lock: verbose mode says that an imported project is verified, and the root says nothing"
+else
+    fail "lock: verbose mode says verified (got '$loud')"
+fi
+loud="$("$CONSTRUCTO" check -v --dev --project="$lk/app" 2>&1)"
+if [[ "$loud" == *"(project example.lib, unverified)"* && "$loud" == *"(project example.app)"* \
+    && "$loud" == *"OK: checked 2 file(s) in 2 project(s)" ]]; then
+    pass "lock: verbose mode says that a project is unverified under --dev"
+else
+    fail "lock: verbose mode says unverified under --dev (got '$loud')"
 fi
 # A run with no project, and a project with nothing to record, have no lock to verify.
 expect_exit "lock: files alone have no lock" 0 check "$TYPED/schema.types"

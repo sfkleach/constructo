@@ -343,7 +343,7 @@ fn main() -> ExitCode {
                     return code;
                 }
             }
-            check(stdin, verbose, &options, &set, &files)
+            check(stdin, verbose, dev, &options, &set, &files)
         }
     }
 }
@@ -401,7 +401,14 @@ fn read_input(file: &InputFile) -> std::io::Result<String> {
     }
 }
 
-fn check(stdin: bool, verbose: bool, options: &CheckOptions, set: &ProjectSet, files: &[PathBuf]) -> ExitCode {
+fn check(
+    stdin: bool,
+    verbose: bool,
+    dev: bool,
+    options: &CheckOptions,
+    set: &ProjectSet,
+    files: &[PathBuf],
+) -> ExitCode {
     // The inputs are read one at a time, and reading stops at the first syntax error. That way an unreadable later
     // input cannot hide an earlier syntax error, which is the error the run is meant to stop at. The files of the
     // projects come first, and the project says that they are types files.
@@ -468,6 +475,7 @@ fn check(stdin: bool, verbose: bool, options: &CheckOptions, set: &ProjectSet, f
         }
         start += project.files.len();
     }
+    let counted = ranges.len();
     if verbose {
         // Each project is reported just before its files, and it has failed if any one of them has.
         let mut pending: VecDeque<(usize, &Project)> = ranges.into();
@@ -480,7 +488,22 @@ fn check(stdin: bool, verbose: bool, options: &CheckOptions, set: &ProjectSet, f
                 let end = (start + project.files.len()).min(report.outcomes.len());
                 let failed = report.outcomes[start.min(end)..end].contains(&Outcome::Failed);
                 let label = if failed { "FAILED" } else { "OK" };
-                println!("{}: {} (project {})", label, project.folder.display(), project.name);
+                // The root project is not in the lock. Any other project that is loaded was checked against it, unless
+                // that was switched off.
+                let checked = if std::ptr::eq(project, set.root()) {
+                    ""
+                } else if dev {
+                    ", unverified"
+                } else {
+                    ", verified"
+                };
+                println!(
+                    "{}: {} (project {}{})",
+                    label,
+                    project.folder.display(),
+                    project.name,
+                    checked
+                );
             }
         };
         for (index, ((source, outcome), kind)) in sources.iter().zip(&report.outcomes).zip(&report.kinds).enumerate() {
@@ -509,7 +532,13 @@ fn check(stdin: bool, verbose: bool, options: &CheckOptions, set: &ProjectSet, f
     }
     if report.is_ok() {
         if verbose {
-            println!("OK: checked {} file(s)", sources.len() - hidden.len());
+            // The projects that are counted are the root and the imported ones, and not the built-in ones. A run with
+            // no project named has none to count.
+            let files = sources.len() - hidden.len();
+            match counted {
+                0 => println!("OK: checked {} file(s)", files),
+                projects => println!("OK: checked {} file(s) in {} project(s)", files, projects),
+            }
         }
         ExitCode::SUCCESS
     } else {
