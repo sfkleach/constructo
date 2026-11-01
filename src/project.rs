@@ -195,19 +195,13 @@ impl Project {
         walk(folder, "", true, &parsed.include, &parsed.exclude, &mut found)
             .map_err(|e| ProjectError::Cannot(format!("Cannot read {}: {}", folder.display(), e)))?;
         found.sort();
-        let files: Vec<InputFile> = found
+        let files = found
             .iter()
             .map(|relative| InputFile {
                 path: folder.join(relative),
                 embedded: None,
             })
             .collect();
-        // The project-file is a file of the project too.
-        let inside = std::fs::canonicalize(folder)
-            .map_err(|e| ProjectError::Cannot(format!("Cannot read {}: {}", folder.display(), e)))?;
-        for file in std::iter::once(&path).chain(files.iter().map(|file| &file.path)) {
-            check_inside(&inside, file)?;
-        }
         Ok(Project {
             name: parsed.name,
             folder: folder.to_path_buf(),
@@ -505,23 +499,6 @@ impl Loader {
         );
         Err(ProjectError::Invalid(Diagnostic::new(file, pos, message)))
     }
-}
-
-/// Checks that a file of a project is inside the project: its canonical path, which has no links or `..`, must lie in
-/// the canonical path of the folder. A link from the project to a file outside it is refused, since the file would be
-/// a part of the project, and be digested for the lock file, without being in the folder.
-fn check_inside(inside: &Path, file: &Path) -> Result<(), ProjectError> {
-    let canonical = std::fs::canonicalize(file)
-        .map_err(|e| ProjectError::Cannot(format!("Cannot read {}: {}", file.display(), e)))?;
-    if canonical.starts_with(inside) {
-        return Ok(());
-    }
-    Err(ProjectError::Cannot(format!(
-        "The file {} is a link to {}, which is outside the project folder {}",
-        file.display(),
-        canonical.display(),
-        inside.display()
-    )))
 }
 
 /// The folder as an absolute path with no links or `..`, which is the identity of a project. A built-in project is
