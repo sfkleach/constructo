@@ -406,17 +406,41 @@ output of the command or with `git diff constructo.lock`.
 
 ## Step 5: Verbose mode and diagnostics
 
-- In verbose mode `check` reports each project that it loaded, with its version
-  and where it was found, in the same style as the files: `OK: ../shared
-  (project shared 1.2.0)`.
-- The final count says how many files and how many projects were checked.
-- Every diagnostic from a file in an included project says which project it is
-  from.
+This step only tells the user what is being done on their behalf to ensure
+provenance. It is small, and is built after Step 4, because it reports the
+result of the verification.
+
+Already done in Step 1 to 3: in verbose mode `check` reports each project that
+it loaded, with its name and where it was found, as `OK: ../shared (project
+com.example.shapes)`, or as `FAILED:` if one of its files has an error, and it
+does not report the built-in projects.
+
+- Each project line also says whether the project was checked against the lock:
+  `OK: ../shared (project com.example.shapes, verified)`. With `--dev` it says
+  `unverified`, and the root project, which is not in the lock, says neither.
+- The final count says how many projects were checked as well as how many
+  files: `OK: checked 5 file(s) in 3 project(s)`. The projects counted are the
+  root and the imported ones, and not the built-in ones.
+- There is no version. The project-file has none, and `version` stays an unknown
+  key. A version belongs with remote projects (Step 6), where a git tag or
+  revision is what the user is relying on.
+- A diagnostic does not say which project it is from. The path of the file is
+  shown as the user typed the folder, which says where it came from, and the
+  project line in verbose mode connects the folder to the name.
 
 ## Step 6: Support remote projects
 
 Allow the project source to be a specified version from a remote git-repo. 
-N.B. We need a Q&A session to elaborate this step.
+N.B. We need a Q&A session to elaborate this step. However I envisage 
+going from `source = PATH` to:
+
+```toml
+[source]
+# Pick one of these  ...
+path = ...
+repo = ...
+builtin = ...
+```
 
 ## Step 7: Spec files
 
