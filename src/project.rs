@@ -4,6 +4,8 @@
 //! is not valid is an error with a line and a column.
 
 use crate::diagnostics::{Diagnostic, Pos};
+use crate::digest::file_digest;
+use crate::lock::LockedProject;
 use glob::{MatchOptions, Pattern};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
@@ -209,6 +211,44 @@ impl Project {
             files,
             builtin: false,
         })
+    }
+
+    /// The digests of the files that the lock file records for the project: its types files and its project-file. Each
+    /// is a pair of the path inside the project, written with `/`, and the digest of the file, which is read through
+    /// any link. The pairs are in order of the bytes of the paths. A built-in project has none, since its content is
+    /// fixed by the binary.
+    pub fn file_digests(&self) -> Result<Vec<(String, String)>, ProjectError> {
+        if self.builtin {
+            return Ok(Vec::new());
+        }
+        let mut paths = vec![(PROJECT_FILE.to_string(), self.folder.join(PROJECT_FILE))];
+        for file in &self.files {
+            // Every file is the folder joined to a path, so the prefix is always there. The whole path is the fallback.
+            let relative = file.path.strip_prefix(&self.folder).unwrap_or(&file.path);
+            let relative = relative
+                .components()
+                .map(|part| part.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/");
+            // A pattern such as `**/*` can select the project-file, which is recorded once.
+            if relative != PROJECT_FILE {
+                paths.push((relative, file.path.clone()));
+            }
+        }
+        paths.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
+        paths
+            .into_iter()
+            .map(|(relative, path)| {
+                let bytes = std::fs::read(&path)
+                    .map_err(|e| ProjectError::Cannot(format!("Cannot read {}: {}", path.display(), e)))?;
+                Ok((relative, file_digest(&bytes)))
+            })
+            .collect()
+    }
+
+    /// The entry for the project in a lock file, from the digests of its files.
+    pub fn lock_entry(&self) -> Result<LockedProject, ProjectError> {
+        Ok(LockedProject::new(&self.name, &self.file_digests()?))
     }
 
     /// The name of the project-file in diagnostics.
@@ -764,5 +804,127 @@ mod tests {
         }
         // A star does not cross a folder.
         assert!(!Pattern::new("*.types").unwrap().matches_with("x/a.types", MATCH));
+    }
+
+    /// A project on disk, in a folder of its own under the temporary folder. The files that are made are the only
+    /// things removed when it is dropped, and then the folders, which must be empty.
+    struct OnDisk {
+        folder: PathBuf,
+        files: Vec<PathBuf>,
+    }
+
+    impl OnDisk {
+        fn new(test: &str, files: &[(&str, &[u8])]) -> OnDisk {
+            let folder = std::env::temp_dir().join(format!("constructo-{}-{}", std::process::id(), test));
+            let mut made = Vec::new();
+            for (relative, bytes) in files {
+                let path = folder.join(relative);
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(&path, bytes).unwrap();
+                made.push(path);
+            }
+            OnDisk { folder, files: made }
+        }
+    }
+
+    impl Drop for OnDisk {
+        fn drop(&mut self) {
+            let mut folders = std::collections::BTreeSet::new();
+            for file in &self.files {
+                let _ = std::fs::remove_file(file);
+                let mut parent = file.parent();
+                while let Some(folder) = parent.filter(|folder| folder.starts_with(&self.folder)) {
+                    folders.insert(folder.to_path_buf());
+                    parent = folder.parent();
+                }
+            }
+            // The deepest first, so that each folder is empty when it is removed.
+            for folder in folders.iter().rev() {
+                let _ = std::fs::remove_dir(folder);
+            }
+        }
+    }
+
+    #[test]
+    fn the_digests_of_a_project_are_those_of_its_files_with_the_project_file() {
+        let disk = OnDisk::new(
+            "digests",
+            &[
+                ("constructo.toml", b"[project]\nname = \"com.example.lib\"\n"),
+                // Saved with CRLF, which does not change the digest.
+                (
+                    "shapes/circle.types",
+                    b"enum Shape = Circle;\r\nconst unit: Shape = Circle;\r\n",
+                ),
+                ("a.types", b"enum A = X;\n"),
+                ("notes.txt", b"not a types file\n"),
+            ],
+        );
+        let project = Project::load(&disk.folder).unwrap();
+        let digests = project.file_digests().unwrap();
+        let paths: Vec<&str> = digests.iter().map(|(path, _)| path.as_str()).collect();
+        assert_eq!(paths, ["a.types", "constructo.toml", "shapes/circle.types"]);
+        // These are the digests of the worked example in the spec of the lock file.
+        assert_eq!(
+            digests[1].1,
+            "sha256:1cfdac805747c77556236b673fc4fb71a344aa39d1f8dfdb37bf53fbfae70830"
+        );
+        assert_eq!(
+            digests[2].1,
+            "sha256:1b0ecdd124592b686f69f8d4544f644fa34b2732bdb94e0500eda45c77025346"
+        );
+        let entry = project.lock_entry().unwrap();
+        assert_eq!(entry.name, "com.example.lib");
+        assert_eq!(
+            entry.digest.digest,
+            crate::digest::project_digest(&digests),
+            "the digest of the project is worked out from the digests of its files"
+        );
+        assert_eq!(entry.files.len(), 3);
+    }
+
+    #[test]
+    fn the_project_file_is_recorded_once_even_if_a_pattern_selects_it() {
+        let disk = OnDisk::new(
+            "once",
+            &[
+                ("constructo.toml", b"[project]\nname = \"a.b\"\ninclude = [\"**/*\"]\n"),
+                ("a.types", b"enum A = X;\n"),
+            ],
+        );
+        let project = Project::load(&disk.folder).unwrap();
+        // The pattern selects both files, and the project file is among the files of the project.
+        assert_eq!(project.files.len(), 2);
+        let paths: Vec<String> = project
+            .file_digests()
+            .unwrap()
+            .into_iter()
+            .map(|(path, _)| path)
+            .collect();
+        assert_eq!(paths, ["a.types", "constructo.toml"]);
+    }
+
+    #[test]
+    fn a_built_in_project_has_no_digests() {
+        let project = Project::load(Path::new("constructo:/prelude")).unwrap();
+        assert!(project.builtin);
+        assert!(project.file_digests().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_file_that_has_gone_is_reported_when_it_is_digested() {
+        let disk = OnDisk::new(
+            "gone",
+            &[
+                ("constructo.toml", b"[project]\nname = \"a.b\"\n"),
+                ("a.types", b"enum A = X;\n"),
+            ],
+        );
+        let project = Project::load(&disk.folder).unwrap();
+        std::fs::remove_file(disk.folder.join("a.types")).unwrap();
+        match project.file_digests().unwrap_err() {
+            ProjectError::Cannot(message) => assert!(message.starts_with("Cannot read "), "{}", message),
+            other => panic!("not a read error: {}", other),
+        }
     }
 }
