@@ -378,6 +378,21 @@ stdin_exit "--no-widening accepts exact numbers" 0 'Pair(1, -2); Circle { radius
 stdin_exit "--no-widening rejects a Nat as an Int" 1 'Pair(1, 2)' --no-widening "$TYPED/schema.types"
 stdin_exit "--no-widening rejects a join of numbers" 1 '[1, 2.5]' --no-widening
 stdin_exit "widening accepts a join of numbers" 0 '[1, 2.5]'
+# A name that cannot be resolved in one value must not hide a type error in another, and the usual rules for stopping
+# at the first error and for --continue apply to both kinds of error.
+mixed='Circle { radius: "bad" }; missing::Circle; other::Circle'
+stdin_lines() { printf '%s\n' "$mixed" | "$CONSTRUCTO" check --stdin "$@" "$TYPED/schema.types" 2>&1 >/dev/null | wc -l || true; }
+if [[ "$(stdin_lines)" -eq 1 && "$(stdin_lines --continue)" -eq 3 ]]; then
+    pass "name errors and type errors in values are reported in turn, one at a time unless --continue"
+else
+    fail "name errors and type errors in values are reported in turn (got $(stdin_lines) and $(stdin_lines --continue))"
+fi
+first="$(printf '%s\n' "$mixed" | "$CONSTRUCTO" check --stdin "$TYPED/schema.types" 2>&1 >/dev/null || true)"
+if [[ "$first" == "ERROR: Expected Float but found String (<stdin>, line 1, col 18)" ]]; then
+    pass "a type error before a name error is the one reported"
+else
+    fail "a type error before a name error is the one reported (got '$first')"
+fi
 # The prelude consts are ordinary consts, so they are only known when the prelude is loaded.
 stdin_exit "null is accepted with the prelude" 0 'null'
 stdin_exit "true and false are accepted with the prelude" 0 '[true, false]; Some(null)'

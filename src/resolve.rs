@@ -53,8 +53,11 @@ enum Ns {
 
 /// What the resolution found.
 pub struct Resolution {
-    /// The errors, each with the index of its source.
+    /// The errors in types files, each with the index of its source.
     pub diagnostics: Vec<(usize, Diagnostic)>,
+    /// The first error in each top-level value that has one, with the index of its source and of the value. These
+    /// are kept apart because they are reported in turn with the type errors of the values, not before them.
+    pub value_errors: Vec<(usize, usize, Diagnostic)>,
     /// For each source, the local names of the types that can be written bare in it.
     pub visible_types: Vec<HashSet<String>>,
     names: Names,
@@ -93,6 +96,7 @@ pub fn resolve(sources: &[Source], parsed: &mut [Parsed], layout: &Layout) -> Re
     };
     resolver.collect(parsed);
     let mut diagnostics = Vec::new();
+    let mut value_errors = Vec::new();
     let mut visible_types = vec![HashSet::new(); sources.len()];
     for (index, file) in parsed.iter_mut().enumerate() {
         let home = resolver.homes[index];
@@ -108,8 +112,15 @@ pub fn resolve(sources: &[Source], parsed: &mut [Parsed], layout: &Layout) -> Re
                 resolver.types_file(&mut context, file);
             }
             Parsed::Values(values) => {
-                for value in values {
+                for (position, value) in values.iter_mut().enumerate() {
+                    let before = context.diagnostics.len();
                     resolver.value(&mut context, value);
+                    // The names are visited in the order they are written, so the first error is the leftmost.
+                    if context.diagnostics.len() > before {
+                        let (_, first) = context.diagnostics[before].clone();
+                        context.diagnostics.truncate(before);
+                        value_errors.push((index, position, first));
+                    }
                 }
             }
         }
@@ -121,6 +132,7 @@ pub fn resolve(sources: &[Source], parsed: &mut [Parsed], layout: &Layout) -> Re
     };
     Resolution {
         diagnostics,
+        value_errors,
         visible_types,
         names,
     }
