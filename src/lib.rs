@@ -5,6 +5,7 @@
 pub mod ast;
 pub mod config;
 pub mod diagnostics;
+pub mod digest;
 pub mod lexer;
 pub mod parser;
 pub mod project;
