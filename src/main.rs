@@ -1,5 +1,6 @@
 use clap::{ArgAction, ArgMatches, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use constructo::diagnostics::{Diagnostic, Pos};
+use constructo::verify::{read_lock, verify_lock};
 use constructo::{
     check_in_projects, source_kind, syntax_error, CheckOptions, Config, Experimental, InputFile, Layout, Outcome,
     Project, ProjectInfo, ProjectSet, Source, SourceKind,
@@ -181,6 +182,15 @@ https://github.com/sfkleach/constructo/blob/main/docs/specs/config-file.md")]
         #[arg(long, overrides_with = "verbose")]
         no_verbose: bool,
 
+        /// Do not verify the imported projects against constructo.lock, and do not need the file. For a project that
+        /// is being developed
+        #[arg(long, short, overrides_with = "no_dev")]
+        dev: bool,
+
+        /// Verify the imported projects against constructo.lock [default]
+        #[arg(long, overrides_with = "dev")]
+        no_dev: bool,
+
         /// Print the settings that the run would use, after the defaults, --config and the other options, as a
         /// commented TOML file that --config can read, and exit without checking. It is a template for a config file
         #[arg(long)]
@@ -256,6 +266,8 @@ fn main() -> ExitCode {
             no_experimental: _,
             verbose,
             no_verbose,
+            dev,
+            no_dev,
             print_config,
             project,
             files,
@@ -276,8 +288,9 @@ fn main() -> ExitCode {
             };
             let load_prelude = setting(prelude, no_prelude, config.prelude());
             let verbose = setting(verbose, no_verbose, config.verbose());
+            let dev = setting(dev, no_dev, config.dev());
             if print_config {
-                print!("{}", Config::effective(&options, load_prelude, verbose).to_toml());
+                print!("{}", Config::effective(&options, load_prelude, verbose, dev).to_toml());
                 return ExitCode::SUCCESS;
             }
             // The project is read after the settings, so that a problem with either is reported by itself. There is
@@ -293,7 +306,32 @@ fn main() -> ExitCode {
                     return ExitCode::from(EXIT_USAGE);
                 }
             };
+            // The lock is verified before anything else is read, and only when a project was named, since a run with
+            // none has no lock. A problem with the lock file itself is a problem with the invocation.
+            if project.is_some() && !dev {
+                if let Some(code) = verify_projects(&set) {
+                    return code;
+                }
+            }
             check(stdin, verbose, &options, &set, &files)
+        }
+    }
+}
+
+/// Verifies the projects against the lock file of the root project. The result is the exit code if there is a problem.
+fn verify_projects(set: &ProjectSet) -> Option<ExitCode> {
+    let verified = read_lock(&set.root().folder).and_then(|lock| verify_lock(set, lock.as_ref()));
+    match verified {
+        Ok(found) if found.is_empty() => None,
+        Ok(found) => {
+            for diagnostic in &found {
+                eprintln!("{}", diagnostic);
+            }
+            Some(ExitCode::from(EXIT_ERRORS))
+        }
+        Err(e) => {
+            eprintln!("{}", e);
+            Some(ExitCode::from(EXIT_USAGE))
         }
     }
 }

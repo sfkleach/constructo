@@ -134,8 +134,9 @@ checked with `sha256sum`.
 `constructo check --project=FOLDER` verifies the lock after the projects have been loaded, and before anything is
 type-checked. The problems are all reported, since each is an independent fact, and the exit code is 1.
 
-- A project or a file whose digest is not the one in the lock is an error. It names the project and the file, shows both
-  values, and is at the entry in the lock file:
+- A file whose digest is not the one in the lock is an error. It names the project and the file, shows both values, and
+  is at the entry in the lock file. The digest of a project is worked out from the digests of its files, so a project
+  that has changed shows as the files that changed, and is not reported again as a whole:
 
   ```text
   ERROR: Checksum mismatch for shapes/circle.types of project com.example.lib: the lock has
