@@ -420,15 +420,15 @@ N.B. We need a Q&A session to elaborate this step.
 
 ## Step 7: Spec files
 
-Add a description of the project and lock format files in
-`docs/specs/project-file-format.md` and `docs/specs/lock-file-format.md`
-respectively.
+The specs are written, ahead of the other steps, so that they say what the code is built to:
 
-The lock-file document should included a description of the checksum algorithms.
+- `docs/specs/project-file-format.md`, the project-file.
+- `docs/specs/lock-file-format.md`, the lock file and the checksum algorithms. It is the design for Step 4 and is marked
+  as not yet implemented. When Step 4 is done, the status note is removed.
+- `docs/specs/resolving-identifiers.md`, the resolution of names.
 
-The resolution algorithm should be documented in
-`docs/specs/resolving-identifiers.md`
-
+What is left for this step is to check each spec against the code and the examples once the other steps are done, and
+to update them for anything that Steps 5 and 6 add, such as the version of a project and the remote sources.
 
 ## Step 8: Consistency pass
 
