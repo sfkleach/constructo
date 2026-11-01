@@ -219,6 +219,7 @@ impl Project {
     /// Reads the text of a project-file. `file` is the name of the file in diagnostics, and a relative `source` of an
     /// import is relative to `folder`.
     fn parse_file(text: &str, file: &str, folder: &Path) -> Result<ParsedFile, ProjectError> {
+        let text = crate::lexer::strip_bom(text);
         let at = |offset: usize| Pos::at(text, offset);
         let invalid =
             |offset: usize, message: String| ProjectError::Invalid(Diagnostic::new(file, at(offset), message));
@@ -669,6 +670,15 @@ mod tests {
         for bad in ["", "a.b", "1a", "_a", "a-b", "a b", "a:", "é"] {
             assert!(check_group(bad).is_err(), "{}", bad);
         }
+    }
+
+    #[test]
+    fn a_byte_order_mark_is_not_a_part_of_the_project_file() {
+        let (name, _, _) = parse("\u{feff}[project]\nname = \"a.b\"\n").unwrap();
+        assert_eq!(name, "a.b");
+        // The positions are those of the text without the mark.
+        let (line, col, _) = error("\u{feff}[project]\nname = \"1st.x\"\n");
+        assert_eq!((line, col), (2, 8));
     }
 
     #[test]
