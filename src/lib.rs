@@ -258,13 +258,9 @@ fn check_with_layout(sources: &[Source], layout: Option<&Layout>, options: &Chec
     let resolution = resolve::resolve(sources, &mut parsed_sources, layout);
     // The names in a types file are unreliable if some could not be resolved, so the validity checks are skipped, as
     // they are for a syntax error. The names in the values are only looked at when the values are type-checked.
-    let is_values = |index: usize| matches!(parsed_sources[index], Parsed::Values(_));
     let mut unresolved = false;
     for (index, diagnostic) in &resolution.diagnostics {
-        if is_values(*index) && !options.type_check {
-            continue;
-        }
-        unresolved |= !is_values(*index);
+        unresolved = true;
         outcomes[*index] = Outcome::Failed;
         found.push((*index, diagnostic.clone()));
     }
@@ -292,7 +288,14 @@ fn check_with_layout(sources: &[Source], layout: Option<&Layout>, options: &Chec
     let type_checked = found.is_empty() && options.type_check;
     let mut consts = Vec::new();
     if type_checked {
-        consts = type_check_values(sources, &parsed_sources, options, &mut outcomes, &mut found);
+        consts = type_check_values(
+            sources,
+            &parsed_sources,
+            &resolution.value_errors,
+            options,
+            &mut outcomes,
+            &mut found,
+        );
     }
     let show = |index: usize, text: &str| resolution.show(index, text);
     for info in &mut consts {
@@ -341,6 +344,7 @@ fn types_after_values(sources: &[Source], parsed_sources: &[Parsed]) -> Vec<(usi
 fn type_check_values(
     sources: &[Source],
     parsed_sources: &[Parsed],
+    value_errors: &[(usize, usize, Diagnostic)],
     options: &CheckOptions,
     outcomes: &mut [Outcome],
     diagnostics: &mut Vec<(usize, Diagnostic)>,
@@ -389,9 +393,20 @@ fn type_check_values(
             Parsed::Types(_) => {}
             Parsed::Values(_) if stopped => outcomes[index] = Outcome::NotChecked,
             Parsed::Values(values) => {
-                for value in values {
-                    if let Err(e) = check_value(&env, options.widening, value) {
-                        diagnostics.push((index, Diagnostic::new(&sources[index].name, e.pos, e.message)));
+                for (position, value) in values.iter().enumerate() {
+                    // A value with a name that could not be resolved is reported for that, and is not type-checked.
+                    let unresolved = value_errors
+                        .iter()
+                        .find(|(source, at, _)| *source == index && *at == position)
+                        .map(|(_, _, diagnostic)| diagnostic.clone());
+                    let failure = match unresolved {
+                        Some(diagnostic) => Some(diagnostic),
+                        None => check_value(&env, options.widening, value)
+                            .err()
+                            .map(|e| Diagnostic::new(&sources[index].name, e.pos, e.message)),
+                    };
+                    if let Some(diagnostic) = failure {
+                        diagnostics.push((index, diagnostic));
                         outcomes[index] = Outcome::Failed;
                         if !options.continue_after_error {
                             stopped = true;
@@ -700,6 +715,54 @@ mod tests {
                 "ERROR: Unknown constructor W (f3, line 1, col 1)",
             ]
         );
+    }
+
+    #[test]
+    fn a_name_error_in_a_value_does_not_hide_the_type_errors_of_the_others() {
+        let texts = ["enum A = X(Nat);", "X(\"bad\"); missing::X; other::X; X(\"worse\")"];
+        let report = check_sources(&sources(&texts));
+        assert_eq!(
+            report.diagnostics.iter().map(|d| d.to_string()).collect::<Vec<_>>(),
+            vec!["ERROR: Expected Nat but found String (f1, line 1, col 3)"]
+        );
+        let options = CheckOptions {
+            continue_after_error: true,
+            ..CheckOptions::default()
+        };
+        let report = check_sources_with(&sources(&texts), &options);
+        assert_eq!(
+            report.diagnostics.iter().map(|d| d.to_string()).collect::<Vec<_>>(),
+            vec![
+                "ERROR: Expected Nat but found String (f1, line 1, col 3)",
+                "ERROR: Unknown group missing (f1, line 1, col 11)",
+                "ERROR: Unknown group other (f1, line 1, col 23)",
+                "ERROR: Expected Nat but found String (f1, line 1, col 35)",
+            ]
+        );
+    }
+
+    #[test]
+    fn name_errors_in_values_stop_at_the_first_unless_continuing() {
+        let texts = ["enum A = X;", "missing::X; other::X"];
+        let report = check_sources(&sources(&texts));
+        assert_eq!(
+            report.diagnostics.iter().map(|d| d.to_string()).collect::<Vec<_>>(),
+            vec!["ERROR: Unknown group missing (f1, line 1, col 1)"]
+        );
+        let options = CheckOptions {
+            continue_after_error: true,
+            ..CheckOptions::default()
+        };
+        assert_eq!(check_sources_with(&sources(&texts), &options).diagnostics.len(), 2);
+    }
+
+    #[test]
+    fn name_errors_in_values_are_ignored_without_the_type_check() {
+        let options = CheckOptions {
+            type_check: false,
+            ..CheckOptions::default()
+        };
+        assert!(check_sources_with(&sources(&["enum A = X;", "missing::X"]), &options).is_ok());
     }
 
     #[test]
