@@ -297,7 +297,8 @@ fn check_with_layout(sources: &[Source], layout: Option<&Layout>, options: &Chec
             &mut found,
         );
     }
-    let show = |index: usize, text: &str| resolution.show(index, text);
+    let file_names: Vec<&str> = sources.iter().map(|source| source.name.as_str()).collect();
+    let show = |index: usize, text: &str| resolution.show(index, text, &file_names);
     for info in &mut consts {
         info.name = show(info.source, &info.name);
         info.ty = show(info.source, &info.ty);

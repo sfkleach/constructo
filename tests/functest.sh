@@ -393,6 +393,18 @@ if [[ "$first" == "ERROR: Expected Float but found String (<stdin>, line 1, col 
 else
     fail "a type error before a name error is the one reported (got '$first')"
 fi
+# A file name that looks like a canonical name, as in `Shape@x.y.types`, is quoted as it is in a message.
+at_dir="$(mktemp -d)"
+printf 'enum Shape = Circle;\n' > "$at_dir/Shape@x.y.types"
+printf 'enum Shape = Square;\n' > "$at_dir/two.types"
+at_out="$("$CONSTRUCTO" check "$at_dir/Shape@x.y.types" "$at_dir/two.types" 2>&1 || true)"
+if [[ "$at_out" == *"first declared at $at_dir/Shape@x.y.types, line 1, col 6"* ]]; then
+    pass "a file name with an @ is not rewritten as a name"
+else
+    fail "a file name with an @ is not rewritten as a name (got '$at_out')"
+fi
+rm -f "$at_dir/Shape@x.y.types" "$at_dir/two.types"
+rmdir "$at_dir"
 # The prelude consts are ordinary consts, so they are only known when the prelude is loaded.
 stdin_exit "null is accepted with the prelude" 0 'null'
 stdin_exit "true and false are accepted with the prelude" 0 '[true, false]; Some(null)'

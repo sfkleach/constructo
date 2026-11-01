@@ -368,7 +368,31 @@ impl<'a> Resolver<'a> {
 impl Resolution {
     /// Rewrites the canonical names in a message as they would be written in the file with the index. A name that can
     /// be written bare there is shown bare, and any other is shown in full, as `com.example.shapes::Shape`.
-    pub fn show(&self, file: usize, text: &str) -> String {
+    ///
+    /// The names of the files in `files` are left as they are. A message can quote one, as in `first declared at
+    /// FILE, line 1`, and a file name with an `@` in it must not be taken for a canonical name.
+    pub fn show(&self, file: usize, text: &str, files: &[&str]) -> String {
+        let mut out = String::new();
+        let mut rest = text;
+        loop {
+            // The earliest occurrence of a file name, and the longest if several start at the same place.
+            let next = files
+                .iter()
+                .filter(|name| name.contains('@'))
+                .filter_map(|name| rest.find(name).map(|at| (at, name)))
+                .min_by_key(|(at, name)| (*at, std::cmp::Reverse(name.len())));
+            let Some((at, name)) = next else {
+                out.push_str(&self.rewrite(file, rest));
+                return out;
+            };
+            out.push_str(&self.rewrite(file, &rest[..at]));
+            out.push_str(name);
+            rest = &rest[at + name.len()..];
+        }
+    }
+
+    /// Rewrites every canonical name in the text.
+    fn rewrite(&self, file: usize, text: &str) -> String {
         if !text.contains('@') {
             return text.to_string();
         }
@@ -814,8 +838,13 @@ mod tests {
         };
         // Text without a canonical name is untouched.
         assert_eq!(
-            resolution.show(0, "no names here, not even a.b or x@"),
+            resolution.show(0, "no names here, not even a.b or x@", &[]),
             "no names here, not even a.b or x@"
+        );
+        // A file name with an `@` is quoted as it is, even if it has the form of a canonical name.
+        assert_eq!(
+            resolution.show(0, "first declared at Shape@x.y.types, line 1", &["Shape@x.y.types"]),
+            "first declared at Shape@x.y.types, line 1"
         );
         assert!(report.is_ok());
     }
