@@ -157,6 +157,24 @@ It means "I am developing, trust what is on disk". It is a setting like the othe
 `[check]` table of a [configuration file](config-file.md), with the negative form `--no-dev`, and it is shown by
 `--print-config`.
 
+## Verbose output
+
+In verbose mode `constructo check` says, on the line of each project that it loaded, whether the project was checked
+against the lock, so that a run with `--dev` is not mistaken for a verified one:
+
+```text
+OK: ../lib (project example.lib, verified)
+OK: . (project example.app)
+OK: checked 2 file(s) in 2 project(s)
+```
+
+- An imported project is `verified`, or `unverified` under `--dev`. The root project is not in the lock, so its line says
+  neither, and the built-in projects are not reported.
+- The count at the end is of the projects as well as the files. The projects counted are the root and the imported ones.
+  A run with no `--project` has no project to count, and the count is of files only.
+- A diagnostic does not say which project it is from. The path of the file shows where it came from, and the project line
+  connects the folder to the name.
+
 ## Updating the lock
 
 `constructo project update [FOLDER]` writes the lock. `FOLDER` defaults to the current folder.
