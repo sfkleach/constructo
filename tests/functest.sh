@@ -405,6 +405,43 @@ else
 fi
 rm -f "$at_dir/Shape@x.y.types" "$at_dir/two.types"
 rmdir "$at_dir"
+# The files of a project must be inside its folder, once links are followed. A link to another file of the project is
+# fine, and a link out of it is refused, for a types file and for the project-file.
+links="$(mktemp -d)"
+mkdir "$links/outside" "$links/inside" "$links/inside/sub" "$links/ok" "$links/ok/sub" "$links/pf"
+printf 'enum Shape = Circle;\n' > "$links/outside/shape.types"
+printf '[project]\nname = "a.b"\n' > "$links/outside/constructo.toml"
+printf '[project]\nname = "a.b"\n' > "$links/inside/constructo.toml"
+ln -s ../../outside/shape.types "$links/inside/sub/shape.types"
+printf '[project]\nname = "a.b"\n' > "$links/ok/constructo.toml"
+printf 'enum Shape = Circle;\n' > "$links/ok/real.types"
+ln -s ../real.types "$links/ok/sub/alias.types"
+ln -s ../outside/constructo.toml "$links/pf/constructo.toml"
+out="$("$CONSTRUCTO" check --project="$links/inside" 2>&1 || true)"
+if [[ "$out" == "ERROR: The file $links/inside/sub/shape.types is a link to "*"/outside/shape.types, which is outside the project folder "* ]]; then
+    pass "a link out of the project is refused"
+else
+    fail "a link out of the project is refused (got '$out')"
+fi
+expect_exit "a link out of the project is exit 2" 2 check --project="$links/inside"
+out="$("$CONSTRUCTO" check --project="$links/pf" 2>&1 || true)"
+if [[ "$out" == "ERROR: The file $links/pf/constructo.toml is a link to "*"/outside/constructo.toml, which is outside the project folder "* ]]; then
+    pass "a project-file that is a link out of the project is refused"
+else
+    fail "a project-file that is a link out of the project is refused (got '$out')"
+fi
+# The alias is a second file with the same declarations, so this is a duplicate and not a refusal of the link.
+out="$("$CONSTRUCTO" check --project="$links/ok" 2>&1 || true)"
+if [[ "$out" == *"Duplicate type Shape"* && "$out" != *"outside the project"* ]]; then
+    pass "a link to another file of the project is accepted"
+else
+    fail "a link to another file of the project is accepted (got '$out')"
+fi
+rm -f "$links/inside/sub/shape.types" "$links/inside/constructo.toml" "$links/outside/shape.types"
+rm -f "$links/outside/constructo.toml" "$links/ok/sub/alias.types" "$links/ok/real.types" "$links/ok/constructo.toml"
+rm -f "$links/pf/constructo.toml"
+rmdir "$links/inside/sub" "$links/inside" "$links/outside" "$links/ok/sub" "$links/ok" "$links/pf" "$links"
+
 # A byte order mark at the start of a file is removed, as rustc does, so an editor that adds one does no harm.
 bom_dir="$(mktemp -d)"
 printf '\xEF\xBB\xBFenum Shape = Circle { radius: Float };\n' > "$bom_dir/shape.types"
