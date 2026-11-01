@@ -10,6 +10,10 @@
 set -euo pipefail
 
 CONSTRUCTO="${1:?usage: functest.sh <binary> [mode]}"
+# Some tests change directory, so a relative path to the binary is made absolute. A bare command name is left alone.
+if [[ "$CONSTRUCTO" == */* ]]; then
+    CONSTRUCTO="$(cd "$(dirname "$CONSTRUCTO")" && pwd)/$(basename "$CONSTRUCTO")"
+fi
 EXAMPLES="$(dirname "$0")/../syntax/examples/types"
 VALUES="$(dirname "$0")/../syntax/examples/values"
 
@@ -865,7 +869,7 @@ rm -f "$nested/lib/constructo.toml" "$nested/lib/lib.types" "$nested/app/constru
 rmdir "$nested/lib" "$nested/app" "$nested"
 # The built-in project is never reported, and its file is shown by its URI.
 listing="$("$CONSTRUCTO" check -v --project="$PRELUDES/explicit-local/app" 2>/dev/null)"
-if [[ "$listing" != *"constructo"* && "$listing" == *"(project example.app)"* ]]; then
+if [[ "$listing" != *"constructo.prelude"* && "$listing" != *"constructo:/"* && "$listing" == *"(project example.app)"* ]]; then
     pass "prelude: the built-in project is not reported"
 else
     fail "prelude: the built-in project is not reported (got '$listing')"
