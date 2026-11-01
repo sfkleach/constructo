@@ -101,9 +101,9 @@ impl Lock {
         self.projects.iter().find(|project| project.name == name)
     }
 
-    /// Reads the text of a lock file. `file` is the name of the file in diagnostics. The file is strict: an unknown key,
-    /// a value of the wrong type, a digest that is not well-formed, a duplicate project and a project whose digest is not
-    /// that of its files are all errors, with the position of the value.
+    /// Reads the text of a lock file. `file` is the name of the file in diagnostics. The file is strict: an unknown
+    /// key, a value of the wrong type, a digest that is not well-formed, a duplicate project and a project whose digest
+    /// is not that of its files are all errors, with the position of the value.
     pub fn parse(text: &str, file: &str) -> Result<Lock, Diagnostic> {
         let text = crate::lexer::strip_bom(text);
         let at = |offset: usize| Pos::at(text, offset);
@@ -213,9 +213,9 @@ impl Lock {
     }
 }
 
-/// Checks that a path is one that can be a path inside a project: relative, written with `/` and with no empty part, `.`
-/// or `..`. The reason is returned if it is not valid. It could not be a file of the project otherwise, and a path that
-/// leaves the folder would let a lock file name a file elsewhere.
+/// Checks that a path is one that can be a path inside a project: relative, written with `/` and with no empty part,
+/// `.` or `..`. The reason is returned if it is not valid. It could not be a file of the project otherwise, and a path
+/// that leaves the folder would let a lock file name a file elsewhere.
 fn check_path(path: &str) -> Result<(), String> {
     if path.is_empty() {
         return Err("it is empty".to_string());
@@ -384,8 +384,12 @@ digest = \"sha256:753517eedcd17f9bae3699b7e6b2a1be5f91f4e382a3d80de5f0f59ebdc5b1
         let (line, col, message) = error(text);
         assert_eq!((line, col), (5, 10));
         assert!(message.starts_with("Invalid digest \"sha256:abc\""), "{}", message);
-        let text = "version = 1\n\n[[project]]\nname = \"a.b\"\ndigest = \"sha256:753517eedcd17f9bae3699b7e6b2a1be5f91f4e382a3d80de5f0f59ebdc5b163\"\n\n[project.files]\n\"constructo.toml\" = \"md5:00\"\n";
-        let (line, col, message) = error(text);
+        let digest = "sha256:753517eedcd17f9bae3699b7e6b2a1be5f91f4e382a3d80de5f0f59ebdc5b163";
+        let text = format!(
+            "version = 1\n\n[[project]]\nname = \"a.b\"\ndigest = \"{}\"\n\n{}",
+            digest, "[project.files]\n\"constructo.toml\" = \"md5:00\"\n"
+        );
+        let (line, col, message) = error(&text);
         assert_eq!((line, col), (8, 21));
         assert!(message.starts_with("Invalid digest \"md5:00\""), "{}", message);
     }
