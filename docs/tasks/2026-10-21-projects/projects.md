@@ -442,6 +442,20 @@ repo = ...
 builtin = ...
 ```
 
+### Links out of a fetched project
+
+For a project on disk, a symbolic link to a file outside the project is allowed.
+The file is identified by its path from the project folder, which has no `..`,
+and the lock file digests its content whatever the link leads to, so a change
+is caught. A shared types file can be linked into several projects.
+
+This does not carry over to a project that is fetched. In a clone, a link that
+leaves the clone has a target that is missing or is not the author's, and in an
+untrusted repository it could make the tool read a file of the user's, such as
+`~/.ssh/config`, whose content a message could quote. So when a project is
+fetched, a file whose canonical path is outside the clone, and the
+project-file if it is one, is an error that names the file and where it leads.
+
 ## Step 7: Spec files
 
 The specs are written, ahead of the other steps, so that they say what the code is built to:
