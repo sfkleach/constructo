@@ -11,8 +11,8 @@ pub const ALGORITHM: &str = "sha256";
 /// The bytes of a byte order mark in UTF-8.
 const BYTE_ORDER_MARK: [u8; 3] = [0xEF, 0xBB, 0xBF];
 
-/// The bytes of a file as they are digested: a byte order mark at the start is removed, and each CRLF is replaced with a
-/// LF, in one pass. A lone CR is left alone. So the same file gives the same digest whether it was saved with LF or
+/// The bytes of a file as they are digested: a byte order mark at the start is removed, and each CRLF is replaced with
+/// a LF, in one pass. A lone CR is left alone. So the same file gives the same digest whether it was saved with LF or
 /// CRLF line endings, and whether or not an editor added a byte order mark.
 pub fn normalise(bytes: &[u8]) -> Vec<u8> {
     let bytes = bytes.strip_prefix(&BYTE_ORDER_MARK).unwrap_or(bytes);
@@ -44,9 +44,9 @@ pub fn file_digest(bytes: &[u8]) -> String {
     digest(&normalise(bytes))
 }
 
-/// The digest of a project, from its files as pairs of a path inside the project, written with `/`, and the digest of the
-/// file. The pairs may be in any order. The digest is that of a text with a line `PATH DIGEST` for each file, in order of
-/// the bytes of the paths, each line ended by a LF.
+/// The digest of a project, from its files as pairs of a path inside the project, written with `/`, and the digest of
+/// the file. The pairs may be in any order. The digest is that of a text with a line `PATH DIGEST` for each file, in
+/// order of the bytes of the paths, each line ended by a LF.
 pub fn project_digest(files: &[(String, String)]) -> String {
     let mut sorted: Vec<&(String, String)> = files.iter().collect();
     sorted.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
