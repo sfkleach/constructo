@@ -110,6 +110,9 @@ Following the style in https://keepachangelog.com/en/1.0.0/
   type, so `Users[A, B]` and `Users[]` are syntax errors, and the type parameters of a generic enum, as in
   `enum JoinList<T> = Items[T], Join[JoinList<T>];`, are unified across the elements. The default of an array is the
   empty array. The grammar files, the diagrams and `syntax/grammar.md` show `ArrayBody` and the array form of `Tagged`.
+- A UTF-8 byte order mark at the start of a types file, a values file, standard input, a configuration file or a
+  project-file is removed, as `rustc` does for a source file, so that an editor that adds one does no harm. The first
+  character that is left is at line 1, col 1. Before this it was a syntax error in a types or values file.
 
 ### Changed
 

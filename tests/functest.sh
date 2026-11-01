@@ -405,6 +405,16 @@ else
 fi
 rm -f "$at_dir/Shape@x.y.types" "$at_dir/two.types"
 rmdir "$at_dir"
+# A byte order mark at the start of a file is removed, as rustc does, so an editor that adds one does no harm.
+bom_dir="$(mktemp -d)"
+printf '\xEF\xBB\xBFenum Shape = Circle { radius: Float };\n' > "$bom_dir/shape.types"
+printf '\xEF\xBB\xBFCircle { radius: 1.0 }\n' > "$bom_dir/circle.values"
+printf '\xEF\xBB\xBF[project]\nname = "a.b"\n' > "$bom_dir/constructo.toml"
+expect_exit "a byte order mark is removed from a types file and a values file" 0 check \
+    "$bom_dir/shape.types" "$bom_dir/circle.values"
+expect_exit "a byte order mark is removed from a project file" 0 check --project="$bom_dir"
+rm -f "$bom_dir/shape.types" "$bom_dir/circle.values" "$bom_dir/constructo.toml"
+rmdir "$bom_dir"
 # The prelude consts are ordinary consts, so they are only known when the prelude is loaded.
 stdin_exit "null is accepted with the prelude" 0 'null'
 stdin_exit "true and false are accepted with the prelude" 0 '[true, false]; Some(null)'

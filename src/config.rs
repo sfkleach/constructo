@@ -50,6 +50,7 @@ pub struct CheckSettings {
 impl Config {
     /// Reads the settings from the text of a configuration file. `name` is the name of the file in diagnostics.
     pub fn parse(text: &str, name: &str) -> Result<Config, Diagnostic> {
+        let text = crate::lexer::strip_bom(text);
         toml::from_str(text).map_err(|e| {
             let offset = e.span().map_or(0, |span| span.start);
             Diagnostic::new(name, Pos::at(text, offset), e.message())
@@ -200,6 +201,12 @@ mod tests {
     fn error(text: &str) -> (u32, u32, String) {
         let d = Config::parse(text, "c.toml").unwrap_err();
         (d.pos.line, d.pos.col, d.message)
+    }
+
+    #[test]
+    fn a_byte_order_mark_is_not_a_part_of_the_file() {
+        let with = Config::parse("\u{feff}[check]\nallow-refs = true\n", "c.toml").unwrap();
+        assert_eq!(with, Config::parse("[check]\nallow-refs = true\n", "c.toml").unwrap());
     }
 
     #[test]
