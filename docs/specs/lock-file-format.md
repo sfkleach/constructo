@@ -174,4 +174,4 @@ The difference can be reviewed from the output of the command, or with `git diff
 
 - [The project-file](project-file-format.md), which says how a project's files are found.
 - [Resolving identifiers](resolving-identifiers.md).
-- Decisions 24 to 26 in `docs/decisions/`. The decisions for the lock file are written with its implementation.
+- Decisions 24 to 28 in `docs/decisions/`, of which 27 and 28 are about the lock file and `--dev`.
