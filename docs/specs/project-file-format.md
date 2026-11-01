@@ -85,10 +85,6 @@ anything that starts with `constructo.`.
 - `**` does not enter a hidden folder, whose name starts with `.`, nor a subfolder that has a `constructo.toml` of its
   own, which is another project. The folder of the project itself is not skipped for either reason.
 - A symbolic link to a folder is not followed, so that a loop cannot make the walk endless.
-- Every file of a project, and its `constructo.toml`, must be inside the project: its canonical path, which has no links
-  or `..`, must lie in the canonical path of the project folder. A link to another file of the project is fine, and a
-  link to a file outside it is an error that names the file and where it leads, with exit code 2. A file is a part of
-  the project, and is digested for the lock file, only if the folder really contains it.
 - The files of a project are sorted by path.
 - A file that matches but holds data-values, such as a file `notes.types` that starts with `42;`, is an error that names
   the file. Other kinds of file in the folder are ignored.
