@@ -133,6 +133,105 @@ fn compare(lock_name: &str, locked: &LockedProject, actual: &LockedProject, foun
     }
 }
 
+/// The lock that describes the projects that are loaded: an entry for each one other than the root project and the
+/// built-in ones.
+pub fn lock_for(set: &ProjectSet) -> Result<Lock, ProjectError> {
+    let root = set.projects.len() - 1;
+    let mut entries = Vec::new();
+    for (index, project) in set.projects.iter().enumerate() {
+        if index != root && !project.builtin {
+            entries.push(project.lock_entry()?);
+        }
+    }
+    Ok(Lock::new(entries))
+}
+
+/// One line for each project or file that differs between the old lock, which is `None` if there was none, and the new
+/// one: added, changed or removed, with the old and the new digest where there are both. A project that is added or
+/// removed is one line, since its files are its own business. There are no lines if the locks are the same.
+pub fn describe_changes(old: Option<&Lock>, new: &Lock) -> Vec<String> {
+    let mut lines = Vec::new();
+    for project in &new.projects {
+        let Some(before) = old.and_then(|lock| lock.get(&project.name)) else {
+            lines.push(format!(
+                "Added the project {} ({})",
+                project.name, project.digest.digest
+            ));
+            continue;
+        };
+        for (path, now) in &project.files {
+            match before.files.get(path) {
+                None => lines.push(format!(
+                    "Added the file {} of project {} ({})",
+                    path, project.name, now.digest
+                )),
+                Some(was) if was.digest != now.digest => lines.push(format!(
+                    "Changed the file {} of project {} ({} to {})",
+                    path, project.name, was.digest, now.digest
+                )),
+                Some(_) => {}
+            }
+        }
+        for (path, was) in &before.files {
+            if !project.files.contains_key(path) {
+                lines.push(format!(
+                    "Removed the file {} of project {} ({})",
+                    path, project.name, was.digest
+                ));
+            }
+        }
+    }
+    if let Some(old) = old {
+        for project in &old.projects {
+            if new.get(&project.name).is_none() {
+                lines.push(format!(
+                    "Removed the project {} ({})",
+                    project.name, project.digest.digest
+                ));
+            }
+        }
+    }
+    lines
+}
+
+/// Writes the lock file for the project in the folder, and returns the lines that say what changed. The project is
+/// loaded as `check` loads it, but nothing is type-checked. An old lock file that cannot be read or does not parse is
+/// replaced, since the point is to accept what is on disk, and the first line says so. If there is nothing to record
+/// there is no lock file, and an old one is removed. A file that is already right is not written again.
+pub fn update_lock(folder: &Path) -> Result<Vec<String>, ProjectError> {
+    // The prelude is built in and never recorded, so whether it is loaded makes no difference.
+    let set = ProjectSet::load(folder, true)?;
+    let new = lock_for(&set)?;
+    let path = folder.join(LOCK_FILE);
+    let mut lines = Vec::new();
+    let old = match read_lock(folder) {
+        Ok(old) => old,
+        Err(e) => {
+            let reason = e.to_string();
+            let reason = reason.strip_prefix("ERROR: ").unwrap_or(&reason);
+            lines.push(format!("Replaced the {} that could not be used: {}", LOCK_FILE, reason));
+            None
+        }
+    };
+    lines.extend(describe_changes(old.as_ref(), &new));
+    let cannot =
+        |action: &str, e: std::io::Error| ProjectError::Cannot(format!("Cannot {} {}: {}", action, path.display(), e));
+    if new.projects.is_empty() {
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == ErrorKind::NotFound => {}
+            Err(e) => return Err(cannot("remove", e)),
+        }
+    } else {
+        let text = new.render();
+        let same = std::fs::read_to_string(&path).map(|now| now == text).unwrap_or(false);
+        if !same {
+            std::fs::write(&path, text).map_err(|e| cannot("write", e))?;
+        }
+    }
+    Ok(lines)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -349,5 +448,88 @@ mod tests {
             ProjectError::Invalid(d) => assert!(d.message.starts_with("Unsupported lock file version 2")),
             other => panic!("not a diagnostic: {}", other),
         }
+    }
+
+    #[test]
+    fn update_makes_a_lock_that_check_accepts_and_a_second_update_says_nothing() {
+        let (app, _lib) = pair("update-make");
+        let lines = update_lock(&app.folder).unwrap();
+        assert_eq!(lines.len(), 1);
+        assert!(
+            lines[0].starts_with("Added the project example.lib (sha256:"),
+            "{}",
+            lines[0]
+        );
+        let set = load(&app);
+        let lock = read_lock(&app.folder).unwrap();
+        assert!(verify_lock(&set, lock.as_ref()).unwrap().is_empty());
+        assert!(update_lock(&app.folder).unwrap().is_empty());
+        std::fs::remove_file(app.folder.join(LOCK_FILE)).unwrap();
+    }
+
+    #[test]
+    fn update_describes_a_changed_an_added_and_a_removed_file() {
+        let (app, lib) = pair("update-changes");
+        update_lock(&app.folder).unwrap();
+        std::fs::write(lib.folder.join("shapes.types"), b"enum Shape = Square;\n").unwrap();
+        std::fs::write(lib.folder.join("more.types"), b"enum More = A;\n").unwrap();
+        let lines = update_lock(&app.folder).unwrap();
+        assert_eq!(lines.len(), 2, "{:?}", lines);
+        assert!(lines[0].starts_with("Added the file more.types of project example.lib (sha256:"));
+        assert!(lines[1].starts_with("Changed the file shapes.types of project example.lib (sha256:"));
+        assert!(lines[1].contains(" to sha256:"));
+        std::fs::remove_file(lib.folder.join("more.types")).unwrap();
+        let lines = update_lock(&app.folder).unwrap();
+        assert_eq!(lines.len(), 1, "{:?}", lines);
+        assert!(lines[0].starts_with("Removed the file more.types of project example.lib"));
+        std::fs::remove_file(app.folder.join(LOCK_FILE)).unwrap();
+    }
+
+    #[test]
+    fn update_replaces_a_lock_that_cannot_be_used() {
+        let (app, _lib) = pair("update-broken");
+        std::fs::write(app.folder.join(LOCK_FILE), "this is not a lock = [\n").unwrap();
+        let lines = update_lock(&app.folder).unwrap();
+        assert!(
+            lines[0].starts_with("Replaced the constructo.lock that could not be used: "),
+            "{:?}",
+            lines
+        );
+        assert!(lines[1].starts_with("Added the project example.lib"));
+        let lock = read_lock(&app.folder).unwrap();
+        assert!(verify_lock(&load(&app), lock.as_ref()).unwrap().is_empty());
+        std::fs::remove_file(app.folder.join(LOCK_FILE)).unwrap();
+    }
+
+    #[test]
+    fn update_removes_a_lock_when_there_is_nothing_to_record() {
+        let alone = OnDisk::new(
+            "update-alone",
+            &[
+                ("constructo.toml", b"[project]\nname = \"example.alone\"\n"),
+                (LOCK_FILE, b"version = 1\n"),
+            ],
+        );
+        assert!(update_lock(&alone.folder).unwrap().is_empty());
+        assert!(!alone.folder.join(LOCK_FILE).exists());
+        // Nor is one made.
+        assert!(update_lock(&alone.folder).unwrap().is_empty());
+        assert!(!alone.folder.join(LOCK_FILE).exists());
+    }
+
+    #[test]
+    fn update_notices_a_removed_project() {
+        let (app, lib) = pair("update-removed");
+        update_lock(&app.folder).unwrap();
+        std::fs::write(
+            app.folder.join("constructo.toml"),
+            "[project]\nname = \"example.app\"\n",
+        )
+        .unwrap();
+        let lines = update_lock(&app.folder).unwrap();
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].starts_with("Removed the project example.lib (sha256:"));
+        assert!(!app.folder.join(LOCK_FILE).exists());
+        drop(lib);
     }
 }

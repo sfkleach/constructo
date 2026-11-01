@@ -1,6 +1,6 @@
 use clap::{ArgAction, ArgMatches, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use constructo::diagnostics::{Diagnostic, Pos};
-use constructo::verify::{read_lock, verify_lock};
+use constructo::verify::{read_lock, update_lock, verify_lock};
 use constructo::{
     check_in_projects, source_kind, syntax_error, CheckOptions, Config, Experimental, InputFile, Layout, Outcome,
     Project, ProjectInfo, ProjectSet, Source, SourceKind,
@@ -83,8 +83,23 @@ fn setting(on: bool, off: bool, default: bool) -> bool {
     }
 }
 
+/// The subcommands of `constructo project`.
+#[derive(Subcommand, Debug)]
+enum ProjectCommand {
+    /// Write constructo.lock, which records the checksums of the projects that the project imports, and say what
+    /// changed
+    Update {
+        /// The folder of the project [default: the current folder]
+        folder: Option<PathBuf>,
+    },
+}
+
 #[derive(Subcommand, Debug)]
 enum Command {
+    /// Work with a project
+    #[command(subcommand)]
+    Project(ProjectCommand),
+
     /// Check the syntax and type-correctness of Constructo files
     #[command(after_help = "\
 Settings can also be put in a TOML file that is named with --config=PATH. An option on the command line overrides the \
@@ -248,6 +263,21 @@ fn main() -> ExitCode {
         Err(code) => return code,
     };
     match cli.command {
+        Command::Project(ProjectCommand::Update { folder }) => {
+            let folder = folder.unwrap_or_else(|| PathBuf::from("."));
+            match update_lock(&folder) {
+                Ok(lines) => {
+                    for line in lines {
+                        println!("{}", line);
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("{}", e);
+                    ExitCode::from(EXIT_USAGE)
+                }
+            }
+        }
         Command::Check {
             stdin,
             prelude,

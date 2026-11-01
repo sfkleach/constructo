@@ -1,9 +1,5 @@
 # The lock file
 
-> **Status:** this is the design for Step 4 of the projects task (`docs/tasks/2026-10-21-projects/projects.md`). It is
-> not implemented yet, so `constructo check` does not read a lock file and there is no `constructo project update`.
-> This document is the specification that the implementation is built to, and it is changed with it.
-
 A project that imports other projects records a digest of each of them in a lock file, so that a dependency cannot
 change without being noticed. The lock file is `constructo.lock`. It sits next to `constructo.toml` in the root of the
 project that `constructo check --project=FOLDER` is run on. It is written by `constructo project update` and by nothing
