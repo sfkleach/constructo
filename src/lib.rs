@@ -11,8 +11,11 @@ pub mod lock;
 pub mod parser;
 pub mod project;
 pub mod resolve;
+#[cfg(test)]
+mod test_support;
 pub mod typecheck;
 pub mod validate;
+pub mod verify;
 
 use ast::{ConstDecl, TypesFile};
 use diagnostics::{Diagnostic, Pos};

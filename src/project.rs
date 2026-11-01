@@ -95,8 +95,10 @@ pub struct Import {
     pub folder: PathBuf,
     /// The index of the imported project in the `ProjectSet`. This is `None` until the set has been loaded.
     pub target: Option<usize>,
-    name_pos: Pos,
-    source_pos: Pos,
+    /// Where the `project-name` of the import is written in the project-file of the importing project.
+    pub name_pos: Pos,
+    /// Where the `source` of the import is written there.
+    pub source_pos: Pos,
 }
 
 /// A types file of a project. A file of a built-in project has its text with it, since it is not on disk.
@@ -252,7 +254,7 @@ impl Project {
     }
 
     /// The name of the project-file in diagnostics.
-    fn project_file(&self) -> String {
+    pub fn project_file(&self) -> String {
         self.folder.join(PROJECT_FILE).display().to_string()
     }
 
@@ -639,6 +641,7 @@ fn walk(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::OnDisk;
 
     fn parse(text: &str) -> Result<(String, Vec<Pattern>, Vec<Pattern>), ProjectError> {
         let parsed = Project::parse_file(text, "constructo.toml", Path::new("here"))?;
@@ -804,45 +807,6 @@ mod tests {
         }
         // A star does not cross a folder.
         assert!(!Pattern::new("*.types").unwrap().matches_with("x/a.types", MATCH));
-    }
-
-    /// A project on disk, in a folder of its own under the temporary folder. The files that are made are the only
-    /// things removed when it is dropped, and then the folders, which must be empty.
-    struct OnDisk {
-        folder: PathBuf,
-        files: Vec<PathBuf>,
-    }
-
-    impl OnDisk {
-        fn new(test: &str, files: &[(&str, &[u8])]) -> OnDisk {
-            let folder = std::env::temp_dir().join(format!("constructo-{}-{}", std::process::id(), test));
-            let mut made = Vec::new();
-            for (relative, bytes) in files {
-                let path = folder.join(relative);
-                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-                std::fs::write(&path, bytes).unwrap();
-                made.push(path);
-            }
-            OnDisk { folder, files: made }
-        }
-    }
-
-    impl Drop for OnDisk {
-        fn drop(&mut self) {
-            let mut folders = std::collections::BTreeSet::new();
-            for file in &self.files {
-                let _ = std::fs::remove_file(file);
-                let mut parent = file.parent();
-                while let Some(folder) = parent.filter(|folder| folder.starts_with(&self.folder)) {
-                    folders.insert(folder.to_path_buf());
-                    parent = folder.parent();
-                }
-            }
-            // The deepest first, so that each folder is empty when it is removed.
-            for folder in folders.iter().rev() {
-                let _ = std::fs::remove_dir(folder);
-            }
-        }
     }
 
     #[test]
