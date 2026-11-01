@@ -51,9 +51,17 @@ digest = "sha256:753517eedcd17f9bae3699b7e6b2a1be5f91f4e382a3d80de5f0f59ebdc5b16
 | `digest`             | string | The digest of the project, as below.                                       |
 | `[project.files]`    | table  | The digest of each file, keyed by its path inside the project, with `/`.   |
 
-The file is strict. An unknown key, a value of the wrong type, a digest that is not well-formed, a missing `name` or
-`digest`, and a duplicate project or file are errors, with a line and column in `constructo.lock`. The exit code is 2,
-as for the project-file.
+The file is strict. These are errors, with a line and column in `constructo.lock`, and the exit code is 2, as for the
+project-file:
+
+- an unknown key, a missing `version`, `name`, `digest` or `files`, and a value of the wrong type;
+- a `version` other than 1;
+- a project name that does not follow the rule for a project name, and a project that is in the file twice;
+- a digest that is not well-formed: `sha256:` and 64 lowercase hexadecimal digits;
+- a file path that is empty, has a `\`, or is not relative to the project, with an empty part, `.` or `..`;
+- a project `digest` that is not the digest of the files that are listed for it. It is worked out from them, so only
+  an edit by hand can make it differ, and the message says the lock file was edited. Without this check an edit would
+  show up as a mismatch for a file that has not changed.
 
 ## The digests
 

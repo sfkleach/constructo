@@ -535,7 +535,7 @@ fn check_group(group: &str) -> Result<(), String> {
 /// Checks that the name is two or more segments separated by dots, where a segment starts with a letter and has
 /// letters, digits and `_`, of either case. A name has to be written in source text, so `-` is not allowed, and the
 /// dot tells a project name from a group name, which has none. The reason is returned if it is not valid.
-fn check_name(name: &str) -> Result<(), String> {
+pub(crate) fn check_name(name: &str) -> Result<(), String> {
     if !name.contains('.') {
         return Err("a project name needs a dot, as in \"com.example\", to tell it from a group name".to_string());
     }
