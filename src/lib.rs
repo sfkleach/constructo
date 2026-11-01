@@ -7,6 +7,7 @@ pub mod config;
 pub mod diagnostics;
 pub mod digest;
 pub mod lexer;
+pub mod lock;
 pub mod parser;
 pub mod project;
 pub mod resolve;
