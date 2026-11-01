@@ -822,6 +822,7 @@ done
 # Names: each project has its own names, which are written with a group or the full name of the project.
 NAMES="$PROJECTS/valid-names"
 expect_exit "project/valid-names/qualified" 0 check --project="$NAMES/qualified/app" "$NAMES/qualified/app/values.values"
+expect_exit "project/valid-names/keyword-parts" 0 check --project="$NAMES/keyword-parts/app" "$NAMES/keyword-parts/app/values.values"
 for case in bundle same-names group; do
     expect_exit "project/valid-names/$case" 0 check --project="$NAMES/$case/app"
 done

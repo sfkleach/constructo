@@ -78,12 +78,14 @@ pub fn parse_values_with(text: &str, experimental: Experimental) -> Result<Vec<V
 
 /// Classifies a file by its first token and parses it with the matching grammar.
 ///
-/// A types file always starts with `enum` or `const` and a values file never does. A file with no tokens is treated as a types
-/// file, which is how it was handled before values files were supported. The kind is returned even when parsing fails.
+/// A types file always starts with `enum` or `const` and a values file starts with one only as a part of a qualifier,
+/// as in `const::Circle`. A file with no tokens is treated as a types file, which is how it was handled before values
+/// files were supported. The kind is returned even when parsing fails.
 pub fn parse_file(text: &str, experimental: Experimental) -> (SourceKind, Result<Parsed>) {
     let mut parser = Parser::new(text, experimental);
     let kind = match parser.peek() {
-        Tok::Enum | Tok::Const | Tok::Eof => SourceKind::Types,
+        Tok::Enum | Tok::Const if !parser.at_qualifier() => SourceKind::Types,
+        Tok::Eof => SourceKind::Types,
         _ => SourceKind::Values,
     };
     let parsed = match kind {
@@ -210,12 +212,23 @@ impl Parser {
         }
     }
 
+    /// The text of a token that can be a part of a qualifier. The keywords are allowed, so `acme.const::X` is a
+    /// qualified name. A keyword is a part only if a dot or `::` follows it, which the callers check.
+    fn qualifier_part(tok: &Tok) -> Option<&str> {
+        match tok {
+            Tok::Name(part) | Tok::TypeName(part) => Some(part),
+            Tok::Enum => Some("enum"),
+            Tok::Const => Some("const"),
+            _ => None,
+        }
+    }
+
     /// Whether the tokens from the current one are a qualifier: names separated by dots and ending in `::`, as in
-    /// `bundle::` or `acme.shapes::`.
+    /// `bundle::` or `acme.shapes::`. The parts may be keywords.
     fn at_qualifier(&self) -> bool {
         let mut i = self.index;
         loop {
-            if !matches!(self.tokens[i].tok, Tok::Name(_) | Tok::TypeName(_)) {
+            if Self::qualifier_part(&self.tokens[i].tok).is_none() {
                 return false;
             }
             // The final token is `Eof`, which is neither a name nor a dot, so this never runs off the end.
@@ -231,9 +244,9 @@ impl Parser {
     fn qualifier(&mut self) -> String {
         let mut text = String::new();
         loop {
-            match self.peek() {
-                Tok::Name(part) | Tok::TypeName(part) => text.push_str(part),
-                _ => unreachable!("at_qualifier has checked the tokens"),
+            match Self::qualifier_part(self.peek()) {
+                Some(part) => text.push_str(part),
+                None => unreachable!("at_qualifier has checked the tokens"),
             }
             self.bump();
             if self.peek() == &Tok::Dot {
@@ -469,7 +482,9 @@ impl Parser {
 
     fn primary_type(&mut self) -> Result<Type> {
         match self.peek() {
-            Tok::TypeName(_) | Tok::Name(_) if self.at_qualifier() || matches!(self.peek(), Tok::TypeName(_)) => {
+            Tok::TypeName(_) | Tok::Name(_) | Tok::Enum | Tok::Const
+                if self.at_qualifier() || matches!(self.peek(), Tok::TypeName(_)) =>
+            {
                 let pos = self.pos();
                 let qualifier = if self.at_qualifier() {
                     self.qualifier()
@@ -559,7 +574,7 @@ impl Parser {
     fn primary_value(&mut self) -> Result<Value> {
         let pos = self.pos();
         let kind = match self.peek().clone() {
-            Tok::Name(_) | Tok::TypeName(_) if self.at_qualifier() => {
+            Tok::Name(_) | Tok::TypeName(_) | Tok::Enum | Tok::Const if self.at_qualifier() => {
                 let qualifier = self.qualifier();
                 match self.peek().clone() {
                     Tok::Name(name) => {
@@ -848,6 +863,43 @@ mod tests {
                 "[h::K]"
             ]
         );
+    }
+
+    #[test]
+    fn a_keyword_can_be_a_part_of_a_qualifier() {
+        let values = parse_values("const::Foo(1); acme.enum::Bar; enum.const::baz").unwrap();
+        let names: Vec<&str> = values
+            .iter()
+            .map(|v| match &v.kind {
+                ValueKind::Tagged { name, .. } => name.as_str(),
+                other => panic!("not tagged: {:?}", other),
+            })
+            .collect();
+        assert_eq!(names, ["const::Foo", "acme.enum::Bar", "enum.const::baz"]);
+        let decls = parse("enum E = A(const::T, acme.enum::U<Nat>), B { f: enum.const::V };")
+            .unwrap()
+            .enums;
+        let shown: Vec<String> = decls[0]
+            .variants
+            .iter()
+            .flat_map(|v| match &v.body {
+                VariantBody::Tuple(params) => params.iter().map(|p| p.ty.to_string()).collect::<Vec<_>>(),
+                VariantBody::Record(fields) => fields.iter().map(|f| f.ty.to_string()).collect(),
+                _ => Vec::new(),
+            })
+            .collect();
+        assert_eq!(shown, ["const::T", "acme.enum::U<Nat>", "enum.const::V"]);
+    }
+
+    #[test]
+    fn a_keyword_alone_still_begins_a_declaration() {
+        // Without a dot or `::` after it, the keyword is not a part of a qualifier.
+        assert_eq!(parse_file("enum E = A;", Experimental::default()).0, SourceKind::Types);
+        assert_eq!(parse_file("const x = 1;", Experimental::default()).0, SourceKind::Types);
+        assert_eq!(parse_file("const::X", Experimental::default()).0, SourceKind::Values);
+        assert_eq!(parse_file("enum.a::X", Experimental::default()).0, SourceKind::Values);
+        assert!(parse_values("const").is_err());
+        assert!(parse_values("const::").is_err());
     }
 
     #[test]
