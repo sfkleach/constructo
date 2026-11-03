@@ -64,8 +64,8 @@ import, and so is a `rev` or a `subdir` without a `repo`.
 - `project-name` states the intention and helps with searching. It must equal the `name` in the project-file that is
   found at the `path`, and a difference is an error that shows both.
 - `path` may be absolute, or relative to the folder of the project that has the `[[import]]`, not to the current
-  folder. A `path` that is empty is an error, and so is one that begins with `constructo:`, since a built-in project (see
-  [Built-in projects](#built-in-projects)) is imported with `builtin`.
+  folder. A `path` that is empty is an error, and so is one that begins with `constructo:`, since a built-in project
+  (see [Built-in projects](#built-in-projects)) is imported with `builtin`.
 - One `[[import]]` puts a project in one group. To put a project in two groups, write two entries with the same
   `path`. The project is still loaded once. The same project in the same group twice, or with no group twice, is an
   error.
