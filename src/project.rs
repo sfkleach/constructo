@@ -80,7 +80,13 @@ struct ProjectTable {
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 struct ImportTable {
     project_name: Spanned<String>,
-    source: Spanned<String>,
+    /// Where the project is: exactly one of `path`, `repo` and `builtin`.
+    path: Option<Spanned<String>>,
+    repo: Option<Spanned<String>>,
+    /// The revision and the folder inside the repository, which only a `repo` has.
+    rev: Option<Spanned<String>>,
+    subdir: Option<Spanned<String>>,
+    builtin: Option<Spanned<String>>,
     group: Option<Spanned<String>>,
 }
 
@@ -314,15 +320,56 @@ impl Project {
                     return Err(invalid(group.span().start, message));
                 }
             }
-            let source = entry.source.get_ref();
+            // Exactly one of the keys that say where the project is must be there, and the keys that belong to a
+            // `repo` need one. A problem with the choice is reported at the project name, since it is about the whole
+            // import, and the other problems are reported at the value that is at fault.
+            let sources: Vec<(&str, &Spanned<String>)> = [
+                ("path", &entry.path),
+                ("repo", &entry.repo),
+                ("builtin", &entry.builtin),
+            ]
+            .into_iter()
+            .filter_map(|(key, value)| value.as_ref().map(|value| (key, value)))
+            .collect();
+            let name_at = entry.project_name.span().start;
+            let (key, found) = match sources.as_slice() {
+                [] => {
+                    let message = "An import needs one of `path`, `repo` and `builtin` to say where the project is";
+                    return Err(invalid(name_at, message.to_string()));
+                }
+                [one] => *one,
+                [_, second, ..] => {
+                    let message = "An import can have only one of `path`, `repo` and `builtin`";
+                    return Err(invalid(second.1.span().start, message.to_string()));
+                }
+            };
+            for (key, value) in [("rev", &entry.rev), ("subdir", &entry.subdir)] {
+                if let (Some(value), None) = (value, &entry.repo) {
+                    let message = format!("`{}` can only be given with `repo`", key);
+                    return Err(invalid(value.span().start, message));
+                }
+            }
+            let source = found.get_ref();
             if source.is_empty() {
                 return Err(invalid(
-                    entry.source.span().start,
-                    "The source of an import is empty".to_string(),
+                    found.span().start,
+                    format!("The {} of an import is empty", key),
                 ));
             }
+            if key == "repo" {
+                let message = "Projects in a git repository are not supported yet".to_string();
+                return Err(invalid(found.span().start, message));
+            }
             // A built-in project has to be named by both its name and its source, so that neither can be mistaken.
-            let (named_builtin, source_builtin) = (name.starts_with(BUILTIN_PREFIX), is_builtin_source(source));
+            let named_builtin = name.starts_with(BUILTIN_PREFIX);
+            let source_builtin = key == "builtin";
+            if key == "path" && is_builtin_source(source) {
+                let message = format!(
+                    "The path {} looks like a built-in project, which is imported with `builtin`",
+                    source
+                );
+                return Err(invalid(found.span().start, message));
+            }
             if named_builtin != source_builtin {
                 let message = if named_builtin {
                     format!(
@@ -336,7 +383,7 @@ impl Project {
                         source
                     )
                 };
-                return Err(invalid(entry.source.span().start, message));
+                return Err(invalid(found.span().start, message));
             }
             if source_builtin && builtin_for_uri(source).is_none() {
                 let message = format!(
@@ -344,7 +391,7 @@ impl Project {
                     source,
                     builtin_list()
                 );
-                return Err(invalid(entry.source.span().start, message));
+                return Err(invalid(found.span().start, message));
             }
             imports.push(Import {
                 project_name: name.clone(),
@@ -356,7 +403,7 @@ impl Project {
                 },
                 target: None,
                 name_pos: at(entry.project_name.span().start),
-                source_pos: at(entry.source.span().start),
+                source_pos: at(found.span().start),
             });
         }
         Ok(ParsedFile {
@@ -667,8 +714,8 @@ mod tests {
     fn an_import_has_a_name_a_source_and_perhaps_a_group() {
         let text = [
             ONE,
-            "\n[[import]]\nproject-name = \"P.Q.R\"\ngroup = \"pqrxyz\"\nsource = \"../sister\"\n",
-            "\n[[import]]\nproject-name = \"x.y\"\nsource = \"/abs/x\"\n",
+            "\n[[import]]\nproject-name = \"P.Q.R\"\ngroup = \"pqrxyz\"\npath = \"../sister\"\n",
+            "\n[[import]]\nproject-name = \"x.y\"\npath = \"/abs/x\"\n",
         ]
         .concat();
         let imports = imports(&text);
@@ -686,19 +733,37 @@ mod tests {
     #[test]
     fn an_import_is_strict() {
         let bad = |entry: &str| error(&format!("{}\n[[import]]\n{}", ONE, entry));
-        assert!(bad("source = \"x\"\n").2.contains("missing field `project-name`"));
-        assert!(bad("project-name = \"x.y\"\n").2.contains("missing field `source`"));
-        let (line, _, message) = bad("project-name = \"x.y\"\nsource = \"s\"\nversion = 1\n");
+        assert!(bad("path = \"x\"\n").2.contains("missing field `project-name`"));
+        assert!(bad("project-name = \"x.y\"\n")
+            .2
+            .contains("needs one of `path`, `repo` and `builtin`"));
+        let (line, _, message) = bad("project-name = \"x.y\"\npath = \"s\"\nversion = 1\n");
         assert_eq!(line, 7);
         assert!(message.contains("unknown field `version`"), "{}", message);
-        assert!(bad("project-name = 1\nsource = \"s\"\n").2.contains("invalid type"));
-        assert!(bad("project-name = \"xy\"\nsource = \"s\"\n")
+        assert!(bad("project-name = 1\npath = \"s\"\n").2.contains("invalid type"));
+        assert!(bad("project-name = \"xy\"\npath = \"s\"\n")
             .2
             .contains("Invalid project name \"xy\""));
-        assert!(bad("project-name = \"x.y\"\nsource = \"\"\n")
+        assert!(bad("project-name = \"x.y\"\npath = \"\"\n")
             .2
-            .contains("source of an import is empty"));
-        let (line, col, message) = bad("project-name = \"x.y\"\nsource = \"s\"\ngroup = \"a.b\"\n");
+            .contains("path of an import is empty"));
+        // Exactly one of the keys that say where the project is, and `rev` and `subdir` only with a `repo`.
+        let (line, col, message) = bad("project-name = \"x.y\"\npath = \"s\"\nbuiltin = \"constructo:/prelude\"\n");
+        assert_eq!((line, col), (7, 11));
+        assert!(message.contains("only one of"), "{}", message);
+        let (line, col, message) = bad("project-name = \"x.y\"\npath = \"s\"\nrev = \"v1\"\n");
+        assert_eq!((line, col), (7, 7));
+        assert!(message.contains("`rev` can only be given with `repo`"), "{}", message);
+        assert!(bad("project-name = \"x.y\"\npath = \"s\"\nsubdir = \"d\"\n")
+            .2
+            .contains("`subdir` can only be given with `repo`"));
+        assert!(bad("project-name = \"x.y\"\nrepo = \"https://example.com/x.git\"\n")
+            .2
+            .contains("not supported yet"));
+        assert!(bad("project-name = \"x.y\"\npath = \"constructo:/prelude\"\n")
+            .2
+            .contains("imported with `builtin`"));
+        let (line, col, message) = bad("project-name = \"x.y\"\npath = \"s\"\ngroup = \"a.b\"\n");
         assert_eq!((line, col), (7, 9));
         assert!(message.contains("a group name has no dot"), "{}", message);
         // An `import` that is not an array of tables is not accepted either.

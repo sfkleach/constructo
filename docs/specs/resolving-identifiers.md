@@ -93,7 +93,7 @@ Every project is given an import of `constructo.prelude` into `local`, as if its
 [[import]]
 project-name = "constructo.prelude"
 group = "local"
-source = "constructo:/prelude"
+builtin = "constructo:/prelude"
 ```
 
 unless it has an `[[import]]` of `constructo.prelude` of its own. So `Bool`, `Option`, `null`, `true` and `false` can be

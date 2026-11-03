@@ -4,9 +4,9 @@ name = "example.app"
 [[import]]
 project-name = "example.a"
 group = "a"
-source = "../a"
+path = "../a"
 
 [[import]]
 project-name = "example.b"
 group = "b"
-source = "../b"
+path = "../b"

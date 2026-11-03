@@ -1,0 +1,8 @@
+# expect: An import can have only one of `path`, `repo` and `builtin`
+[project]
+name = "example.app"
+
+[[import]]
+project-name = "example.lib"
+path = "../lib"
+builtin = "constructo:/prelude"

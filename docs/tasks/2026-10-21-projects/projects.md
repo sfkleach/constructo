@@ -158,7 +158,7 @@ Implement imports that are included in the `constructo.toml` file. Each
 [[import]]
 project-name = "P.Q.R"
 group = "pqrxyz"
-source = "../sister-data-types"
+path = "../sister-data-types"
 ```
 
 One `[[import]]` puts a project in one group. To have a project in two groups,
@@ -267,7 +267,7 @@ Step 2 fudge, where the command adds the prelude ahead of the project, goes away
 [[import]]
 project-name = "constructo.prelude"
 group = "local"
-source = "constructo:/prelude"
+builtin = "constructo:/prelude"
 ```
 
 - Every project gets this import, and so do the files given without a project.

@@ -1,0 +1,7 @@
+# expect: The path constructo:/prelude looks like a built-in project
+[project]
+name = "example.app"
+
+[[import]]
+project-name = "example.lib"
+path = "constructo:/prelude"

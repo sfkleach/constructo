@@ -247,7 +247,7 @@ mod tests {
             &[("constructo.toml", LIB.as_bytes()), ("shapes.types", SHAPES)],
         );
         let app_file = format!(
-            "[project]\nname = \"example.app\"\n\n[[import]]\nproject-name = \"example.lib\"\nsource = \"{}\"\n",
+            "[project]\nname = \"example.app\"\n\n[[import]]\nproject-name = \"example.lib\"\npath = \"{}\"\n",
             lib.folder.display()
         );
         (

@@ -4,4 +4,4 @@ name = "example.right"
 [[import]]
 project-name = "example.base"
 group = "common"
-source = "../base"
+path = "../base"

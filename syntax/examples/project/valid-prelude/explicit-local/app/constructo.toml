@@ -5,4 +5,4 @@ name = "example.app"
 [[import]]
 project-name = "constructo.prelude"
 group = "local"
-source = "constructo:/prelude"
+builtin = "constructo:/prelude"

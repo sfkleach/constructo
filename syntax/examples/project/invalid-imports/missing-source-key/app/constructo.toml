@@ -1,4 +1,4 @@
-# expect: missing field `source`
+# expect: An import needs one of `path`, `repo` and `builtin`
 [project]
 name = "example.app"
 

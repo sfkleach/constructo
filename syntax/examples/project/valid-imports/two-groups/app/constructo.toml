@@ -4,18 +4,18 @@ name = "example.app"
 [[import]]
 project-name = "example.lib"
 group = "one"
-source = "../lib"
+path = "../lib"
 
 [[import]]
 project-name = "example.lib"
 group = "two"
-source = "../lib"
+path = "../lib"
 
 [[import]]
 project-name = "example.lib"
-source = "../lib"
+path = "../lib"
 
 [[import]]
 project-name = "example.lib"
 group = "local"
-source = "../lib/../lib"
+path = "../lib/../lib"
