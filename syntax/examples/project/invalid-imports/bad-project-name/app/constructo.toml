@@ -4,4 +4,4 @@ name = "example.app"
 
 [[import]]
 project-name = "lib"
-source = "../lib"
+path = "../lib"

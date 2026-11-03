@@ -18,12 +18,12 @@ exclude = ["old/**"]
 [[import]]
 project-name = "com.example.base"
 group = "base"
-source = "../base"
+path = "../base"
 
 [[import]]
 project-name = "constructo.prelude"
 group = "local"
-source = "constructo:/prelude"
+builtin = "constructo:/prelude"
 ```
 
 ## Format
@@ -51,16 +51,23 @@ in which nothing matches is not an error, since a project may consist only of im
 | Key            | Type   | Required | Meaning                                                              |
 |----------------|--------|----------|----------------------------------------------------------------------|
 | `project-name` | string | yes      | The full name of the project that is imported.                       |
-| `source`       | string | yes      | Where the project is: a folder, or the URI of a built-in project.    |
+| `path`         | string | one of   | A folder that holds the project.                                     |
+| `builtin`      | string | one of   | The URI of a built-in project.                                       |
+| `repo`         | string | one of   | A git repository. Not supported yet.                                 |
+| `rev`          | string | no       | With `repo` only: a tag, branch or commit. Not supported yet.        |
+| `subdir`       | string | no       | With `repo` only: the folder inside the repository. Not supported yet. |
 | `group`        | string | no       | The group that the project is put into. Without one, only by its full name. |
 
+Exactly one of `path`, `builtin` and `repo` says where the project is. Two of them, or none, is an error at the
+import, and so is a `rev` or a `subdir` without a `repo`.
+
 - `project-name` states the intention and helps with searching. It must equal the `name` in the project-file that is
-  found at `source`, and a difference is an error that shows both.
-- `source` that is a folder may be absolute, or relative to the folder of the project that has the `[[import]]`, not to
-  the current folder. A source that begins with `constructo:` is a built-in project (see
-  [Built-in projects](#built-in-projects)). A source that is empty is an error.
+  found at the `path`, and a difference is an error that shows both.
+- `path` may be absolute, or relative to the folder of the project that has the `[[import]]`, not to the current
+  folder. A `path` that is empty is an error, and so is one that begins with `constructo:`, since a built-in project (see
+  [Built-in projects](#built-in-projects)) is imported with `builtin`.
 - One `[[import]]` puts a project in one group. To put a project in two groups, write two entries with the same
-  `source`. The project is still loaded once. The same project in the same group twice, or with no group twice, is an
+  `path`. The project is still loaded once. The same project in the same group twice, or with no group twice, is an
   error.
 
 ## Names
@@ -102,16 +109,16 @@ anything that starts with `constructo.`.
 
 ## Built-in projects
 
-A built-in project is a project like any other, but it is held inside the binary. Its source is a URI, as a folder
+A built-in project is a project like any other, but it is held inside the binary. Its `builtin` is a URI, as a folder
 would be, and the files of the project are shown in diagnostics under it, as `constructo:/prelude/prelude.types`.
 
 | Source                | Name                 | Contents                              |
 |-----------------------|----------------------|---------------------------------------|
 | `constructo:/prelude` | `constructo.prelude` | `Bool`, `Option`, `null`, `true` and `false` |
 
-An import whose `project-name` starts with `constructo.`, or whose `source` starts with `constructo:`, has to name a
-built-in project with both, and anything else is an error that lists the built-in projects. A built-in project is not
-reported in verbose mode and is not checksummed.
+An import whose `project-name` starts with `constructo.`, or that has a `builtin`, has to name a built-in project with
+both, and anything else is an error that lists the built-in projects. A built-in project is not reported in verbose
+mode and is not checksummed.
 
 The implicit import is, in effect:
 
@@ -119,7 +126,7 @@ The implicit import is, in effect:
 [[import]]
 project-name = "constructo.prelude"
 group = "local"
-source = "constructo:/prelude"
+builtin = "constructo:/prelude"
 ```
 
 To override the prelude a project imports it into another group. Then bare `Bool` is the project's own, and `std::Bool`
@@ -132,7 +139,7 @@ Every problem with the project-file is an error in the usual form, with the posi
 `constructo.toml`:
 
 ```text
-ERROR: missing field `source` (constructo.toml, line 5, col 1)
+ERROR: An import needs one of `path`, `repo` and `builtin` to say where the project is (constructo.toml, line 5, col 1)
 ```
 
 A problem with an import is reported at the `[[import]]`. A folder that does not exist, a missing or unreadable

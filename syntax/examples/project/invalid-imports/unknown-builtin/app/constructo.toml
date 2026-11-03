@@ -4,4 +4,4 @@ name = "example.app"
 
 [[import]]
 project-name = "constructo.nothing"
-source = "constructo:/nothing"
+builtin = "constructo:/nothing"

@@ -794,7 +794,7 @@ else
     fail "imports: a relative source is relative to the importing project"
 fi
 absolute="$(mktemp -d)"
-printf '[project]\nname = "example.absolute"\n\n[[import]]\nproject-name = "example.lib"\nsource = "%s"\n' \
+printf '[project]\nname = "example.absolute"\n\n[[import]]\nproject-name = "example.lib"\npath = "%s"\n' \
     "$(cd "$IMPORTS/two-groups/lib" && pwd)" > "$absolute/constructo.toml"
 expect_exit "imports: a source may be an absolute path" 0 check --dev --project="$absolute"
 rm -f "$absolute/constructo.toml"
@@ -804,7 +804,7 @@ broken="$(mktemp -d)"
 mkdir "$broken/lib" "$broken/app"
 printf '[project]\nname = "example.lib"\n' > "$broken/lib/constructo.toml"
 echo "enum Lib = Lib(Missing);" > "$broken/lib/lib.types"
-printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lib"\nsource = "../lib"\n' \
+printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lib"\npath = "../lib"\n' \
     > "$broken/app/constructo.toml"
 echo "enum App = App;" > "$broken/app/app.types"
 expect_exit "imports: a type error in an imported project fails the run" 1 check --dev --project="$broken/app"
@@ -897,7 +897,7 @@ nested="$(mktemp -d)"
 mkdir "$nested/lib" "$nested/app"
 printf '[project]\nname = "example.lib"\n' > "$nested/lib/constructo.toml"
 echo "enum Lib = Lib(Option<Bool>);" > "$nested/lib/lib.types"
-printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lib"\nsource = "../lib"\n' \
+printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lib"\npath = "../lib"\n' \
     > "$nested/app/constructo.toml"
 echo "enum App = App;" > "$nested/app/app.types"
 expect_exit "prelude: an imported project has the prelude too" 0 check --dev --project="$nested/app"
@@ -1039,7 +1039,7 @@ lk="$(mktemp -d)"
 mkdir "$lk/lib" "$lk/app"
 printf '[project]\nname = "example.lib"\n' > "$lk/lib/constructo.toml"
 printf 'enum Shape = Circle;\r\n' > "$lk/lib/shapes.types"
-printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lib"\nsource = "../lib"\n' > "$lk/app/constructo.toml"
+printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lib"\npath = "../lib"\n' > "$lk/app/constructo.toml"
 printf 'enum App = App;\n' > "$lk/app/app.types"
 # Writes the lock file of the app from the files of the lib as they are now, with the extra lines given as the files.
 write_lock() {
@@ -1160,7 +1160,7 @@ up="$(mktemp -d)"
 mkdir "$up/lib" "$up/app"
 printf '[project]\nname = "example.lib"\n' > "$up/lib/constructo.toml"
 printf 'enum Shape = Circle;\r\n' > "$up/lib/shapes.types"
-printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lib"\nsource = "../lib"\n' > "$up/app/constructo.toml"
+printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lib"\npath = "../lib"\n' > "$up/app/constructo.toml"
 # The lock that the update is expected to write, from the files of the lib as they are now.
 expected_lock() {
     local toml shapes project
@@ -1220,7 +1220,7 @@ expect_exit "update: no lock is made for a project with nothing to record" 0 pro
 if [[ ! -e "$up/app/constructo.lock" ]]; then pass "update: and none was written"; else fail "update: and none was written"; fi
 # Problems are exit 2, as for check.
 expect_exit "update: a folder that does not exist is exit 2" 2 project update "$up/nowhere"
-printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.other"\nsource = "../lib"\n' > "$up/app/constructo.toml"
+printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.other"\npath = "../lib"\n' > "$up/app/constructo.toml"
 expect_exit "update: a project that cannot be loaded is exit 2" 2 project update "$up/app"
 rm -f "$up/lib/constructo.toml" "$up/lib/shapes.types" "$up/app/constructo.toml" "$up/app/constructo.lock"
 rmdir "$up/lib" "$up/app" "$up"

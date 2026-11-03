@@ -5,4 +5,4 @@ name = "example.app"
 [[import]]
 project-name = "example.lib"
 group = "a.b"
-source = "../lib"
+path = "../lib"

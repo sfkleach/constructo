@@ -4,4 +4,4 @@ name = "example.b"
 [[import]]
 project-name = "example.c"
 group = "c"
-source = "../c"
+path = "../c"

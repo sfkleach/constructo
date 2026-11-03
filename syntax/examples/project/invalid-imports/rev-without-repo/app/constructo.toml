@@ -1,0 +1,8 @@
+# expect: `rev` can only be given with `repo`
+[project]
+name = "example.app"
+
+[[import]]
+project-name = "example.lib"
+path = "../lib"
+rev = "v1"

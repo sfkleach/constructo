@@ -4,9 +4,9 @@ name = "example.app"
 
 [[import]]
 project-name = "example.lib"
-source = "../one"
+path = "../one"
 
 [[import]]
 project-name = "example.lib"
 group = "other"
-source = "../two"
+path = "../two"
