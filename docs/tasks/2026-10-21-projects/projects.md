@@ -430,17 +430,10 @@ does not report the built-in projects.
 
 ## Step 6: Support remote projects
 
-Allow the project source to be a specified version from a remote git-repo. 
-N.B. We need a Q&A session to elaborate this step. However I envisage 
-going from `source = PATH` to:
-
-```toml
-[source]
-# Pick one of these  ...
-path = ...
-repo = ...
-builtin = ...
-```
+Allow the project source to be a specified version from a remote git-repo. The Q&A session has been held and the
+plan is in [plan-step06.md](plan-step06.md). In short, `source = PATH` becomes exactly one of the keys `path`,
+`repo` (with optional `rev` and `subdir`) or `builtin` on the `[[import]]`; only `constructo project update` fetches,
+and it pins the commit in the lock file.
 
 ### Links out of a fetched project
 
