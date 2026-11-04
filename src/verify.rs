@@ -70,7 +70,9 @@ pub fn verify_lock_with(set: &ProjectSet, lock: Option<&Lock>, dev: bool) -> Res
         .projects
         .iter()
         .enumerate()
-        .filter(|(index, project)| *index != root && !project.builtin && (!dev || project.remote.is_some()))
+        .filter(|(index, project)| {
+            *index != root && !project.builtin && (!dev || project.remote.is_some() || project.confined.is_some())
+        })
         .collect();
     let first = first_imports(set);
     let mut found = Vec::new();
@@ -772,6 +774,143 @@ mod tests {
         let set = ProjectSet::load_with(&app.folder, true, remotes).unwrap();
         assert_eq!(verify_lock_with(&set, lock.as_ref(), false).unwrap().len(), 1);
         assert!(verify_lock_with(&set, lock.as_ref(), true).unwrap().is_empty());
+        std::fs::remove_file(app.folder.join(LOCK_FILE)).unwrap();
+    }
+
+    /// Adds a link to a repository and commits it. The target is written as it is, so it can be absolute or relative.
+    #[cfg(unix)]
+    fn link(repo: &Repo, name: &str, target: &Path) {
+        let path = repo.folder.join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(target, path).unwrap();
+        repo.git(&["add", "-A"]);
+        repo.git(&["commit", "--quiet", "-m", name]);
+    }
+
+    /// An app that imports `example.lib` from the repository, as `subdir` if there is one.
+    #[cfg(unix)]
+    fn app_importing(test: &str, repo: &Repo, subdir: Option<&str>) -> OnDisk {
+        let subdir = subdir.map_or(String::new(), |subdir| format!("subdir = \"{}\"\n", subdir));
+        let text = format!(
+            "[project]\nname = \"example.app\"\n\n[[import]]\nproject-name = \"example.lib\"\nrepo = \"{}\"\n{}",
+            repo.url(),
+            subdir
+        );
+        OnDisk::new(test, &[("constructo.toml", text.as_bytes())])
+    }
+
+    #[cfg(unix)]
+    fn update_error(app: &OnDisk, cache: &Cache) -> String {
+        update_lock_with(&app.folder, Remotes::Fetch(Ok(cache.clone())))
+            .unwrap_err()
+            .to_string()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_out_of_a_clone_is_refused_and_what_it_leads_to_is_not_read() {
+        let secret = OnDisk::new("clone-secret", &[("secret", b"SECRET-CONTENT")]);
+        let scratch = Scratch::new(&std::env::temp_dir()).unwrap();
+        let cache = Cache::new(scratch.0.join("cache"));
+        let target = secret.folder.join("secret");
+
+        // The project-file is a link, and it is refused before it is read, so nothing of it is in the message.
+        let repo = Repo::new();
+        link(&repo, "constructo.toml", &target);
+        let app = app_importing("clone-pf-app", &repo, None);
+        let error = update_error(&app, &cache);
+        assert!(
+            error.contains("constructo.toml of the project example.lib leads to"),
+            "{}",
+            error
+        );
+        assert!(
+            error.contains(&target.display().to_string()) && !error.contains("SECRET-CONTENT"),
+            "{}",
+            error
+        );
+        assert!(error.contains("line 6, col 8"), "{}", error);
+
+        // A types file is a link.
+        let repo = Repo::new();
+        repo.commit("constructo.toml", LIB);
+        link(&repo, "bad.types", &target);
+        let app = app_importing("clone-types-app", &repo, None);
+        let error = update_error(&app, &cache);
+        assert!(
+            error.contains("bad.types of the project example.lib leads to"),
+            "{}",
+            error
+        );
+
+        // The folder of the project is a link.
+        let repo = Repo::new();
+        let elsewhere = OnDisk::new("clone-elsewhere", &[("constructo.toml", LIB.as_bytes())]);
+        link(&repo, "libs", &elsewhere.folder);
+        let app = app_importing("clone-subdir-app", &repo, Some("libs"));
+        let error = update_error(&app, &cache);
+        assert!(
+            error.contains("its folder of the project example.lib leads to"),
+            "{}",
+            error
+        );
+        assert!(!app.folder.join(LOCK_FILE).exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_that_stays_inside_the_clone_is_allowed() {
+        let scratch = Scratch::new(&std::env::temp_dir()).unwrap();
+        let cache = Cache::new(scratch.0.join("cache"));
+        let repo = Repo::new();
+        repo.commit("constructo.toml", LIB);
+        repo.commit("shapes.types", "enum Shape = Circle;\n");
+        link(&repo, "alias.types", Path::new("shapes.types"));
+        let app = app_importing("clone-inside-app", &repo, None);
+        update_lock_with(&app.folder, Remotes::Fetch(Ok(cache))).unwrap();
+        let lock = read_lock(&app.folder).unwrap().unwrap();
+        assert!(lock.get("example.lib").unwrap().files.contains_key("alias.types"));
+        std::fs::remove_file(app.folder.join(LOCK_FILE)).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_project_in_a_clone_may_import_by_a_path_that_stays_inside_it() {
+        let scratch = Scratch::new(&std::env::temp_dir()).unwrap();
+        let cache = Cache::new(scratch.0.join("cache"));
+        let repo = Repo::new();
+        let mid = |path: &str| {
+            format!(
+                "[project]\nname = \"example.lib\"\n\n[[import]]\nproject-name = \"example.sibling\"\npath = \"{}\"\n",
+                path
+            )
+        };
+        repo.commit("sibling/constructo.toml", "[project]\nname = \"example.sibling\"\n");
+        repo.commit("mid/constructo.toml", &mid("../sibling"));
+        let app = app_importing("clone-path-app", &repo, Some("mid"));
+        update_lock_with(&app.folder, Remotes::Fetch(Ok(cache.clone()))).unwrap();
+        let lock = read_lock(&app.folder).unwrap().unwrap();
+        assert_eq!(lock.projects.len(), 2);
+        // The sibling has no repository of its own, and is still verified under `--dev`, since it cannot be edited.
+        assert!(lock.get("example.sibling").unwrap().remote.is_none());
+        let remotes = Remotes::Locked {
+            cache: Ok(cache.clone()),
+            lock: Ok(Some(lock.clone())),
+        };
+        let set = ProjectSet::load_with(&app.folder, true, remotes).unwrap();
+        assert!(set.projects.iter().filter(|p| p.confined.is_some()).count() == 2);
+
+        // A path that leaves the clone is refused, and so is an absolute one.
+        for path in ["../../outside", "/etc"] {
+            repo.commit("mid/constructo.toml", &mid(path));
+            let again = Cache::new(scratch.0.join(format!("cache-{}", path.len())));
+            let error = update_error(&app, &again);
+            assert!(
+                error.contains("leaves the repository that the project example.lib is in"),
+                "{}",
+                error
+            );
+        }
         std::fs::remove_file(app.folder.join(LOCK_FILE)).unwrap();
     }
 }
