@@ -380,9 +380,9 @@ missing lock file is then not an error. It means "I am developing, trust what is
 on disk". It is a setting like the other boolean options (decision 21): `dev` in
 the `[check]` table, a negative form `--no-dev`, and it is shown by
 `--print-config`. The configuration file is read only when it is named, so it
-cannot switch verification off unnoticed. Once remote projects exist (Step 6)
-this may need to be narrowed, so that a developer of a local library still has
-the remote ones verified.
+cannot switch verification off unnoticed. Step 6 narrowed this: `--dev` leaves
+out the projects that are folders on disk, and a project from a repository is
+always verified (decision 30).
 
 ### The command `constructo project update [FOLDER]`
 
@@ -433,7 +433,7 @@ does not report the built-in projects.
 Allow the project source to be a specified version from a remote git-repo. The Q&A session has been held and the
 plan is in [plan-step06.md](plan-step06.md). In short, `source = PATH` becomes exactly one of the keys `path`,
 `repo` (with optional `rev` and `subdir`) or `builtin` on the `[[import]]`; only `constructo project update` fetches,
-and it pins the commit in the lock file.
+and it pins the commit in the lock file. This step is done, and decisions 29 and 30 record it.
 
 ### Links out of a fetched project
 
@@ -454,12 +454,11 @@ project-file if it is one, is an error that names the file and where it leads.
 The specs are written, ahead of the other steps, so that they say what the code is built to:
 
 - `docs/specs/project-file-format.md`, the project-file.
-- `docs/specs/lock-file-format.md`, the lock file and the checksum algorithms. It is the design for Step 4 and is marked
-  as not yet implemented. When Step 4 is done, the status note is removed.
+- `docs/specs/lock-file-format.md`, the lock file and the checksum algorithms.
 - `docs/specs/resolving-identifiers.md`, the resolution of names.
 
 What is left for this step is to check each spec against the code and the examples once the other steps are done, and
-to update them for anything that Steps 5 and 6 add, such as the version of a project and the remote sources.
+to update them for anything that Step 5 adds. The remote sources of Step 6 are already in them.
 
 ## Step 8: Consistency pass
 
