@@ -53,9 +53,9 @@ in which nothing matches is not an error, since a project may consist only of im
 | `project-name` | string | yes      | The full name of the project that is imported.                       |
 | `path`         | string | one of   | A folder that holds the project.                                     |
 | `builtin`      | string | one of   | The URI of a built-in project.                                       |
-| `repo`         | string | one of   | A git repository. Not supported yet.                                 |
-| `rev`          | string | no       | With `repo` only: a tag, branch or commit. Not supported yet.        |
-| `subdir`       | string | no       | With `repo` only: the folder inside the repository. Not supported yet. |
+| `repo`         | string | one of   | The URL of a git repository, as [below](#projects-from-a-repository). |
+| `rev`          | string | no       | With `repo` only: a tag, branch or commit. Without one, the default branch. |
+| `subdir`       | string | no       | With `repo` only: the folder inside the repository that holds the project. |
 | `group`        | string | no       | The group that the project is put into. Without one, only by its full name. |
 
 Exactly one of `path`, `builtin` and `repo` says where the project is. Two of them, or none, is an error at the
@@ -69,6 +69,35 @@ import, and so is a `rev` or a `subdir` without a `repo`.
 - One `[[import]]` puts a project in one group. To put a project in two groups, write two entries with the same
   `path`. The project is still loaded once. The same project in the same group twice, or with no group twice, is an
   error.
+
+### Projects from a repository
+
+An import with a `repo` takes the project from a git repository.
+
+```toml
+[[import]]
+project-name = "com.example.shapes"
+repo = "https://github.com/example/shapes.git"
+rev = "v1.2.0"
+subdir = "constructo"
+group = "shapes"
+```
+
+- `repo` is `https://HOST/PATH`, `ssh://[USER@]HOST/PATH` or the short form `[USER@]HOST:PATH`, `file://PATH`, or a path
+  to a folder. A URL with a password, or a token in place of a user name, is an error, since it would be written in the
+  lock file and in messages: use a credential helper or an ssh key. `ext::` and the other remote helpers, `git://`,
+  `http://` and `ftp://` are errors, and so is a URL that starts with `-`. The error is at the `repo`.
+- `rev` is a tag, a branch or a commit, and may not be empty. `subdir` is a path inside the repository, written with
+  `/`, with no empty part, `.` or `..`.
+- `constructo check` does not fetch. The commit comes from the [lock file](lock-file-format.md) and the files from the
+  cache, and `constructo project update` is what gets them. A `check` that finds no lock, no entry, or no checkout
+  in the cache is an error at the import, with exit code 1.
+- A project from a repository stays inside the clone. A link in the repository that leads out of it, for the
+  project-file, the folder or a types file, is an error at the import, with exit code 2, that says where it leads. A
+  `path` import in such a project must stay inside the clone by the path as written, and so must the projects it
+  reaches. It may import other repositories and built-in projects.
+- The `git` program is used, so it has to be installed. `$CONSTRUCTO_CACHE` names the cache folder. Without it the
+  cache is `constructo` in `$XDG_CACHE_HOME` or `~/.cache`, and `%LOCALAPPDATA%` on Windows.
 
 ## Names
 
@@ -150,4 +179,4 @@ configuration file, and 1 for the errors that are found in the types files and v
 
 - [Resolving identifiers](resolving-identifiers.md), for what a group and a qualified name mean.
 - [The lock file](lock-file-format.md), which records the checksums of the projects that are imported.
-- Decisions 24 to 26, in `docs/decisions/`.
+- Decisions 24 to 26, 29 and 30, in `docs/decisions/`.

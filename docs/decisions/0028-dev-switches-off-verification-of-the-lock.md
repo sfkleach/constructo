@@ -22,8 +22,7 @@ each edit. We have to decide how they say so.
 
 - Development on a local dependency needs no lock file and no updates.
 - One flag covers everything, so a run with `--dev` verifies nothing, including imports that are not being developed.
-  When remote projects exist (Step 6) that may need narrowing, so that a developer of a local library still has the
-  fetched ones verified.
+  Decision 30 has narrowed this for remote projects: a project from a repository is always verified.
 - Verbose mode will say that projects are `unverified`, so that a run with `--dev` is not mistaken for a verified one.
 
 ## Options and Outcome

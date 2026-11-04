@@ -174,15 +174,22 @@ type-checked. The problems are all reported, since each is an independent fact, 
   lock file is an error at its first import, which says to run `constructo project update`.
 - A lock file that cannot be read, or that does not parse, is an error with exit code 2.
 - `constructo check` without `--project` has no lock and verifies nothing.
+- A project from a repository is loaded from the commit in its entry. A missing lock, an entry that is not from that
+  repository and `subdir`, and a commit that is not in the cache, are errors at the `[[import]]` with exit code 1 that
+  say to run `constructo project update`. `check` never fetches.
 
 The built-in projects are never verified.
 
 ### The option `--dev`
 
-`-d, --dev` switches off all verification of the lock, for every project, and a missing lock file is then not an error.
-It means "I am developing, trust what is on disk". It is a setting like the other boolean options: `dev` in the
+`-d, --dev` switches off verification of the lock for the projects that are folders on disk, and a missing lock file is
+then not an error. It means "I am developing, trust what is on disk". It is a setting like the other boolean options: `dev` in the
 `[check]` table of a [configuration file](config-file.md), with the negative form `--no-dev`, and it is shown by
 `--print-config`.
+
+A project from a repository cannot be edited, so `--dev` does not apply to it, nor to a project that it imports by a
+`path`. Such a project is loaded from the commit in the lock and verified as without `--dev`, so the lock is read when
+there is a `repo` import: a lock that cannot be read is then exit code 2, and a missing one is an error.
 
 ## Verbose output
 
@@ -195,7 +202,7 @@ OK: . (project example.app)
 OK: checked 2 file(s) in 2 project(s)
 ```
 
-- An imported project is `verified`, or `unverified` under `--dev`. The root project is not in the lock, so its line says
+- An imported project is `verified`, or `unverified` under `--dev` if it is a folder on disk. The root project is not in the lock, so its line says
   neither, and the built-in projects are not reported.
 - The count at the end is of the projects as well as the files. The projects counted are the root and the imported ones.
   A run with no `--project` has no project to count, and the count is of files only.
@@ -211,6 +218,10 @@ OK: checked 2 file(s) in 2 project(s)
 - It prints one line for each difference from the old lock: a project or a file that was added, changed or removed,
   with the old and new digest. It prints nothing if the lock is already up to date.
 - It does not need the old lock to be valid or to exist, since the point is to accept a change.
+- It is the only command that fetches. For each `repo` import it clones the repository, resolves the `rev` to a commit,
+  puts the files in the cache and records the commit. A commit that has moved is a line `Moved the project X from commit
+  A to B`. A repository that cannot be fetched, a `rev` that does not exist and a `git` that is not installed are
+  errors with exit code 2, reported at the import.
 - A project with nothing to record gets no lock file, and an old one is removed so that it does not become stale.
 
 The difference can be reviewed from the output of the command, or with `git diff constructo.lock`.

@@ -20,7 +20,7 @@ to decide what is recorded to prevent that, where, how it is checked and how it 
   paths, each ended by a LF.
 - A file is identified by its path from the project folder, written with `/`, and its digest is of the content it has.
   A symbolic link inside or out of a local project is fine, since the content is what is pinned. Refusing links out of a
-  fetched project belongs to remote projects.
+  fetched project is in decision 30.
 - The lock must describe exactly what is loaded. `check` reports, all together and with exit code 1: a digest that
   differs, a loaded project or file that is not in the lock, and a project or file in the lock that is not loaded. A
   problem is reported at the place that explains it: a missing project at the `[[import]]` that first loaded it, and
