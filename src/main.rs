@@ -200,8 +200,8 @@ https://github.com/sfkleach/constructo/blob/main/docs/specs/config-file.md")]
         #[arg(long, overrides_with = "verbose")]
         no_verbose: bool,
 
-        /// Do not verify the imported projects against constructo.lock, and do not need the file. For a project that
-        /// is being developed
+        /// Do not verify the imported projects that are folders on disk against constructo.lock, and do not need
+        /// the file for them. For a project that is being developed. Projects from a repository are still verified
         #[arg(long, short, overrides_with = "no_dev")]
         dev: bool,
 

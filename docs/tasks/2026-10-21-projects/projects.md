@@ -460,6 +460,11 @@ The specs are written, ahead of the other steps, so that they say what the code 
 What is left for this step is to check each spec against the code and the examples once the other steps are done, and
 to update them for anything that Step 5 adds. The remote sources of Step 6 are already in them.
 
+Done. Each spec was checked against the built binary: the messages and exit codes, the cycle, name, group and source
+errors, the lock errors, the verbose lines, and the files that a project selects. They agree. The one difference found
+was the help text of `--dev` (and its `--print-config` comment), which still said that all imported projects go
+unverified. It now says that only folders on disk do.
+
 ## Step 8: Consistency pass
 
 - Update `docs/vision.md` and the README to describe projects.
