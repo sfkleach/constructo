@@ -522,7 +522,7 @@ fn check(
                 // that was switched off.
                 let checked = if std::ptr::eq(project, set.root()) {
                     ""
-                } else if dev && project.remote.is_none() {
+                } else if dev && project.remote.is_none() && project.confined.is_none() {
                     // A project from a repository is verified whatever `--dev` says.
                     ", unverified"
                 } else {

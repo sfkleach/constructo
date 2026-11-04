@@ -1305,6 +1305,18 @@ if command -v git >/dev/null 2>&1; then
     else
         fail "repo: a changed file in the cache is a checksum mismatch, even with --dev (exit $status, got '$out')"
     fi
+    # A link in the cache that leads out of the clone is refused, and nothing of what it leads to is shown.
+    printf 'SECRET-CONTENT\n' > "$rp/secret"
+    rm -f "$cached/shapes.types"
+    ln -s "$rp/secret" "$cached/shapes.types"
+    out="$("$CONSTRUCTO" check --dev --project="$rp/app" 2>&1)" && status=0 || status=$?
+    if [[ $status -eq 2 && "$out" == *"shapes.types of the project example.lib leads to $rp/secret, which is outside the repository"* \
+        && "$out" != *"SECRET-CONTENT"* ]]; then
+        pass "repo: check refuses a link that leaves the clone"
+    else
+        fail "repo: check refuses a link that leaves the clone (exit $status, got '$out')"
+    fi
+    rm -f "$cached/shapes.types"
     printf 'enum Shape = Circle;\n' > "$cached/shapes.types"
     # With no lock there is nothing that says which commit to use.
     mv "$rp/app/constructo.lock" "$rp/app/constructo.lock.off"
@@ -1327,7 +1339,31 @@ if command -v git >/dev/null 2>&1; then
     printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lib"\nrepo = "ext::sh -c ls"\n' \
         > "$rp/app/constructo.toml"
     expect_exit "repo: a remote helper is refused with exit 2" 2 project update "$rp/app"
+    # A link that leaves the clone stops an update, and so does a path import that leaves it.
+    printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lib"\nrepo = "%s"\n' "$rp/repo" \
+        > "$rp/app/constructo.toml"
+    ln -s "$rp/secret" "$rp/repo/bad.types"
+    git_in_repo add -A
+    git_in_repo commit --quiet -m link
+    out="$("$CONSTRUCTO" project update "$rp/app" 2>&1)" && status=0 || status=$?
+    if [[ $status -eq 2 && "$out" == *"bad.types of the project example.lib leads to $rp/secret"* ]]; then
+        pass "repo: update refuses a link that leaves the clone"
+    else
+        fail "repo: update refuses a link that leaves the clone (exit $status, got '$out')"
+    fi
+    rm -f "$rp/repo/bad.types"
+    printf '[project]\nname = "example.lib"\n\n[[import]]\nproject-name = "example.other"\npath = "../elsewhere"\n' \
+        > "$rp/repo/constructo.toml"
+    git_in_repo add -A
+    git_in_repo commit --quiet -m escape
+    out="$("$CONSTRUCTO" project update "$rp/app" 2>&1)" && status=0 || status=$?
+    if [[ $status -eq 2 && "$out" == *"leaves the repository that the project example.lib is in"* ]]; then
+        pass "repo: update refuses a path that leaves the clone"
+    else
+        fail "repo: update refuses a path that leaves the clone (exit $status, got '$out')"
+    fi
     unset CONSTRUCTO_CACHE
+    rm -f "$rp/secret"
     rm -rf "$rp/repo/.git" "$rp/cache/git"
     rm -f "$rp/repo/constructo.toml" "$rp/repo/shapes.types" "$rp/repo/more.types" "$rp/app/constructo.toml" \
         "$rp/app/constructo.lock"

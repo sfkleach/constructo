@@ -168,6 +168,9 @@ pub struct Project {
     pub builtin: bool,
     /// Where the project was fetched from, if it was fetched from a git repository.
     pub remote: Option<Remote>,
+    /// The root of the clone that the project has to stay inside, if it came from a repository or from a project that
+    /// did. Nothing it reads may be outside the clone, whatever a link in the repository says.
+    pub confined: Option<PathBuf>,
 }
 
 /// Why a project could not be loaded. Both kinds are problems with the invocation, not with the inputs.
@@ -227,6 +230,7 @@ impl Project {
             files,
             builtin: true,
             remote: None,
+            confined: None,
         }
     }
 
@@ -265,6 +269,7 @@ impl Project {
             files,
             builtin: false,
             remote: None,
+            confined: None,
         })
     }
 
@@ -540,6 +545,7 @@ impl ProjectSet {
             files: Vec::new(),
             builtin: false,
             remote: None,
+            confined: None,
         };
         loader
             .visit(root)
@@ -613,20 +619,36 @@ impl Loader {
             let (name_pos, source_pos) = (project.imports[index].name_pos, project.imports[index].source_pos);
             let problem = |pos: Pos, message: String| ProjectError::Invalid(Diagnostic::new(&file, pos, message));
             // A project in a repository has no folder until it has been fetched.
+            // A built-in project is held in the binary, so it is never in a clone and never has to stay in one.
+            let builtin = project.imports[index].folder.to_str().is_some_and(is_builtin_source);
+            let mut confined = if builtin { None } else { project.confined.clone() };
             let remote = match project.imports[index].repo.clone() {
                 Some(repo) => {
                     let name = project.imports[index].project_name.clone();
-                    let (folder, remote) =
+                    let (folder, remote, root) =
                         self.resolve_repo(&name, &repo, (&file, source_pos))
                             .map_err(|e| match e {
                                 ProjectError::Cannot(message) => problem(source_pos, message),
                                 other => other,
                             })?;
                     project.imports[index].folder = folder;
+                    confined = Some(root);
                     Some(remote)
                 }
                 None => None,
             };
+            // A project inside a clone may import another by a path, if the path stays inside the clone.
+            if let (Some(root), None) = (&confined, &project.imports[index].repo) {
+                let wanted = lexical(&project.imports[index].folder);
+                if !wanted.starts_with(lexical(root)) {
+                    let message = format!(
+                        "The path {} leaves the repository that the project {} is in",
+                        project.imports[index].folder.display(),
+                        project.name
+                    );
+                    return Err(problem(source_pos, message));
+                }
+            }
             let import = &project.imports[index];
             let child_canonical = absolute(&import.folder).map_err(|e| {
                 problem(
@@ -634,6 +656,12 @@ impl Loader {
                     format!("Cannot read the project at {}: {}", import.folder.display(), e),
                 )
             })?;
+            if let Some(root) = &confined {
+                let name = &import.project_name;
+                check_inside(root, &child_canonical, "its folder", name).map_err(|m| problem(source_pos, m))?;
+                check_inside(root, &import.folder.join(PROJECT_FILE), PROJECT_FILE, name)
+                    .map_err(|m| problem(source_pos, m))?;
+            }
             if !seen.insert((child_canonical.clone(), import.group.clone())) {
                 let message = match &import.group {
                     Some(group) => format!(
@@ -656,7 +684,15 @@ impl Loader {
                 ));
             } else {
                 let mut child = Project::load(&import.folder)?;
+                if let Some(root) = &confined {
+                    for file in &child.files {
+                        let relative = file.path.strip_prefix(&child.folder).unwrap_or(&file.path);
+                        check_inside(root, &file.path, &relative.display().to_string(), &child.name)
+                            .map_err(|m| problem(source_pos, m))?;
+                    }
+                }
                 child.remote = remote;
+                child.confined = confined;
                 self.check_name_of(&file, import, name_pos, &child.name)?;
                 if let Some(other) = self.names.get(&child.name) {
                     if *other != child_canonical {
@@ -685,7 +721,7 @@ impl Loader {
         name: &str,
         repo: &RepoSource,
         (file, pos): (&str, Pos),
-    ) -> Result<(PathBuf, Remote), ProjectError> {
+    ) -> Result<(PathBuf, Remote, PathBuf), ProjectError> {
         if let Remotes::Locked { cache, lock } = &self.remotes {
             let lock = lock.as_ref().map_err(Clone::clone)?;
             return locked_repo(name, repo, cache, lock.as_ref(), (file, pos));
@@ -719,7 +755,7 @@ impl Loader {
             commit: fetched.commit,
             subdir: repo.subdir.clone(),
         };
-        Ok((folder, remote))
+        Ok((folder, remote, fetched.path))
     }
 
     /// Checks that the project that an import found has the name that the import says.
@@ -737,6 +773,46 @@ impl Loader {
     }
 }
 
+/// The path with `.` removed and each `..` taken to cancel the part before it, without looking at the disk, so a link
+/// is not followed. A `..` at the start is kept.
+fn lexical(path: &Path) -> PathBuf {
+    let mut parts: Vec<std::path::Component> = Vec::new();
+    for part in path.components() {
+        match part {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir if matches!(parts.last(), Some(std::path::Component::Normal(_))) => {
+                parts.pop();
+            }
+            other => parts.push(other),
+        }
+    }
+    parts.iter().collect()
+}
+
+/// Checks that a file of a project that is inside a clone is inside it still once the links are followed. `what` says
+/// which file, for the message, which names where a link leads and never what is in the file that it leads to. A
+/// path that cannot be followed is left for the ordinary reading of it to report, unless it is a link.
+fn check_inside(root: &Path, path: &Path, what: &str, project: &str) -> Result<(), String> {
+    let inside = |target: &Path| match std::fs::canonicalize(root) {
+        Ok(root) => target.starts_with(root),
+        Err(_) => false,
+    };
+    match std::fs::canonicalize(path) {
+        Ok(target) if inside(&target) => Ok(()),
+        Ok(target) => Err(format!(
+            "The {} of the project {} leads to {}, which is outside the repository",
+            what,
+            project,
+            target.display()
+        )),
+        Err(_) if path.is_symlink() => Err(format!(
+            "The {} of the project {} is a link that leads nowhere",
+            what, project
+        )),
+        Err(_) => Ok(()),
+    }
+}
+
 /// The folder of a project in a repository as the lock records it. The lock must have an entry for the project that is
 /// from this repository and folder, and the commit of it must be in the cache. Neither is a thing that this run can
 /// put right, so both are reported at the import and say to run `constructo project update`.
@@ -746,7 +822,7 @@ fn locked_repo(
     cache: &Result<Cache, String>,
     lock: Option<&Lock>,
     (file, pos): (&str, Pos),
-) -> Result<(PathBuf, Remote), ProjectError> {
+) -> Result<(PathBuf, Remote, PathBuf), ProjectError> {
     let unverified = |message: String| ProjectError::Unverified(Diagnostic::new(file, pos, message));
     let Some(lock) = lock else {
         return Err(unverified(format!(
@@ -780,7 +856,7 @@ fn locked_repo(
     };
     let folder = match &remote.subdir {
         Some(subdir) => checkout.join(subdir),
-        None => checkout,
+        None => checkout.clone(),
     };
     Ok((
         folder,
@@ -789,6 +865,7 @@ fn locked_repo(
             commit: remote.commit.clone(),
             subdir: remote.subdir.clone(),
         },
+        checkout,
     ))
 }
 
