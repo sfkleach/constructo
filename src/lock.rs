@@ -6,6 +6,7 @@
 
 use crate::diagnostics::{Diagnostic, Pos};
 use crate::digest::{is_digest, project_digest};
+use crate::fetch::{is_commit, redact, validate_url};
 use crate::project::check_name;
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -32,6 +33,9 @@ struct LockTable {
 #[serde(deny_unknown_fields)]
 struct ProjectTable {
     name: Spanned<String>,
+    repo: Option<Spanned<String>>,
+    commit: Option<Spanned<String>>,
+    subdir: Option<Spanned<String>>,
     digest: Spanned<String>,
     files: BTreeMap<String, Spanned<String>>,
 }
@@ -43,12 +47,33 @@ pub struct Recorded {
     pub pos: Pos,
 }
 
+/// Where a project that was fetched from a git repository came from: the repository, the commit that was found and the
+/// folder in the repository that holds the project, if it is not the root of it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LockedRemote {
+    pub repo: String,
+    pub commit: String,
+    pub subdir: Option<String>,
+}
+
+impl LockedRemote {
+    /// The remote as a person would say it, such as `https://example.com/lib.git at 9f2c...`, with the folder if any.
+    pub fn describe(&self) -> String {
+        match &self.subdir {
+            Some(subdir) => format!("{} at {} in {}", self.repo, self.commit, subdir),
+            None => format!("{} at {}", self.repo, self.commit),
+        }
+    }
+}
+
 /// The entry for one project.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LockedProject {
     pub name: String,
     /// The position of the name, which is where the entry starts.
     pub pos: Pos,
+    /// Where the project came from if it was fetched, and `None` for one that is a folder on disk.
+    pub remote: Option<LockedRemote>,
     pub digest: Recorded,
     /// The digest of each file, keyed by the path inside the project, written with `/`.
     pub files: BTreeMap<String, Recorded>,
@@ -62,6 +87,7 @@ impl LockedProject {
         LockedProject {
             name: name.to_string(),
             pos: at,
+            remote: None,
             digest: Recorded {
                 digest: project_digest(files),
                 pos: at,
@@ -131,6 +157,40 @@ impl Lock {
                     format!("The project {} is in the lock file twice", name),
                 ));
             }
+            let remote = match (&entry.repo, &entry.commit, &entry.subdir) {
+                (None, None, None) => None,
+                (Some(repo), Some(commit), subdir) => {
+                    if let Err(reason) = validate_url(repo.get_ref()) {
+                        let message = format!("Invalid repository \"{}\": {}", redact(repo.get_ref()), reason);
+                        return Err(invalid(repo.span().start, message));
+                    }
+                    if !is_commit(commit.get_ref()) {
+                        let message = format!(
+                            "Invalid commit \"{}\": it should be 40 lowercase hexadecimal digits",
+                            commit.get_ref()
+                        );
+                        return Err(invalid(commit.span().start, message));
+                    }
+                    if let Some(subdir) = subdir {
+                        if let Err(reason) = check_path(subdir.get_ref()) {
+                            let message = format!("Invalid subdir \"{}\": {}", subdir.get_ref(), reason);
+                            return Err(invalid(subdir.span().start, message));
+                        }
+                    }
+                    Some(LockedRemote {
+                        repo: repo.get_ref().clone(),
+                        commit: commit.get_ref().clone(),
+                        subdir: subdir.as_ref().map(|subdir| subdir.get_ref().clone()),
+                    })
+                }
+                _ => {
+                    let message = format!(
+                        "The project {} needs both `repo` and `commit`, or neither, and a `subdir` needs them",
+                        name
+                    );
+                    return Err(invalid(start, message));
+                }
+            };
             let digest = entry.digest.get_ref();
             if !is_digest(digest) {
                 return Err(invalid(
@@ -182,6 +242,7 @@ impl Lock {
             projects.push(LockedProject {
                 name: name.clone(),
                 pos: at(start),
+                remote,
                 digest: Recorded {
                     digest: digest.clone(),
                     pos: at(entry.digest.span().start),
@@ -199,9 +260,19 @@ impl Lock {
         sorted.sort_by(|a, b| a.name.cmp(&b.name));
         let mut out = format!("{}\nversion = {}\n", HEADER, VERSION);
         for project in sorted {
+            out.push_str(&format!("\n[[project]]\nname = {}\n", quote(&project.name)));
+            if let Some(remote) = &project.remote {
+                out.push_str(&format!(
+                    "repo = {}\ncommit = {}\n",
+                    quote(&remote.repo),
+                    quote(&remote.commit)
+                ));
+                if let Some(subdir) = &remote.subdir {
+                    out.push_str(&format!("subdir = {}\n", quote(subdir)));
+                }
+            }
             out.push_str(&format!(
-                "\n[[project]]\nname = {}\ndigest = {}\n\n[project.files]\n",
-                quote(&project.name),
+                "digest = {}\n\n[project.files]\n",
                 quote(&project.digest.digest)
             ));
             // A `BTreeMap` of strings is ordered by the bytes of the paths, which is the order that the digest uses.
@@ -216,7 +287,7 @@ impl Lock {
 /// Checks that a path is one that can be a path inside a project: relative, written with `/` and with no empty part,
 /// `.` or `..`. The reason is returned if it is not valid. It could not be a file of the project otherwise, and a path
 /// that leaves the folder would let a lock file name a file elsewhere.
-fn check_path(path: &str) -> Result<(), String> {
+pub(crate) fn check_path(path: &str) -> Result<(), String> {
     if path.is_empty() {
         return Err("it is empty".to_string());
     }
@@ -449,5 +520,48 @@ digest = \"sha256:753517eedcd17f9bae3699b7e6b2a1be5f91f4e382a3d80de5f0f59ebdc5b1
         let read = Lock::parse(&lock.render(), "c.lock").unwrap();
         assert_eq!(read.render(), lock.render());
         assert!(read.get("a.b").unwrap().files.contains_key(&files[0].0));
+    }
+    #[test]
+    fn a_fetched_project_records_where_it_came_from() {
+        let files = vec![("constructo.toml".to_string(), file_digest(b"x"))];
+        let mut entry = LockedProject::new("example.lib", &files);
+        let commit = "ab".repeat(20);
+        entry.remote = Some(LockedRemote {
+            repo: "https://example.com/lib.git".to_string(),
+            commit: commit.clone(),
+            subdir: Some("shapes".to_string()),
+        });
+        let text = Lock::new(vec![entry.clone()]).render();
+        assert!(
+            text.contains(&format!(
+                "name = \"example.lib\"\nrepo = \"https://example.com/lib.git\"\ncommit = \"{}\"\nsubdir = \"shapes\"\ndigest",
+                commit
+            )),
+            "{}",
+            text
+        );
+        let again = Lock::parse(&text, "constructo.lock").unwrap();
+        assert_eq!(again.get("example.lib").unwrap().remote, entry.remote);
+        assert_eq!(again.render(), text);
+    }
+
+    #[test]
+    fn the_remote_of_a_project_is_strict() {
+        let files = vec![("constructo.toml".to_string(), file_digest(b"x"))];
+        let entry = LockedProject::new("example.lib", &files);
+        let good = Lock::new(vec![entry]).render();
+        let with = |extra: &str| good.replacen("digest =", &format!("{}digest =", extra), 1);
+        let commit = "ab".repeat(20);
+        let err = |text: String| Lock::parse(&text, "constructo.lock").unwrap_err().to_string();
+        assert!(err(with("repo = \"https://example.com/lib\"\n")).contains("both `repo` and `commit`"));
+        assert!(err(with(&format!("commit = \"{}\"\n", commit))).contains("both `repo` and `commit`"));
+        assert!(err(with(&format!("subdir = \"a\"\ncommit = \"{}\"\n", commit))).contains("both `repo` and `commit`"));
+        assert!(err(with(&format!("repo = \"ext::ls\"\ncommit = \"{}\"\n", commit))).contains("Invalid repository"));
+        assert!(err(with("repo = \"/r\"\ncommit = \"abc\"\n")).contains("Invalid commit"));
+        assert!(err(with(&format!(
+            "repo = \"/r\"\ncommit = \"{}\"\nsubdir = \"../a\"\n",
+            commit
+        )))
+        .contains("Invalid subdir"));
     }
 }

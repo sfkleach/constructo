@@ -149,11 +149,11 @@ pub fn url_key(url: &str) -> String {
 }
 
 /// A folder that is made for a while and removed, with what is in it, when it is dropped.
-struct Scratch(PathBuf);
+pub(crate) struct Scratch(pub(crate) PathBuf);
 
 impl Scratch {
     /// Makes a new folder with a name of its own in the folder given.
-    fn new(parent: &Path) -> Result<Scratch, ProjectError> {
+    pub(crate) fn new(parent: &Path) -> Result<Scratch, ProjectError> {
         static COUNT: AtomicU32 = AtomicU32::new(0);
         std::fs::create_dir_all(parent).map_err(|e| cannot(parent, "make", e))?;
         let name = format!("tmp-{}-{}", std::process::id(), COUNT.fetch_add(1, Ordering::Relaxed));
@@ -356,6 +356,7 @@ fn git(args: &[&str], folder: Option<&Path>, url: &str) -> Result<String, Projec
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::Repo;
 
     #[test]
     fn the_urls_that_can_be_used() {
@@ -484,60 +485,6 @@ mod tests {
         );
         // A commit that is not well-formed is never looked up, whatever is on disk.
         assert_eq!(cache.lookup("https://example.com/lib", "../../x"), None);
-    }
-
-    /// A repository in a folder of its own, made by git, with the commits that a test makes in it.
-    struct Repo {
-        folder: PathBuf,
-        _scratch: Scratch,
-    }
-
-    impl Repo {
-        fn new() -> Repo {
-            let scratch = Scratch::new(&std::env::temp_dir()).unwrap();
-            let folder = scratch.0.join("repo");
-            std::fs::create_dir(&folder).unwrap();
-            let repo = Repo {
-                folder,
-                _scratch: scratch,
-            };
-            repo.git(&["init", "--quiet", "--initial-branch=main"]);
-            repo
-        }
-
-        fn git(&self, args: &[&str]) -> String {
-            let output = Command::new("git")
-                .arg("-C")
-                .arg(&self.folder)
-                .args([
-                    "-c",
-                    "user.name=Test",
-                    "-c",
-                    "user.email=test@example.com",
-                    "-c",
-                    "commit.gpgsign=false",
-                ])
-                .args(["-c", "tag.gpgsign=false"])
-                .args(args)
-                .output()
-                .expect("git is needed to test fetching");
-            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-            String::from_utf8_lossy(&output.stdout).trim().to_string()
-        }
-
-        /// Writes a file and commits everything, returning the commit.
-        fn commit(&self, file: &str, text: &str) -> String {
-            let path = self.folder.join(file);
-            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            std::fs::write(path, text).unwrap();
-            self.git(&["add", "-A"]);
-            self.git(&["commit", "--quiet", "-m", text]);
-            self.git(&["rev-parse", "HEAD"])
-        }
-
-        fn url(&self) -> String {
-            self.folder.display().to_string()
-        }
     }
 
     fn cache() -> (Cache, Scratch) {

@@ -14,7 +14,10 @@ The lock has one entry for each project that is loaded, other than the root proj
 - The root project is not recorded, because its files are the ones that are being edited.
 - A built-in project, such as `constructo.prelude`, is not recorded, since it has no files on disk and its content is
   fixed by the binary.
-- The source of a project is not recorded. Different importers may write the same project with different paths.
+- The folder that a project is in is not recorded. Different importers may write the same project with different
+  paths. A project that was fetched from a git repository is different, since the commit is what is relied on: the
+  entry records the repository, the commit and the folder in it (see
+  [A project from a repository](#a-project-from-a-repository)).
 - A project that imports only built-in projects has nothing to record and needs no lock file.
 
 An entry covers the files that the project's `include` and `exclude` patterns select, and its `constructo.toml`.
@@ -46,6 +49,30 @@ digest = "sha256:753517eedcd17f9bae3699b7e6b2a1be5f91f4e382a3d80de5f0f59ebdc5b16
 | `name`               | string | The full name of the project. It is unique in the file.                    |
 | `digest`             | string | The digest of the project, as below.                                       |
 | `[project.files]`    | table  | The digest of each file, keyed by its path inside the project, with `/`.   |
+
+### A project from a repository
+
+The entry for a project that was fetched from a git repository also has `repo` and `commit`, and `subdir` if the
+project is in a folder of the repository.
+
+```toml
+[[project]]
+name = "com.example.lib"
+repo = "https://example.com/lib.git"
+commit = "9f2c5a1e0b7d4c3a8e6f1d2b9a0c7e5f4d3b2a10"
+digest = "sha256:..."
+```
+
+| Key      | Type   | Meaning                                                                         |
+|----------|--------|---------------------------------------------------------------------------------|
+| `repo`   | string | The URL as written in the `repo` of the import. It has no password.             |
+| `commit` | string | The commit that `rev` named at `constructo project update`: 40 lowercase hex.   |
+| `subdir` | string | The folder in the repository that holds the project. Left out if there is none. |
+
+The `rev` of the import is not recorded. `update` looks it up again each time, which is how a branch is brought
+forward, and the commit is what the lock pins. `repo` and `commit` come together or not at all, and `subdir` needs
+them. A `repo` that is not an acceptable URL, a `commit` that is not well-formed and a `subdir` that is not a
+relative path are errors, as for the other keys.
 
 The file is strict. These are errors, with a line and column in `constructo.lock`, and the exit code is 2, as for the
 project-file:
