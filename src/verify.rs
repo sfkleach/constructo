@@ -58,13 +58,19 @@ fn at_import(set: &ProjectSet, (importer, number): (usize, usize)) -> (String, P
 ///
 /// A file whose project has been loaded but cannot now be read is an error and not a diagnostic.
 pub fn verify_lock(set: &ProjectSet, lock: Option<&Lock>) -> Result<Vec<Diagnostic>, ProjectError> {
+    verify_lock_with(set, lock, false)
+}
+
+/// As `verify_lock`. With `dev` the projects that are folders on disk are not verified, and neither are their entries
+/// in the lock. A project from a repository is always verified, since it cannot be edited here.
+pub fn verify_lock_with(set: &ProjectSet, lock: Option<&Lock>, dev: bool) -> Result<Vec<Diagnostic>, ProjectError> {
     let root = set.projects.len() - 1;
     let lock_name = set.root().folder.join(LOCK_FILE).display().to_string();
     let loaded: Vec<(usize, &Project)> = set
         .projects
         .iter()
         .enumerate()
-        .filter(|(index, project)| *index != root && !project.builtin)
+        .filter(|(index, project)| *index != root && !project.builtin && (!dev || project.remote.is_some()))
         .collect();
     let first = first_imports(set);
     let mut found = Vec::new();
@@ -93,6 +99,9 @@ pub fn verify_lock(set: &ProjectSet, lock: Option<&Lock>) -> Result<Vec<Diagnost
         compare(&lock_name, locked, &actual, &mut found);
     }
     for locked in &lock.projects {
+        if dev && locked.remote.is_none() {
+            continue;
+        }
         if !loaded.iter().any(|(_, project)| project.name == locked.name) {
             let message = format!("The lock has the project {}, which is not imported", locked.name);
             found.push(Diagnostic::new(&lock_name, locked.pos, message));
@@ -680,5 +689,89 @@ mod tests {
         assert!(text.contains("no cache") && text.contains("line 6"), "{}", text);
         let error = update_lock_with(&app.folder, Remotes::Refuse).unwrap_err();
         assert!(error.to_string().contains("cannot be loaded here"), "{}", error);
+    }
+
+    #[test]
+    fn a_locked_load_uses_the_cache_and_says_what_is_missing() {
+        let (repo, app, cache, _scratch) = app_with_repo("locked-load");
+        let commit = repo.git(&["rev-parse", "HEAD"]);
+        update_lock_with(&app.folder, Remotes::Fetch(Ok(cache.clone()))).unwrap();
+        let lock = read_lock(&app.folder).unwrap();
+        let locked = |cache: &Cache, lock: Option<Lock>| Remotes::Locked {
+            cache: Ok(cache.clone()),
+            lock: Ok(lock),
+        };
+        // The commit is in the cache, so the project loads and the lock describes it.
+        let set = ProjectSet::load_with(&app.folder, true, locked(&cache, lock.clone())).unwrap();
+        assert_eq!(set.projects[1].remote.as_ref().unwrap().commit, commit);
+        assert!(verify_lock_with(&set, lock.as_ref(), false).unwrap().is_empty());
+        // Without a lock, with a lock that has not got the project, and with a cache that has not got the commit,
+        // the project is not loaded and the message is at the import.
+        let empty = Cache::new(app.folder.join("no-cache"));
+        let cases = [
+            (locked(&cache, None), "there is no constructo.lock"),
+            (
+                locked(&cache, Some(Lock::default())),
+                "is not in constructo.lock as from the repository",
+            ),
+            (locked(&empty, lock.clone()), "is not in the cache"),
+        ];
+        for (remotes, expected) in cases {
+            match ProjectSet::load_with(&app.folder, true, remotes).unwrap_err() {
+                ProjectError::Unverified(diagnostic) => {
+                    let text = diagnostic.to_string();
+                    assert!(text.contains(expected) && text.contains("line 6, col 8"), "{}", text);
+                }
+                other => panic!("{:?}", other),
+            }
+        }
+        // A lock that could not be read is the error that was found, and a cache that cannot be had is exit 2.
+        let broken = Remotes::Locked {
+            cache: Ok(cache.clone()),
+            lock: Err(ProjectError::Cannot("broken".to_string())),
+        };
+        assert!(matches!(
+            ProjectSet::load_with(&app.folder, true, broken).unwrap_err(),
+            ProjectError::Invalid(diagnostic) if diagnostic.message == "broken"
+        ));
+        let no_cache = Remotes::Locked {
+            cache: Err("no cache".to_string()),
+            lock: Ok(lock),
+        };
+        assert!(matches!(
+            ProjectSet::load_with(&app.folder, true, no_cache).unwrap_err(),
+            ProjectError::Invalid(_)
+        ));
+    }
+
+    #[test]
+    fn dev_leaves_out_the_folders_on_disk_but_not_the_repositories() {
+        let (_repo, app, cache, _scratch) = app_with_repo("dev-remote");
+        let local = OnDisk::new(
+            "dev-local",
+            &[("constructo.toml", b"[project]\nname = \"example.local\"\n")],
+        );
+        let mut text = std::fs::read_to_string(app.folder.join("constructo.toml")).unwrap();
+        text.push_str(&format!(
+            "\n[[import]]\nproject-name = \"example.local\"\npath = \"{}\"\n",
+            local.folder.display()
+        ));
+        std::fs::write(app.folder.join("constructo.toml"), text).unwrap();
+        update_lock_with(&app.folder, Remotes::Fetch(Ok(cache.clone()))).unwrap();
+        let lock = read_lock(&app.folder).unwrap();
+        // The local project changes after the lock was made.
+        std::fs::write(
+            local.folder.join("constructo.toml"),
+            "[project]\nname = \"example.local\"\n# changed\n",
+        )
+        .unwrap();
+        let remotes = Remotes::Locked {
+            cache: Ok(cache),
+            lock: Ok(lock.clone()),
+        };
+        let set = ProjectSet::load_with(&app.folder, true, remotes).unwrap();
+        assert_eq!(verify_lock_with(&set, lock.as_ref(), false).unwrap().len(), 1);
+        assert!(verify_lock_with(&set, lock.as_ref(), true).unwrap().is_empty());
+        std::fs::remove_file(app.folder.join(LOCK_FILE)).unwrap();
     }
 }

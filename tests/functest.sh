@@ -1264,6 +1264,63 @@ if command -v git >/dev/null 2>&1; then
     else
         fail "repo: update says when the commit moves (got '$out')"
     fi
+    # The lock now holds the commit, so `check` uses the cache and never the network, even after the repository moves on.
+    printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lib"\nrepo = "%s"\n' "$rp/repo" \
+        > "$rp/app/constructo.toml"
+    printf 'enum Pick = A(example.lib::Shape);\n' > "$rp/app/pick.types"
+    expect_exit "repo: check passes from the cache" 0 check --project="$rp/app"
+    out="$("$CONSTRUCTO" check --verbose --project="$rp/app" 2>&1)" || true
+    if [[ "$out" == *"(project example.lib, verified)"* ]]; then
+        pass "repo: verbose says the project from a repository is verified"
+    else
+        fail "repo: verbose says the project from a repository is verified (got '$out')"
+    fi
+    expect_exit "repo: check passes under --dev too" 0 check --dev --project="$rp/app"
+    out="$("$CONSTRUCTO" check --dev --verbose --project="$rp/app" 2>&1)" || true
+    if [[ "$out" == *"(project example.lib, verified)"* ]]; then
+        pass "repo: --dev does not make a project from a repository unverified"
+    else
+        fail "repo: --dev does not make a project from a repository unverified (got '$out')"
+    fi
+    git_in_repo commit --quiet --allow-empty -m third
+    expect_exit "repo: check does not follow a repository that moved on" 0 check --project="$rp/app"
+    # An empty cache has not got the locked commit, and check does not fetch it.
+    mkdir "$rp/empty"
+    out="$(CONSTRUCTO_CACHE="$rp/empty" "$CONSTRUCTO" check --project="$rp/app" 2>&1)" && status=0 || status=$?
+    if [[ $status -eq 1 && "$out" == *"is not in the cache; run \`constructo project update\` to fetch it ("*"line 6, col 8)" ]]; then
+        pass "repo: check says to run update when the cache has not got the commit"
+    else
+        fail "repo: check says to run update when the cache has not got the commit (exit $status, got '$out')"
+    fi
+    if [[ ! -e "$rp/empty/git" ]]; then pass "repo: and it did not fetch"; else fail "repo: and it did not fetch"; fi
+    rmdir "$rp/empty"
+    # A file in the cache that was changed is a checksum mismatch, whatever --dev says.
+    locked="$(sed -n 's/^commit = "\(.*\)"$/\1/p' "$rp/app/constructo.lock")"
+    cached="$(echo "$CONSTRUCTO_CACHE"/git/*/"$locked")"
+    chmod u+w "$cached/shapes.types"
+    printf 'enum Shape = Square;\n' > "$cached/shapes.types"
+    out="$("$CONSTRUCTO" check --dev --project="$rp/app" 2>&1)" && status=0 || status=$?
+    if [[ $status -eq 1 && "$out" == "ERROR: Checksum mismatch for shapes.types of project example.lib"* ]]; then
+        pass "repo: a changed file in the cache is a checksum mismatch, even with --dev"
+    else
+        fail "repo: a changed file in the cache is a checksum mismatch, even with --dev (exit $status, got '$out')"
+    fi
+    printf 'enum Shape = Circle;\n' > "$cached/shapes.types"
+    # With no lock there is nothing that says which commit to use.
+    mv "$rp/app/constructo.lock" "$rp/app/constructo.lock.off"
+    out="$("$CONSTRUCTO" check --dev --project="$rp/app" 2>&1)" && status=0 || status=$?
+    if [[ $status -eq 1 && "$out" == *"but there is no constructo.lock; run \`constructo project update\` to make one"* ]]; then
+        pass "repo: no lock is an error for a project from a repository, even with --dev"
+    else
+        fail "repo: no lock is an error for a project from a repository, even with --dev (exit $status, got '$out')"
+    fi
+    # A lock that does not parse is exit 2, and --dev does not excuse it for a project from a repository.
+    printf 'not a lock' > "$rp/app/constructo.lock"
+    expect_exit "repo: a lock that does not parse is exit 2" 2 check --project="$rp/app"
+    expect_exit "repo: and is exit 2 under --dev when a repository needs it" 2 check --dev --project="$rp/app"
+    rm -f "$rp/app/constructo.lock"
+    mv "$rp/app/constructo.lock.off" "$rp/app/constructo.lock"
+    rm -f "$rp/app/pick.types"
     printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lib"\nrepo = "%s"\nrev = "nothing-here"\n' \
         "$rp/repo" > "$rp/app/constructo.toml"
     expect_exit "repo: a rev that does not exist is exit 2" 2 project update "$rp/app"
