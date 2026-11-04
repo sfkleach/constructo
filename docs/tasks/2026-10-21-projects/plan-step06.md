@@ -40,8 +40,9 @@ to describe it.
 7. **Cache.** `$CONSTRUCTO_CACHE`, else the OS user cache directory (`$XDG_CACHE_HOME` or `~/.cache`) plus
    `constructo/git/<sha256 of url, 16 hex>/<commit>/`. A checkout is immutable once made (made in a temporary
    directory, then renamed) and is shared across projects.
-8. **Identity.** A remote project's identity is `url@commit` plus `subdir`, replacing the canonical folder used for
-   local ones. The same project name from two identities is the existing "project in two places" error.
+8. **Identity.** A remote project is identified as a local one is, by the canonical path of its folder. That is the
+   checkout in the cache, whose path holds the key of the URL, the commit and the `subdir`, so there is no separate
+   `Identity` type. The same project name from two identities is the existing "project in two places" error.
 9. **Subdir.** Optional; the project folder is `<clone>/<subdir>`. The links-out rule in Step 6 of `projects.md` is
    checked against the clone root, so a file may link elsewhere within the clone but not outside it. The project-file
    is held to the same rule.
@@ -58,8 +59,8 @@ to describe it.
 
 - `src/project.rs`: `ImportTable` gets `path`, `repo`, `rev`, `subdir` and `builtin` (each `Option<Spanned<String>>`),
   validated to exactly one source. `Import` gains a `Source` enum (`Path`, `Builtin`, `Repo { url, rev, subdir }`).
-  `Loader::visit` resolves a `Repo` to its cache checkout using the lock, and `Loader.done`, `names` and `stack` key on
-  an `Identity` enum (`Folder(PathBuf)` or `Remote { url, commit, subdir }`). The existing `is_builtin_source` and
+  `Loader::visit` resolves a `Repo` to its cache checkout using the lock, and `Loader.done`, `names` and `stack` keep
+  keying on the canonical folder. The existing `is_builtin_source` and
   `BUILTIN_SCHEME` are reused for `builtin`.
 - New `src/fetch.rs`: a `git()` wrapper, URL validation, `cache_dir()`, `resolve_rev(url, rev) -> commit`,
   `checkout(url, commit) -> PathBuf` (clone into a temporary directory, `git checkout --detach`, rename), the escape

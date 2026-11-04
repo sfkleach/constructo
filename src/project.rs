@@ -5,7 +5,8 @@
 
 use crate::diagnostics::{Diagnostic, Pos};
 use crate::digest::file_digest;
-use crate::lock::LockedProject;
+use crate::fetch::{redact, validate_url, Cache, Fetched};
+use crate::lock::{check_path, LockedProject, LockedRemote};
 use glob::{MatchOptions, Pattern};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
@@ -97,14 +98,46 @@ pub struct Import {
     pub project_name: String,
     /// The group the project is put into. Without one the project can only be named by its full name.
     pub group: Option<String>,
-    /// The folder of the imported project, as the importing folder joined to the `source`.
+    /// The folder of the imported project, as the importing folder joined to the `path`. For a `repo` it is empty
+    /// until the repository has been fetched, and then it is the folder in the cache.
     pub folder: PathBuf,
+    /// The repository that the project is in, if it is a `repo` import.
+    pub repo: Option<RepoSource>,
     /// The index of the imported project in the `ProjectSet`. This is `None` until the set has been loaded.
     pub target: Option<usize>,
     /// Where the `project-name` of the import is written in the project-file of the importing project.
     pub name_pos: Pos,
     /// Where the `source` of the import is written there.
     pub source_pos: Pos,
+}
+
+/// The `repo`, `rev` and `subdir` of an import, as the project-file gives them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepoSource {
+    pub url: String,
+    /// A tag, a branch or a commit. Without one the head of the default branch is used.
+    pub rev: Option<String>,
+    /// The folder in the repository that holds the project, if it is not the root of it.
+    pub subdir: Option<String>,
+}
+
+/// Where a loaded project was fetched from: the repository, the commit that the lock names or that was found, and the
+/// folder in the repository.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Remote {
+    pub url: String,
+    pub commit: String,
+    pub subdir: Option<String>,
+}
+
+/// Where the projects that are in git repositories come from when a project is loaded.
+#[derive(Debug, Clone, Default)]
+pub enum Remotes {
+    /// There is no way to get them, so an import of one is an error.
+    #[default]
+    Refuse,
+    /// Fetch them into the cache, or say why the cache cannot be had. Only `constructo project update` does this.
+    Fetch(Result<Cache, String>),
 }
 
 /// A types file of a project. A file of a built-in project has its text with it, since it is not on disk.
@@ -126,6 +159,8 @@ pub struct Project {
     pub files: Vec<InputFile>,
     /// True for a project that is built in, which is not reported as an input.
     pub builtin: bool,
+    /// Where the project was fetched from, if it was fetched from a git repository.
+    pub remote: Option<Remote>,
 }
 
 /// Why a project could not be loaded. Both kinds are problems with the invocation, not with the inputs.
@@ -181,6 +216,7 @@ impl Project {
             imports: Vec::new(),
             files,
             builtin: true,
+            remote: None,
         }
     }
 
@@ -218,6 +254,7 @@ impl Project {
             imports: parsed.imports,
             files,
             builtin: false,
+            remote: None,
         })
     }
 
@@ -256,7 +293,13 @@ impl Project {
 
     /// The entry for the project in a lock file, from the digests of its files.
     pub fn lock_entry(&self) -> Result<LockedProject, ProjectError> {
-        Ok(LockedProject::new(&self.name, &self.file_digests()?))
+        let mut entry = LockedProject::new(&self.name, &self.file_digests()?);
+        entry.remote = self.remote.as_ref().map(|remote| LockedRemote {
+            repo: remote.url.clone(),
+            commit: remote.commit.clone(),
+            subdir: remote.subdir.clone(),
+        });
+        Ok(entry)
     }
 
     /// The name of the project-file in diagnostics.
@@ -356,10 +399,30 @@ impl Project {
                     format!("The {} of an import is empty", key),
                 ));
             }
-            if key == "repo" {
-                let message = "Projects in a git repository are not supported yet".to_string();
-                return Err(invalid(found.span().start, message));
-            }
+            let repo = if key == "repo" {
+                if let Err(reason) = validate_url(source) {
+                    let message = format!("Cannot use the repository {}: {}", redact(source), reason);
+                    return Err(invalid(found.span().start, message));
+                }
+                if let Some(rev) = &entry.rev {
+                    if rev.get_ref().is_empty() {
+                        return Err(invalid(rev.span().start, "The rev of an import is empty".to_string()));
+                    }
+                }
+                if let Some(subdir) = &entry.subdir {
+                    if let Err(reason) = check_path(subdir.get_ref()) {
+                        let message = format!("Invalid subdir \"{}\": {}", subdir.get_ref(), reason);
+                        return Err(invalid(subdir.span().start, message));
+                    }
+                }
+                Some(RepoSource {
+                    url: source.clone(),
+                    rev: entry.rev.as_ref().map(|rev| rev.get_ref().clone()),
+                    subdir: entry.subdir.as_ref().map(|subdir| subdir.get_ref().clone()),
+                })
+            } else {
+                None
+            };
             // A built-in project has to be named by both its name and its source, so that neither can be mistaken.
             let named_builtin = name.starts_with(BUILTIN_PREFIX);
             let source_builtin = key == "builtin";
@@ -398,9 +461,12 @@ impl Project {
                 group: entry.group.map(Spanned::into_inner),
                 folder: if source_builtin {
                     PathBuf::from(source)
+                } else if repo.is_some() {
+                    PathBuf::new()
                 } else {
                     folder.join(source)
                 },
+                repo,
                 target: None,
                 name_pos: at(entry.project_name.span().start),
                 source_pos: at(found.span().start),
@@ -432,8 +498,14 @@ impl ProjectSet {
     /// Unless `prelude` is false, every project that does not import the standard prelude itself is given an import of
     /// it into the group `local`, as its first import. A project that does import it has said what it wants.
     pub fn load(folder: &Path, prelude: bool) -> Result<ProjectSet, ProjectError> {
+        ProjectSet::load_with(folder, prelude, Remotes::Refuse)
+    }
+
+    /// As `load`, with `remotes` saying where to get the projects that are in git repositories.
+    pub fn load_with(folder: &Path, prelude: bool, remotes: Remotes) -> Result<ProjectSet, ProjectError> {
         let mut loader = Loader {
             implicit_prelude: prelude,
+            remotes,
             ..Loader::default()
         };
         let root = Project::load(folder)?;
@@ -457,6 +529,7 @@ impl ProjectSet {
             imports: Vec::new(),
             files: Vec::new(),
             builtin: false,
+            remote: None,
         };
         loader
             .visit(root)
@@ -486,6 +559,10 @@ struct Loader {
     names: HashMap<String, PathBuf>,
     /// Whether a project that does not import the prelude is given the import of it.
     implicit_prelude: bool,
+    /// Where the projects in git repositories come from.
+    remotes: Remotes,
+    /// The checkouts made in this run, so that a repository imported twice is fetched once.
+    fetched: HashMap<(String, Option<String>), Fetched>,
 }
 
 impl Loader {
@@ -509,6 +586,7 @@ impl Loader {
                     project_name: PRELUDE_PROJECT.to_string(),
                     group: Some("local".to_string()),
                     folder: PathBuf::from(prelude.uri),
+                    repo: None,
                     target: None,
                     name_pos: start,
                     source_pos: start,
@@ -522,9 +600,21 @@ impl Loader {
         let file = project.project_file();
         let mut seen: HashSet<(PathBuf, Option<String>)> = HashSet::new();
         for index in 0..project.imports.len() {
-            let import = &project.imports[index];
-            let (name_pos, source_pos) = (import.name_pos, import.source_pos);
+            let (name_pos, source_pos) = (project.imports[index].name_pos, project.imports[index].source_pos);
             let problem = |pos: Pos, message: String| ProjectError::Invalid(Diagnostic::new(&file, pos, message));
+            // A project in a repository has no folder until it has been fetched.
+            let remote = match project.imports[index].repo.clone() {
+                Some(repo) => {
+                    let (folder, remote) = self.resolve_repo(&repo).map_err(|e| match e {
+                        ProjectError::Cannot(message) => problem(source_pos, message),
+                        other => other,
+                    })?;
+                    project.imports[index].folder = folder;
+                    Some(remote)
+                }
+                None => None,
+            };
+            let import = &project.imports[index];
             let child_canonical = absolute(&import.folder).map_err(|e| {
                 problem(
                     source_pos,
@@ -552,7 +642,8 @@ impl Loader {
                     format!("The imports form a cycle: {}", names.join(" -> ")),
                 ));
             } else {
-                let child = Project::load(&import.folder)?;
+                let mut child = Project::load(&import.folder)?;
+                child.remote = remote;
                 self.check_name_of(&file, import, name_pos, &child.name)?;
                 if let Some(other) = self.names.get(&child.name) {
                     if *other != child_canonical {
@@ -573,6 +664,39 @@ impl Loader {
         self.projects.push(project);
         self.done.insert(canonical, self.projects.len() - 1);
         Ok(self.projects.len() - 1)
+    }
+
+    /// Gets the repository of a `repo` import and returns the folder of the project in it, with where it came from.
+    fn resolve_repo(&mut self, repo: &RepoSource) -> Result<(PathBuf, Remote), ProjectError> {
+        let key = (repo.url.clone(), repo.rev.clone());
+        let fetched = match self.fetched.get(&key) {
+            Some(fetched) => fetched.clone(),
+            None => {
+                let cache = match &self.remotes {
+                    Remotes::Refuse => {
+                        return Err(ProjectError::Cannot(format!(
+                            "The project in the repository {} cannot be loaded here; run `constructo project update`",
+                            redact(&repo.url)
+                        )))
+                    }
+                    Remotes::Fetch(Ok(cache)) => cache,
+                    Remotes::Fetch(Err(message)) => return Err(ProjectError::Cannot(message.clone())),
+                };
+                let fetched = cache.fetch(&repo.url, repo.rev.as_deref())?;
+                self.fetched.insert(key, fetched.clone());
+                fetched
+            }
+        };
+        let folder = match &repo.subdir {
+            Some(subdir) => fetched.path.join(subdir),
+            None => fetched.path.clone(),
+        };
+        let remote = Remote {
+            url: repo.url.clone(),
+            commit: fetched.commit,
+            subdir: repo.subdir.clone(),
+        };
+        Ok((folder, remote))
     }
 
     /// Checks that the project that an import found has the name that the import says.
@@ -757,9 +881,22 @@ mod tests {
         assert!(bad("project-name = \"x.y\"\npath = \"s\"\nsubdir = \"d\"\n")
             .2
             .contains("`subdir` can only be given with `repo`"));
-        assert!(bad("project-name = \"x.y\"\nrepo = \"https://example.com/x.git\"\n")
+        let (line, col, message) = bad("project-name = \"x.y\"\nrepo = \"ext::sh -c ls\"\n");
+        assert_eq!((line, col), (6, 8));
+        assert!(message.contains("Cannot use the repository"), "{}", message);
+        let (line, col, message) = bad("project-name = \"x.y\"\nrepo = \"https://u:pw@example.com/x\"\n");
+        assert_eq!((line, col), (6, 8));
+        assert!(
+            message.contains("https://***@example.com/x") && !message.contains("pw@"),
+            "{}",
+            message
+        );
+        let (line, col, message) = bad("project-name = \"x.y\"\nrepo = \"/r\"\nsubdir = \"../d\"\n");
+        assert_eq!((line, col), (7, 10));
+        assert!(message.contains("Invalid subdir"), "{}", message);
+        assert!(bad("project-name = \"x.y\"\nrepo = \"/r\"\nrev = \"\"\n")
             .2
-            .contains("not supported yet"));
+            .contains("rev of an import is empty"));
         assert!(bad("project-name = \"x.y\"\npath = \"constructo:/prelude\"\n")
             .2
             .contains("imported with `builtin`"));

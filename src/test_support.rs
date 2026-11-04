@@ -1,6 +1,8 @@
 //! Helpers for the unit tests that need files on disk.
 
+use crate::fetch::Scratch;
 use std::path::PathBuf;
+use std::process::Command;
 
 /// A project on disk, in a folder of its own under the temporary folder. The files that are made are the only
 /// things removed when it is dropped, and then the folders, which must be empty.
@@ -45,5 +47,59 @@ impl Drop for OnDisk {
         for folder in folders.iter().rev() {
             let _ = std::fs::remove_dir(folder);
         }
+    }
+}
+
+/// A repository in a folder of its own, made by git, with the commits that a test makes in it.
+pub(crate) struct Repo {
+    pub folder: PathBuf,
+    _scratch: Scratch,
+}
+
+impl Repo {
+    pub fn new() -> Repo {
+        let scratch = Scratch::new(&std::env::temp_dir()).unwrap();
+        let folder = scratch.0.join("repo");
+        std::fs::create_dir(&folder).unwrap();
+        let repo = Repo {
+            folder,
+            _scratch: scratch,
+        };
+        repo.git(&["init", "--quiet", "--initial-branch=main"]);
+        repo
+    }
+
+    pub fn git(&self, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(&self.folder)
+            .args([
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(["-c", "tag.gpgsign=false"])
+            .args(args)
+            .output()
+            .expect("git is needed to test fetching");
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    /// Writes a file and commits everything, returning the commit.
+    pub fn commit(&self, file: &str, text: &str) -> String {
+        let path = self.folder.join(file);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+        self.git(&["add", "-A"]);
+        self.git(&["commit", "--quiet", "-m", text]);
+        self.git(&["rev-parse", "HEAD"])
+    }
+
+    pub fn url(&self) -> String {
+        self.folder.display().to_string()
     }
 }

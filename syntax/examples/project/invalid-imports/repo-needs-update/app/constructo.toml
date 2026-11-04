@@ -1,0 +1,7 @@
+# expect: The project in the repository https://example.com/lib.git cannot be loaded here; run `constructo project update`
+[project]
+name = "example.app"
+
+[[import]]
+project-name = "example.lib"
+repo = "https://example.com/lib.git"

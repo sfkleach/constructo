@@ -1,7 +1,0 @@
-# expect: Projects in a git repository are not supported yet
-[project]
-name = "example.app"
-
-[[import]]
-project-name = "example.lib"
-repo = "https://example.com/lib.git"

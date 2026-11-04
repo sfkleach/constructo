@@ -1226,6 +1226,60 @@ rm -f "$up/lib/constructo.toml" "$up/lib/shapes.types" "$up/app/constructo.toml"
 rmdir "$up/lib" "$up/app" "$up"
 echo ""
 
+# Projects in a git repository (Step 6). Only `project update` fetches, and it records the commit in the lock.
+echo "=== Projects in a repository ==="
+if command -v git >/dev/null 2>&1; then
+    rp="$(mktemp -d)"
+    mkdir "$rp/repo" "$rp/app"
+    printf '[project]\nname = "example.lib"\n' > "$rp/repo/constructo.toml"
+    printf 'enum Shape = Circle;\n' > "$rp/repo/shapes.types"
+    git_in_repo() { git -C "$rp/repo" -c user.name=Test -c user.email=test@example.com -c commit.gpgsign=false "$@"; }
+    git_in_repo init --quiet --initial-branch=main
+    git_in_repo add -A
+    git_in_repo commit --quiet -m first
+    commit="$(git_in_repo rev-parse HEAD)"
+    printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lib"\nrepo = "%s"\n' "$rp/repo" \
+        > "$rp/app/constructo.toml"
+    export CONSTRUCTO_CACHE="$rp/cache"
+    out="$("$CONSTRUCTO" project update "$rp/app" 2>&1)" || true
+    if [[ "$out" == "Added the project example.lib from $rp/repo at $commit (sha256:"*")" ]]; then
+        pass "repo: update fetches the project and says what it added"
+    else
+        fail "repo: update fetches the project and says what it added (got '$out')"
+    fi
+    if grep -q "^commit = \"$commit\"\$" "$rp/app/constructo.lock" && grep -q '^repo = ' "$rp/app/constructo.lock"; then
+        pass "repo: the lock records the repository and the commit"
+    else
+        fail "repo: the lock records the repository and the commit"
+    fi
+    out="$("$CONSTRUCTO" project update "$rp/app" 2>&1)" || true
+    if [[ -z "$out" ]]; then pass "repo: a second update says nothing"; else fail "repo: a second update says nothing (got '$out')"; fi
+    printf 'enum More = M;\n' > "$rp/repo/more.types"
+    git_in_repo add -A
+    git_in_repo commit --quiet -m second
+    moved="$(git_in_repo rev-parse HEAD)"
+    out="$("$CONSTRUCTO" project update "$rp/app" 2>&1)" || true
+    if [[ "$out" == "Moved the project example.lib from commit $commit to $moved"* ]]; then
+        pass "repo: update says when the commit moves"
+    else
+        fail "repo: update says when the commit moves (got '$out')"
+    fi
+    printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lib"\nrepo = "%s"\nrev = "nothing-here"\n' \
+        "$rp/repo" > "$rp/app/constructo.toml"
+    expect_exit "repo: a rev that does not exist is exit 2" 2 project update "$rp/app"
+    printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lib"\nrepo = "ext::sh -c ls"\n' \
+        > "$rp/app/constructo.toml"
+    expect_exit "repo: a remote helper is refused with exit 2" 2 project update "$rp/app"
+    unset CONSTRUCTO_CACHE
+    rm -rf "$rp/repo/.git" "$rp/cache/git"
+    rm -f "$rp/repo/constructo.toml" "$rp/repo/shapes.types" "$rp/repo/more.types" "$rp/app/constructo.toml" \
+        "$rp/app/constructo.lock"
+    rmdir "$rp/repo" "$rp/app" "$rp/cache" "$rp"
+else
+    echo "  SKIP: git is not installed"
+fi
+echo ""
+
 TOTAL=$(( PASS + FAIL ))
 echo "Results: $PASS/$TOTAL passed"
 if [[ $FAIL -gt 0 ]]; then

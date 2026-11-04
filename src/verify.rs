@@ -4,8 +4,9 @@
 //! exactly what is loaded: nothing missing, nothing extra, and every digest the one that the files have.
 
 use crate::diagnostics::{Diagnostic, Pos};
-use crate::lock::{Lock, LockedProject, LOCK_FILE};
-use crate::project::{Project, ProjectError, ProjectSet};
+use crate::fetch::Cache;
+use crate::lock::{Lock, LockedProject, LockedRemote, LOCK_FILE};
+use crate::project::{Project, ProjectError, ProjectSet, Remotes};
 use std::collections::{HashMap, HashSet};
 use std::io::ErrorKind;
 use std::path::Path;
@@ -153,12 +154,23 @@ pub fn describe_changes(old: Option<&Lock>, new: &Lock) -> Vec<String> {
     let mut lines = Vec::new();
     for project in &new.projects {
         let Some(before) = old.and_then(|lock| lock.get(&project.name)) else {
+            let from = project
+                .remote
+                .as_ref()
+                .map_or(String::new(), |remote| format!(" from {}", remote.describe()));
             lines.push(format!(
-                "Added the project {} ({})",
-                project.name, project.digest.digest
+                "Added the project {}{} ({})",
+                project.name, from, project.digest.digest
             ));
             continue;
         };
+        if before.remote != project.remote {
+            lines.push(describe_move(
+                &project.name,
+                before.remote.as_ref(),
+                project.remote.as_ref(),
+            ));
+        }
         for (path, now) in &project.files {
             match before.files.get(path) {
                 None => lines.push(format!(
@@ -194,13 +206,40 @@ pub fn describe_changes(old: Option<&Lock>, new: &Lock) -> Vec<String> {
     lines
 }
 
+/// The line for a project whose source is not what the old lock recorded: the commit of a repository moved, or the
+/// project is now from somewhere else. The positions in the entries are not compared, only what they say.
+fn describe_move(name: &str, before: Option<&LockedRemote>, now: Option<&LockedRemote>) -> String {
+    let source = |remote: Option<&LockedRemote>| remote.map_or("a folder".to_string(), LockedRemote::describe);
+    match (before, now) {
+        (Some(was), Some(is)) if was.repo == is.repo && was.subdir == is.subdir => {
+            format!("Moved the project {} from commit {} to {}", name, was.commit, is.commit)
+        }
+        _ => format!(
+            "Changed the source of the project {} from {} to {}",
+            name,
+            source(before),
+            source(now)
+        ),
+    }
+}
+
 /// Writes the lock file for the project in the folder, and returns the lines that say what changed. The project is
 /// loaded as `check` loads it, but nothing is type-checked. An old lock file that cannot be read or does not parse is
 /// replaced, since the point is to accept what is on disk, and the first line says so. If there is nothing to record
 /// there is no lock file, and an old one is removed. A file that is already right is not written again.
 pub fn update_lock(folder: &Path) -> Result<Vec<String>, ProjectError> {
+    let cache = Cache::from_environment().map_err(|e| match e {
+        ProjectError::Cannot(message) => message,
+        other => other.to_string(),
+    });
+    update_lock_with(folder, Remotes::Fetch(cache))
+}
+
+/// As `update_lock`, with `remotes` saying how the projects in git repositories are got. This is the only place that
+/// fetches, which `update_lock` does into the cache that the environment names.
+pub fn update_lock_with(folder: &Path, remotes: Remotes) -> Result<Vec<String>, ProjectError> {
     // The prelude is built in and never recorded, so whether it is loaded makes no difference.
-    let set = ProjectSet::load(folder, true)?;
+    let set = ProjectSet::load_with(folder, true, remotes)?;
     let new = lock_for(&set)?;
     let path = folder.join(LOCK_FILE);
     let mut lines = Vec::new();
@@ -235,7 +274,8 @@ pub fn update_lock(folder: &Path) -> Result<Vec<String>, ProjectError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::OnDisk;
+    use crate::fetch::Scratch;
+    use crate::test_support::{OnDisk, Repo};
 
     const LIB: &str = "[project]\nname = \"example.lib\"\n";
     const SHAPES: &[u8] = b"enum Shape = Circle;\n";
@@ -531,5 +571,114 @@ mod tests {
         assert!(lines[0].starts_with("Removed the project example.lib (sha256:"));
         assert!(!app.folder.join(LOCK_FILE).exists());
         drop(lib);
+    }
+
+    /// A repository that holds a project named `example.lib` with the file `shapes.types`, and an app that imports it
+    /// from there. The cache is in a scratch folder of its own.
+    fn app_with_repo(test: &str) -> (Repo, OnDisk, Cache, Scratch) {
+        let repo = Repo::new();
+        repo.commit("constructo.toml", LIB);
+        repo.commit("shapes.types", "enum Shape = Circle;\n");
+        let app_file = format!(
+            "[project]\nname = \"example.app\"\n\n[[import]]\nproject-name = \"example.lib\"\nrepo = \"{}\"\n",
+            repo.url()
+        );
+        let app = OnDisk::new(&format!("{}-app", test), &[("constructo.toml", app_file.as_bytes())]);
+        let scratch = Scratch::new(&std::env::temp_dir()).unwrap();
+        let cache = Cache::new(scratch.0.join("cache"));
+        (repo, app, cache, scratch)
+    }
+
+    #[test]
+    fn update_records_the_commit_of_a_project_in_a_repository() {
+        let (repo, app, cache, _scratch) = app_with_repo("update-repo");
+        let commit = repo.git(&["rev-parse", "HEAD"]);
+        let lines = update_lock_with(&app.folder, Remotes::Fetch(Ok(cache.clone()))).unwrap();
+        assert_eq!(lines.len(), 1, "{:?}", lines);
+        assert!(
+            lines[0].starts_with(&format!(
+                "Added the project example.lib from {} at {} (sha256:",
+                repo.url(),
+                commit
+            )),
+            "{}",
+            lines[0]
+        );
+        let lock = read_lock(&app.folder).unwrap().unwrap();
+        let remote = lock.get("example.lib").unwrap().remote.clone().unwrap();
+        assert_eq!((remote.repo, remote.commit, remote.subdir), (repo.url(), commit, None));
+        assert!(lock.get("example.lib").unwrap().files.contains_key("shapes.types"));
+        // Nothing has changed, so nothing is said.
+        assert!(update_lock_with(&app.folder, Remotes::Fetch(Ok(cache)))
+            .unwrap()
+            .is_empty());
+        std::fs::remove_file(app.folder.join(LOCK_FILE)).unwrap();
+    }
+
+    #[test]
+    fn update_says_when_the_commit_of_a_repository_moves() {
+        let (repo, app, cache, _scratch) = app_with_repo("update-moves");
+        let first = repo.git(&["rev-parse", "HEAD"]);
+        update_lock_with(&app.folder, Remotes::Fetch(Ok(cache.clone()))).unwrap();
+        let second = repo.commit("more.types", "enum More = M;\n");
+        let lines = update_lock_with(&app.folder, Remotes::Fetch(Ok(cache))).unwrap();
+        assert_eq!(
+            lines[0],
+            format!("Moved the project example.lib from commit {} to {}", first, second)
+        );
+        assert!(
+            lines[1].starts_with("Added the file more.types of project example.lib"),
+            "{:?}",
+            lines
+        );
+        std::fs::remove_file(app.folder.join(LOCK_FILE)).unwrap();
+    }
+
+    #[test]
+    fn update_finds_the_project_in_a_subdir_and_the_one_it_imports_from_another_repository() {
+        let inner = Repo::new();
+        inner.commit("constructo.toml", "[project]\nname = \"example.inner\"\n");
+        let outer = Repo::new();
+        let mid = format!(
+            "[project]\nname = \"example.mid\"\n\n[[import]]\nproject-name = \"example.inner\"\nrepo = \"{}\"\n",
+            inner.url()
+        );
+        outer.commit("libs/mid/constructo.toml", &mid);
+        let app_file = format!(
+            "[project]\nname = \"example.app\"\n\n[[import]]\nproject-name = \"example.mid\"\nrepo = \"{}\"\nsubdir = \"libs/mid\"\n",
+            outer.url()
+        );
+        let app = OnDisk::new("update-subdir-app", &[("constructo.toml", app_file.as_bytes())]);
+        let scratch = Scratch::new(&std::env::temp_dir()).unwrap();
+        let cache = Cache::new(scratch.0.join("cache"));
+        update_lock_with(&app.folder, Remotes::Fetch(Ok(cache))).unwrap();
+        let lock = read_lock(&app.folder).unwrap().unwrap();
+        assert_eq!(lock.projects.len(), 2);
+        assert_eq!(
+            lock.get("example.mid")
+                .unwrap()
+                .remote
+                .as_ref()
+                .unwrap()
+                .subdir
+                .as_deref(),
+            Some("libs/mid")
+        );
+        assert!(lock.get("example.mid").unwrap().files.contains_key("constructo.toml"));
+        assert_eq!(
+            lock.get("example.inner").unwrap().remote.as_ref().unwrap().repo,
+            inner.url()
+        );
+        std::fs::remove_file(app.folder.join(LOCK_FILE)).unwrap();
+    }
+
+    #[test]
+    fn a_failed_fetch_is_reported_at_the_import() {
+        let (_repo, app, _cache, _scratch) = app_with_repo("update-fails");
+        let error = update_lock_with(&app.folder, Remotes::Fetch(Err("no cache".to_string()))).unwrap_err();
+        let text = error.to_string();
+        assert!(text.contains("no cache") && text.contains("line 6"), "{}", text);
+        let error = update_lock_with(&app.folder, Remotes::Refuse).unwrap_err();
+        assert!(error.to_string().contains("cannot be loaded here"), "{}", error);
     }
 }
