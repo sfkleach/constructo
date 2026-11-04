@@ -6,7 +6,7 @@
 use crate::diagnostics::{Diagnostic, Pos};
 use crate::digest::file_digest;
 use crate::fetch::{redact, validate_url, Cache, Fetched};
-use crate::lock::{check_path, LockedProject, LockedRemote};
+use crate::lock::{check_path, Lock, LockedProject, LockedRemote, LOCK_FILE};
 use glob::{MatchOptions, Pattern};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
@@ -138,6 +138,13 @@ pub enum Remotes {
     Refuse,
     /// Fetch them into the cache, or say why the cache cannot be had. Only `constructo project update` does this.
     Fetch(Result<Cache, String>),
+    /// Use the commits that the lock names, which must be in the cache already, and never go to the network. The lock
+    /// is `Ok(None)` if there is no lock file. A lock that could not be read is an error only if a project in a
+    /// repository needs it.
+    Locked {
+        cache: Result<Cache, String>,
+        lock: Result<Option<Lock>, ProjectError>,
+    },
 }
 
 /// A types file of a project. A file of a built-in project has its text with it, since it is not on disk.
@@ -170,13 +177,16 @@ pub enum ProjectError {
     Cannot(String),
     /// The project-file is not valid.
     Invalid(Diagnostic),
+    /// A project cannot be loaded because the lock does not say which commit of it to use. This is a problem with the
+    /// inputs and not with the invocation, since `constructo project update` puts it right.
+    Unverified(Diagnostic),
 }
 
 impl fmt::Display for ProjectError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ProjectError::Cannot(message) => write!(f, "ERROR: {}", message),
-            ProjectError::Invalid(diagnostic) => write!(f, "{}", diagnostic),
+            ProjectError::Invalid(diagnostic) | ProjectError::Unverified(diagnostic) => write!(f, "{}", diagnostic),
         }
     }
 }
@@ -605,10 +615,13 @@ impl Loader {
             // A project in a repository has no folder until it has been fetched.
             let remote = match project.imports[index].repo.clone() {
                 Some(repo) => {
-                    let (folder, remote) = self.resolve_repo(&repo).map_err(|e| match e {
-                        ProjectError::Cannot(message) => problem(source_pos, message),
-                        other => other,
-                    })?;
+                    let name = project.imports[index].project_name.clone();
+                    let (folder, remote) =
+                        self.resolve_repo(&name, &repo, (&file, source_pos))
+                            .map_err(|e| match e {
+                                ProjectError::Cannot(message) => problem(source_pos, message),
+                                other => other,
+                            })?;
                     project.imports[index].folder = folder;
                     Some(remote)
                 }
@@ -667,7 +680,16 @@ impl Loader {
     }
 
     /// Gets the repository of a `repo` import and returns the folder of the project in it, with where it came from.
-    fn resolve_repo(&mut self, repo: &RepoSource) -> Result<(PathBuf, Remote), ProjectError> {
+    fn resolve_repo(
+        &mut self,
+        name: &str,
+        repo: &RepoSource,
+        (file, pos): (&str, Pos),
+    ) -> Result<(PathBuf, Remote), ProjectError> {
+        if let Remotes::Locked { cache, lock } = &self.remotes {
+            let lock = lock.as_ref().map_err(Clone::clone)?;
+            return locked_repo(name, repo, cache, lock.as_ref(), (file, pos));
+        }
         let key = (repo.url.clone(), repo.rev.clone());
         let fetched = match self.fetched.get(&key) {
             Some(fetched) => fetched.clone(),
@@ -681,6 +703,7 @@ impl Loader {
                     }
                     Remotes::Fetch(Ok(cache)) => cache,
                     Remotes::Fetch(Err(message)) => return Err(ProjectError::Cannot(message.clone())),
+                    Remotes::Locked { .. } => unreachable!("a locked import returned above"),
                 };
                 let fetched = cache.fetch(&repo.url, repo.rev.as_deref())?;
                 self.fetched.insert(key, fetched.clone());
@@ -712,6 +735,61 @@ impl Loader {
         );
         Err(ProjectError::Invalid(Diagnostic::new(file, pos, message)))
     }
+}
+
+/// The folder of a project in a repository as the lock records it. The lock must have an entry for the project that is
+/// from this repository and folder, and the commit of it must be in the cache. Neither is a thing that this run can
+/// put right, so both are reported at the import and say to run `constructo project update`.
+fn locked_repo(
+    name: &str,
+    repo: &RepoSource,
+    cache: &Result<Cache, String>,
+    lock: Option<&Lock>,
+    (file, pos): (&str, Pos),
+) -> Result<(PathBuf, Remote), ProjectError> {
+    let unverified = |message: String| ProjectError::Unverified(Diagnostic::new(file, pos, message));
+    let Some(lock) = lock else {
+        return Err(unverified(format!(
+            "The project {} is from the repository {}, but there is no {}; run `constructo project update` to make one",
+            name,
+            redact(&repo.url),
+            LOCK_FILE
+        )));
+    };
+    let remote = lock
+        .get(name)
+        .and_then(|entry| entry.remote.as_ref())
+        .filter(|remote| remote.repo == repo.url && remote.subdir == repo.subdir);
+    let Some(remote) = remote else {
+        return Err(unverified(format!(
+            "The project {} is not in {} as from the repository {}; run `constructo project update` to record it",
+            name,
+            LOCK_FILE,
+            redact(&repo.url)
+        )));
+    };
+    let cache = cache
+        .as_ref()
+        .map_err(|message| ProjectError::Cannot(message.clone()))?;
+    let Some(checkout) = cache.lookup(&remote.repo, &remote.commit) else {
+        return Err(unverified(format!(
+            "The commit {} of {} is not in the cache; run `constructo project update` to fetch it",
+            remote.commit,
+            redact(&remote.repo)
+        )));
+    };
+    let folder = match &remote.subdir {
+        Some(subdir) => checkout.join(subdir),
+        None => checkout,
+    };
+    Ok((
+        folder,
+        Remote {
+            url: remote.repo.clone(),
+            commit: remote.commit.clone(),
+            subdir: remote.subdir.clone(),
+        },
+    ))
 }
 
 /// The folder as an absolute path with no links or `..`, which is the identity of a project. A built-in project is

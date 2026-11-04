@@ -1,6 +1,9 @@
 use clap::{ArgAction, ArgMatches, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use constructo::diagnostics::{Diagnostic, Pos};
-use constructo::verify::{read_lock, update_lock, verify_lock};
+use constructo::fetch::Cache;
+use constructo::lock::Lock;
+use constructo::project::{ProjectError, Remotes};
+use constructo::verify::{read_lock, update_lock, verify_lock_with};
 use constructo::{
     check_in_projects, source_kind, syntax_error, CheckOptions, Config, Experimental, InputFile, Layout, Outcome,
     Project, ProjectInfo, ProjectSet, Source, SourceKind,
@@ -325,21 +328,49 @@ fn main() -> ExitCode {
             }
             // The project is read after the settings, so that a problem with either is reported by itself. There is
             // always a project: without one named it is a virtual project with nothing but the prelude.
+            //
+            // The lock is read first, since the projects in repositories are loaded from the commits that it names. A
+            // run with no project named has no lock. A problem with the lock file itself is a problem with the
+            // invocation.
+            let lock = match project.as_deref() {
+                Some(folder) => read_lock(folder),
+                None => Ok(None),
+            };
+            // A lock that cannot be used is reported at once, unless `--dev` means it is not needed. A project in a
+            // repository needs it whatever `--dev` says, and then it is reported when that project is reached.
+            if let (Err(e), false) = (&lock, dev) {
+                eprintln!("{}", e);
+                return ExitCode::from(EXIT_USAGE);
+            }
             let set = match project.as_deref() {
-                Some(folder) => ProjectSet::load(folder, load_prelude),
+                Some(folder) => {
+                    let cache = Cache::from_environment().map_err(|e| match e {
+                        ProjectError::Cannot(message) => message,
+                        other => other.to_string(),
+                    });
+                    ProjectSet::load_with(
+                        folder,
+                        load_prelude,
+                        Remotes::Locked {
+                            cache,
+                            lock: lock.clone(),
+                        },
+                    )
+                }
                 None => Ok(ProjectSet::unnamed(load_prelude)),
             };
             let set = match set {
                 Ok(set) => set,
                 Err(e) => {
                     eprintln!("{}", e);
-                    return ExitCode::from(EXIT_USAGE);
+                    let unlocked = matches!(e, ProjectError::Unverified(_));
+                    return ExitCode::from(if unlocked { EXIT_ERRORS } else { EXIT_USAGE });
                 }
             };
-            // The lock is verified before anything else is read, and only when a project was named, since a run with
-            // none has no lock. A problem with the lock file itself is a problem with the invocation.
-            if project.is_some() && !dev {
-                if let Some(code) = verify_projects(&set) {
+            // The lock is verified before anything else is read, and only when a project was named. `--dev` leaves
+            // out the projects that are folders on disk, and not those from repositories.
+            if project.is_some() {
+                if let Some(code) = verify_projects(&set, lock.as_ref().ok().and_then(Option::as_ref), dev) {
                     return code;
                 }
             }
@@ -349,9 +380,8 @@ fn main() -> ExitCode {
 }
 
 /// Verifies the projects against the lock file of the root project. The result is the exit code if there is a problem.
-fn verify_projects(set: &ProjectSet) -> Option<ExitCode> {
-    let verified = read_lock(&set.root().folder).and_then(|lock| verify_lock(set, lock.as_ref()));
-    match verified {
+fn verify_projects(set: &ProjectSet, lock: Option<&Lock>, dev: bool) -> Option<ExitCode> {
+    match verify_lock_with(set, lock, dev) {
         Ok(found) if found.is_empty() => None,
         Ok(found) => {
             for diagnostic in &found {
@@ -492,7 +522,8 @@ fn check(
                 // that was switched off.
                 let checked = if std::ptr::eq(project, set.root()) {
                     ""
-                } else if dev {
+                } else if dev && project.remote.is_none() {
+                    // A project from a repository is verified whatever `--dev` says.
                     ", unverified"
                 } else {
                     ", verified"
