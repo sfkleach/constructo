@@ -473,6 +473,9 @@ unverified. It now says that only folders on disk do.
 - Update the grammar files if the project-file is written in Constructo, the
   examples in `syntax/examples/`, the functional tests and the CHANGELOG.
 
+Done. The README, `docs/vision.md`, the CHANGELOG and the examples README describe projects, the decisions 24 to 30
+are written, and the grammar needs no change, since the project-file is TOML and the qualifiers were already in it.
+
 
 ## Out of scope for this task
 
