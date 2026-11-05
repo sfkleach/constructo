@@ -113,6 +113,35 @@ Following the style in https://keepachangelog.com/en/1.0.0/
 - A UTF-8 byte order mark at the start of a types file, a values file, standard input, a configuration file or a
   project-file is removed, as `rustc` does for a source file, so that an editor that adds one does no harm. The first
   character that is left is at line 1, col 1. Before this it was a syntax error in a types or values file.
+- Projects (decisions 24 to 30). A project is a folder with a project-file `constructo.toml`, which gives its name,
+  the types files that belong to it (`include` and `exclude` globs) and the other projects that it imports. The format
+  is in `docs/specs/project-file-format.md`.
+  - `constructo check --project=FOLDER` checks the types files of the project, and of every project it imports, before
+    the files on the command line. A project-file is strict, and a problem with it is an error with exit code 2 at the
+    offending value in `constructo.toml`.
+  - An `[[import]]` says where a project is with exactly one of `path`, `builtin` and `repo`, and may put it into a
+    `group`. Imports are loaded to any depth, each project once, and a cycle, a name that does not match and two
+    projects with one name are errors.
+  - Names are resolved in the project that writes them (decision 25, `docs/specs/resolving-identifiers.md`). A name
+    may be bare, `group::Name` or `com.example.project::Name`, in types and in values. Imports are not transitive for
+    names. An ambiguous name is an error at its use, and a message shows a name in full when a bare one would be
+    unclear.
+  - The prelude is the built-in project `constructo.prelude` (decision 26), imported into `local` by every project
+    unless it imports it itself. `builtin = "constructo:/prelude"` imports it by hand.
+  - `constructo project update [FOLDER]` writes `constructo.lock` (decision 27, `docs/specs/lock-file-format.md`),
+    which holds a SHA-256 digest of each file of each imported project, and says what changed. `constructo check`
+    verifies the lock, and a changed, added or removed file, or a project with no entry, is an error with exit code 1.
+    `constructo check -v` says `verified` for each imported project.
+  - `--dev` (`-d`), `--no-dev` and `dev` in `[check]` of a configuration file switch the verification off for the
+    projects that are folders on disk (decision 28).
+  - A project can come from a git repository, with `repo`, `rev` and `subdir` (decisions 29 and 30). Only
+    `constructo project update` fetches: it resolves the `rev` to a commit, puts the files in a cache and records the
+    commit in the lock. `constructo check` never uses the network, and loads the project from the commit in the lock
+    and the cache. The cache is `$CONSTRUCTO_CACHE`, or `constructo` under `$XDG_CACHE_HOME` or `~/.cache`. The `git`
+    program does the work, with hooks and the user's git configuration switched off, and only https, ssh and local
+    repositories are allowed. A project from a repository must stay inside its clone, and `--dev` does not make it
+    unverified.
+  - The library has the `project`, `lock`, `verify` and `fetch` modules.
 
 ### Changed
 

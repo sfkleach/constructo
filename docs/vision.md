@@ -75,6 +75,14 @@ The pipeline validates every `*.values` file against the schema, and a generated
 config piped on stdin. A non-zero exit fails the build, so mistakes are caught
 before deployment.
 
+## Day four: Priya shares the schema
+
+The schema grows, and other teams want it. Priya turns the folder into a project: a `constructo.toml` gives it the name
+`com.acme.deploy`. The other teams import it from the git repository, at the tag `v1.0.0`, and write
+`deploy::Env` or `com.acme.deploy::Env` for its types. `constructo project update` fetches the tag, pins the commit and
+records a checksum of every file in `constructo.lock`. In CI, `constructo check --project=.` uses the lock and the
+cache and never touches the network, so a tag that is moved later is noticed and not followed.
+
 ## Capabilities established
 
 - Validate the syntax of a types file.
@@ -85,6 +93,9 @@ before deployment.
   disables it.
 - Post-parse checks: duplicate variants or fields, unknown types, wrong generic
   arity.
+- Group types into projects, import projects from folders, git repositories or the binary, and refer to them by group
+  or by full name.
+- Pin imported projects with a lock file of checksums, and verify it offline.
 - Warnings (e.g. `+8080` where a `Nat` is expected) are distinguished from errors.
 - Precise error locations; machine-friendly exit codes.
 

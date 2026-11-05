@@ -1,5 +1,5 @@
 //! Fetching a project from a git repository into a cache, as planned in
-//! `docs/tasks/2026-10-21-projects/plan-step06.md`.
+//! `docs/tasks/done/2026-10-21-projects/plan-step06.md`.
 //!
 //! Only `constructo project update` fetches. `check` looks in the cache for the commit that the lock names and never
 //! goes to the network. The work is done by running `git`, which is treated with care, since the repository is
