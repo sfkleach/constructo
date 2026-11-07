@@ -151,18 +151,67 @@ pub fn url_key(url: &str) -> String {
 /// The start of the name of a scratch folder.
 const SCRATCH_PREFIX: &str = "tmp-";
 
-/// How long a scratch folder may go unchanged before it is taken to belong to a run that was killed. No fetch takes
-/// anything like as long.
+/// How often the folder of a run that is going has its time changed. It is much less than `STALE_AFTER`.
+const HEARTBEAT: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+
+/// How long a scratch folder may go unchanged before it is taken to belong to a run that was killed. A run that is
+/// going changes the time every `HEARTBEAT`, so it never gets this old.
 const STALE_AFTER: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
 
 /// A folder that is made for a while and removed, with what is in it, when it is dropped.
-pub(crate) struct Scratch(pub(crate) PathBuf);
+pub(crate) struct Scratch(pub(crate) PathBuf, Heartbeat);
+
+/// A thread that changes the time of a folder every so often while the folder is in use, so that `Scratch::sweep` can
+/// tell a run that is still going from one that was killed, however long the run takes. It stops when it is dropped.
+struct Heartbeat {
+    stop: Option<std::sync::mpsc::Sender<()>>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Heartbeat {
+    fn start(folder: PathBuf, every: std::time::Duration) -> Heartbeat {
+        let (stop, stopped) = std::sync::mpsc::channel::<()>();
+        let thread = std::thread::spawn(move || {
+            // Only a timeout means that it is time to touch the folder. A message or a dropped sender means stop.
+            while let Err(std::sync::mpsc::RecvTimeoutError::Timeout) = stopped.recv_timeout(every) {
+                // A failure is ignored: the worst that follows is that the folder looks old to a sweep.
+                if let Ok(file) = std::fs::File::open(&folder) {
+                    let _ = file.set_modified(std::time::SystemTime::now());
+                }
+            }
+        });
+        Heartbeat {
+            stop: Some(stop),
+            thread: Some(thread),
+        }
+    }
+}
+
+impl Heartbeat {
+    fn stop(&mut self) {
+        // Dropping the sender wakes the thread at once, so that waiting for it does not take an interval.
+        self.stop.take();
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+impl Drop for Heartbeat {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
 
 impl Scratch {
     /// Makes a new folder with a name of its own in the folder given. The name has the process, the time and a count
     /// in it. A folder that is there already is left alone, since it may belong to a run that is still going (in a
     /// container that shares the cache, a process number is not unique), and another name is tried.
     pub(crate) fn new(parent: &Path) -> Result<Scratch, ProjectError> {
+        Scratch::new_with(parent, HEARTBEAT)
+    }
+
+    fn new_with(parent: &Path, every: std::time::Duration) -> Result<Scratch, ProjectError> {
         static COUNT: AtomicU32 = AtomicU32::new(0);
         std::fs::create_dir_all(parent).map_err(|e| cannot(parent, "make", e))?;
         loop {
@@ -178,7 +227,10 @@ impl Scratch {
             );
             let path = parent.join(name);
             match std::fs::create_dir(&path) {
-                Ok(()) => return Ok(Scratch(path)),
+                Ok(()) => {
+                    let heartbeat = Heartbeat::start(path.clone(), every);
+                    return Ok(Scratch(path, heartbeat));
+                }
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
                 Err(e) => return Err(cannot(&path, "make", e)),
             }
@@ -209,6 +261,8 @@ impl Scratch {
 
 impl Drop for Scratch {
     fn drop(&mut self) {
+        // The heartbeat is stopped first, so that it does not touch a folder that is being removed.
+        self.1.stop();
         // The folder was made by `Scratch::new` for the purpose and holds only what git put in it.
         let _ = std::fs::remove_dir_all(&self.0);
     }
@@ -558,6 +612,25 @@ mod tests {
         Scratch::sweep(&parent);
         assert!(!stale.exists(), "the old scratch folder should go");
         assert!(unrelated.is_dir() && first.0.is_dir());
+    }
+
+    #[test]
+    fn a_scratch_folder_in_use_keeps_itself_young() {
+        let (_cache, outer) = cache();
+        let parent = outer.0.join("git");
+        let scratch = Scratch::new_with(&parent, std::time::Duration::from_millis(20)).unwrap();
+        let old = std::time::SystemTime::now() - STALE_AFTER - std::time::Duration::from_secs(60);
+        std::fs::File::open(&scratch.0).unwrap().set_modified(old).unwrap();
+        // Within a short time the heartbeat has changed the time again, so a sweep leaves the folder.
+        let young = (0..100).any(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            std::fs::metadata(&scratch.0)
+                .and_then(|meta| meta.modified())
+                .is_ok_and(|modified| modified.elapsed().is_ok_and(|age| age < STALE_AFTER))
+        });
+        assert!(young, "the heartbeat should have renewed the time");
+        Scratch::sweep(&parent);
+        assert!(scratch.0.is_dir());
     }
 
     #[test]
