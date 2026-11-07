@@ -152,7 +152,13 @@ pub fn url_key(url: &str) -> String {
 /// The start of the name of a scratch folder.
 const SCRATCH_PREFIX: &str = "tmp-";
 
-/// How often the folder of a run that is going has its time changed. It is much less than `STALE_AFTER`.
+/// The name of the lock file in a scratch folder. It is made with the folder, and its modified time is renewed for as
+/// long as the run that made it is going, which is how `Scratch::sweep` tells such a run from one that was killed. A
+/// file is used, and not the time of the folder itself, since a file can have its time changed on every platform,
+/// while on Windows a folder cannot even be opened in the ordinary way.
+const SCRATCH_LOCK: &str = "lock";
+
+/// How often the lock file of a run that is going has its time renewed. It is much less than `STALE_AFTER`.
 const HEARTBEAT: std::time::Duration = std::time::Duration::from_secs(60 * 60);
 
 /// The size of the stack of the heartbeat thread, which is the size that Rust gives a thread when none is given. A
@@ -160,34 +166,34 @@ const HEARTBEAT: std::time::Duration = std::time::Duration::from_secs(60 * 60);
 /// only for the part of the stack that is touched.
 const HEARTBEAT_STACK: usize = 2 * 1024 * 1024;
 
-/// How long a scratch folder may go unchanged before it is taken to belong to a run that was killed. A run that is
-/// going changes the time every `HEARTBEAT`, so it never gets this old.
+/// How long the lock file of a scratch folder may go without being renewed before the folder is taken to belong to a
+/// run that was killed. A run that is going renews it every `HEARTBEAT`, so it never gets this old.
 const STALE_AFTER: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
 
 /// A folder that is made for a while and removed, with what is in it, when it is dropped.
 pub(crate) struct Scratch(pub(crate) PathBuf, Heartbeat);
 
-/// A thread that changes the time of a folder every so often while the folder is in use, so that `Scratch::sweep` can
-/// tell a run that is still going from one that was killed, however long the run takes. It stops when it is dropped.
+/// A thread that renews the modified time of a lock file every so often while its folder is in use, so that
+/// `Scratch::sweep` can tell a run that is still going from one that was killed, however long the run takes. It stops
+/// when it is dropped.
 struct Heartbeat {
     stop: Option<std::sync::mpsc::Sender<()>>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl Heartbeat {
-    fn start(folder: PathBuf, every: std::time::Duration) -> Heartbeat {
+    /// Starts renewing the time of the lock file, which is held open, and so not opened again each time.
+    fn start(lock: std::fs::File, every: std::time::Duration) -> Heartbeat {
         let (stop, stopped) = std::sync::mpsc::channel::<()>();
         // The size of the stack is given, since otherwise it is read from `RUST_MIN_STACK` in the environment.
         let thread = std::thread::Builder::new()
             .name("heartbeat".to_string())
             .stack_size(HEARTBEAT_STACK)
             .spawn(move || {
-                // Only a timeout means that it is time to touch the folder. A message or a dropped sender means stop.
+                // Only a timeout means that it is time to renew. A message or a dropped sender means stop.
                 while let Err(std::sync::mpsc::RecvTimeoutError::Timeout) = stopped.recv_timeout(every) {
-                    // A failure is ignored: the worst that follows is that the folder looks old to a sweep.
-                    if let Ok(file) = std::fs::File::open(&folder) {
-                        let _ = file.set_modified(std::time::SystemTime::now());
-                    }
+                    // A failure is ignored: the worst that follows is that the folder looks stale to a sweep.
+                    let _ = lock.set_modified(std::time::SystemTime::now());
                 }
             });
         Heartbeat {
@@ -197,11 +203,10 @@ impl Heartbeat {
             thread: thread.ok(),
         }
     }
-}
 
-impl Heartbeat {
     fn stop(&mut self) {
-        // Dropping the sender wakes the thread at once, so that waiting for it does not take an interval.
+        // Dropping the sender wakes the thread at once, so that waiting for it does not take an interval. The thread
+        // owns the lock file, so it is closed when the thread ends, before the folder is removed.
         self.stop.take();
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
@@ -216,31 +221,48 @@ impl Drop for Heartbeat {
 }
 
 impl Scratch {
-    /// Makes a new folder with a name of its own in the folder given. The name has the process, the time and a count
-    /// in it. A folder that is there already is left alone, since it may belong to a run that is still going (in a
-    /// container that shares the cache, a process number is not unique), and another name is tried.
+    /// Makes a new folder with a name of its own in the folder given, with a lock file in it. The name has the process,
+    /// the time and a count in it. A folder that is there already is left alone, since it may belong to a run that is
+    /// still going (in a container that shares the cache, a process number is not unique), and another name is tried.
     pub(crate) fn new(parent: &Path) -> Result<Scratch, ProjectError> {
         Scratch::new_with(parent, HEARTBEAT)
     }
 
     fn new_with(parent: &Path, every: std::time::Duration) -> Result<Scratch, ProjectError> {
         static COUNT: AtomicU32 = AtomicU32::new(0);
-        std::fs::create_dir_all(parent).map_err(|e| cannot(parent, "make", e))?;
-        loop {
+        let name = || {
             let nanos = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |since| since.as_nanos());
-            let name = format!(
+            format!(
                 "{}{}-{}-{}",
                 SCRATCH_PREFIX,
                 std::process::id(),
                 nanos,
                 COUNT.fetch_add(1, Ordering::Relaxed)
-            );
-            let path = parent.join(name);
+            )
+        };
+        Scratch::make(parent, name, every)
+    }
+
+    /// Makes the folder with the first name that `name` gives that is not taken, and its lock file.
+    fn make(
+        parent: &Path,
+        mut name: impl FnMut() -> String,
+        every: std::time::Duration,
+    ) -> Result<Scratch, ProjectError> {
+        std::fs::create_dir_all(parent).map_err(|e| cannot(parent, "make", e))?;
+        loop {
+            let path = parent.join(name());
             match std::fs::create_dir(&path) {
                 Ok(()) => {
-                    let heartbeat = Heartbeat::start(path.clone(), every);
+                    let lock_path = path.join(SCRATCH_LOCK);
+                    let lock = std::fs::File::create(&lock_path).map_err(|e| {
+                        // The folder is this run's, so it is removed again, since nothing else would.
+                        let _ = std::fs::remove_dir(&path);
+                        cannot(&lock_path, "make", e)
+                    })?;
+                    let heartbeat = Heartbeat::start(lock, every);
                     return Ok(Scratch(path, heartbeat));
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
@@ -249,23 +271,32 @@ impl Scratch {
         }
     }
 
-    /// Removes the scratch folders in the folder given that were last changed more than `STALE_AFTER` ago. A run
-    /// that is killed leaves its folder behind, and nothing else would ever remove it. A folder that is younger may
-    /// belong to a run that is still going, so it is left. This is a tidy-up, so a failure to do any of it is ignored.
+    /// Removes the scratch folders in the folder given whose lock file was last renewed more than `STALE_AFTER` ago. A
+    /// run that is killed leaves its folder behind, and nothing else would ever remove it. A folder whose lock file is
+    /// younger may belong to a run that is still going, so it is left. A folder with no lock file, which a run that was
+    /// killed between making the folder and making the file leaves, is judged by its own time instead. This is a
+    /// tidy-up, so a failure to do any of it is ignored.
     pub(crate) fn sweep(parent: &Path) {
         let Ok(entries) = std::fs::read_dir(parent) else {
             return;
         };
-        for entry in entries.flatten() {
-            let old = entry
-                .metadata()
+        let stale = |path: &Path| {
+            std::fs::metadata(path)
                 .and_then(|meta| meta.modified())
                 .ok()
                 .and_then(|modified| modified.elapsed().ok())
-                .is_some_and(|age| age > STALE_AFTER);
+                .is_some_and(|age| age > STALE_AFTER)
+        };
+        for entry in entries.flatten() {
             // The prefix is checked first, so that nothing is removed that this module did not make.
-            if old && entry.file_name().to_string_lossy().starts_with(SCRATCH_PREFIX) && entry.path().is_dir() {
-                let _ = std::fs::remove_dir_all(entry.path());
+            let folder = entry.path();
+            if !entry.file_name().to_string_lossy().starts_with(SCRATCH_PREFIX) || !folder.is_dir() {
+                continue;
+            }
+            let lock = folder.join(SCRATCH_LOCK);
+            let old = if lock.exists() { stale(&lock) } else { stale(&folder) };
+            if old {
+                let _ = std::fs::remove_dir_all(&folder);
             }
         }
     }
@@ -884,44 +915,87 @@ mod tests {
         (Cache::new(scratch.0.join("cache")), scratch)
     }
 
+    /// Sets the modified time of a file or a folder to longer ago than `STALE_AFTER`.
+    fn make_stale(path: &Path) {
+        let old = std::time::SystemTime::now() - STALE_AFTER - std::time::Duration::from_secs(60);
+        let file = if path.is_dir() {
+            std::fs::File::open(path)
+        } else {
+            std::fs::OpenOptions::new().write(true).open(path)
+        };
+        file.unwrap().set_modified(old).unwrap();
+    }
+
     #[test]
-    fn a_scratch_folder_that_is_there_already_is_skipped_and_an_old_one_is_swept() {
+    fn a_scratch_folder_has_a_lock_file_and_a_name_of_its_own() {
         let (_cache, scratch) = cache();
         let parent = scratch.0.join("git");
         let first = Scratch::new(&parent).unwrap();
         let second = Scratch::new(&parent).unwrap();
         assert_ne!(first.0, second.0);
-        // Only a folder with the prefix is ever swept, and only when it is old, so none of these goes.
-        std::fs::create_dir(parent.join("other")).unwrap();
-        Scratch::sweep(&parent);
-        assert!(first.0.is_dir() && second.0.is_dir() && parent.join("other").is_dir());
-        let old = std::time::SystemTime::now() - STALE_AFTER - std::time::Duration::from_secs(60);
-        let stale = parent.join("tmp-1-1-1");
-        std::fs::create_dir(&stale).unwrap();
-        std::fs::File::open(&stale).unwrap().set_modified(old).unwrap();
-        let unrelated = parent.join("unrelated");
-        std::fs::create_dir(&unrelated).unwrap();
-        std::fs::File::open(&unrelated).unwrap().set_modified(old).unwrap();
-        Scratch::sweep(&parent);
-        assert!(!stale.exists(), "the old scratch folder should go");
-        assert!(unrelated.is_dir() && first.0.is_dir());
+        assert!(first.0.join(SCRATCH_LOCK).is_file() && second.0.join(SCRATCH_LOCK).is_file());
     }
 
     #[test]
-    fn a_scratch_folder_in_use_keeps_itself_young() {
+    fn a_name_that_is_taken_is_skipped_and_what_has_it_is_left_alone() {
+        let (_cache, scratch) = cache();
+        let parent = scratch.0.join("git");
+        let taken = parent.join("tmp-taken");
+        std::fs::create_dir_all(&taken).unwrap();
+        std::fs::write(taken.join("theirs"), "x").unwrap();
+        let mut names = ["tmp-taken", "tmp-free"].into_iter().map(String::from);
+        let made = Scratch::make(&parent, || names.next().unwrap(), HEARTBEAT).unwrap();
+        assert_eq!(made.0, parent.join("tmp-free"));
+        assert!(taken.join("theirs").is_file() && !taken.join(SCRATCH_LOCK).exists());
+    }
+
+    #[test]
+    fn a_scratch_folder_is_swept_when_its_lock_file_is_stale() {
+        let (_cache, scratch) = cache();
+        let parent = scratch.0.join("git");
+        let live = Scratch::new(&parent).unwrap();
+        let folder = |name: &str, lock: bool| {
+            let path = parent.join(name);
+            std::fs::create_dir(&path).unwrap();
+            if lock {
+                std::fs::write(path.join(SCRATCH_LOCK), "").unwrap();
+            }
+            path
+        };
+        // A stale lock file is what counts, even in a folder whose own time is new.
+        let stale_lock = folder("tmp-stale-lock", true);
+        make_stale(&stale_lock.join(SCRATCH_LOCK));
+        // A lock file that is new keeps a folder whose own time is old.
+        let fresh_lock = folder("tmp-fresh-lock", true);
+        make_stale(&fresh_lock);
+        // With no lock file, the time of the folder decides.
+        let old_bare = folder("tmp-old-bare", false);
+        make_stale(&old_bare);
+        let new_bare = folder("tmp-new-bare", false);
+        // Only a folder with the prefix is ever swept.
+        let unrelated = folder("unrelated", true);
+        make_stale(&unrelated.join(SCRATCH_LOCK));
+        make_stale(&unrelated);
+        Scratch::sweep(&parent);
+        assert!(!stale_lock.exists() && !old_bare.exists());
+        assert!(fresh_lock.is_dir() && new_bare.is_dir() && unrelated.is_dir() && live.0.is_dir());
+    }
+
+    #[test]
+    fn a_scratch_folder_in_use_keeps_its_lock_file_young() {
         let (_cache, outer) = cache();
         let parent = outer.0.join("git");
         let scratch = Scratch::new_with(&parent, std::time::Duration::from_millis(20)).unwrap();
-        let old = std::time::SystemTime::now() - STALE_AFTER - std::time::Duration::from_secs(60);
-        std::fs::File::open(&scratch.0).unwrap().set_modified(old).unwrap();
-        // Within a short time the heartbeat has changed the time again, so a sweep leaves the folder.
+        let lock = scratch.0.join(SCRATCH_LOCK);
+        make_stale(&lock);
+        // Within a short time the heartbeat has renewed the lock file, so a sweep leaves the folder.
         let young = (0..100).any(|_| {
             std::thread::sleep(std::time::Duration::from_millis(50));
-            std::fs::metadata(&scratch.0)
+            std::fs::metadata(&lock)
                 .and_then(|meta| meta.modified())
                 .is_ok_and(|modified| modified.elapsed().is_ok_and(|age| age < STALE_AFTER))
         });
-        assert!(young, "the heartbeat should have renewed the time");
+        assert!(young, "the heartbeat should have renewed the lock file");
         Scratch::sweep(&parent);
         assert!(scratch.0.is_dir());
     }

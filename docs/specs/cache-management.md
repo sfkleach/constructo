@@ -29,8 +29,9 @@ never changes anything in it.
 ## What is in it
 
 ```text
-CACHE/git/KEY/COMMIT/          the files of one commit of one repository
-CACHE/git/tmp-PID-TIME-COUNT/  a folder that a run is working in, or one that a killed run left
+CACHE/git/KEY/COMMIT/               the files of one commit of one repository
+CACHE/git/tmp-PID-TIME-COUNT/       a folder that a run is working in, or one that a killed run left
+CACHE/git/tmp-PID-TIME-COUNT/lock   the lock file of that folder, whose time says whether the run is going
 ```
 
 - `KEY` is the first 16 hexadecimal digits of the SHA-256 of the URL of the repository as it is written in the
@@ -71,8 +72,8 @@ The rules below make the cases that can arise safe without one.
   make a commit come out differently from the same commit in the cache of another.
 
 The cache is trusted as far as the permissions of the folder allow: a program that can write to it can act as the user
-anyway. The lock file is what detects a change, and the comparison with a fresh checkout is what stops one from being
-recorded.
+anyway. `constructo.lock` is what detects a change, and the comparison with a fresh checkout is what stops one from
+being recorded.
 
 ## Relics of a crash
 
@@ -81,13 +82,16 @@ it can be large, since it holds a full clone. Nothing else is left, because the 
 rename.
 
 - **A run removes its folder when it is done.** It is removed when the run ends, by any route, including an error.
-- **A run that is going shows that it is.** While a folder is in use, a thread changes the modified time of the
-  folder every hour. So the time of a folder that is in use is never more than about an hour old, however long the
-  fetch takes.
+- **A run that is going shows that it is.** A run makes a file `lock` in its folder as soon as it makes the folder,
+  and while the folder is in use a thread renews the modified time of the file every hour. So the lock file of a
+  run that is going is never more than about an hour old, however long the fetch takes. A file is used, and not the
+  time of the folder, because a file can have its time changed on every platform, and on Windows a folder cannot.
 - **A fetch sweeps.** At the start, `update` removes the folders in `git/` whose names start with `tmp-` and whose
-  modified time is more than 24 hours old, with what is in them. A folder that was changed in the last day may
-  belong to a run that is going and is left. Nothing whose name does not start with `tmp-` is removed, and neither is
-  a plain file. Failing to remove a folder is not an error, since the sweep is only a tidy-up.
+  lock file has not been renewed for more than 24 hours, with what is in them. A folder with no lock file, which a run
+  that was killed between making the folder and making the file leaves, is judged by the modified time of the folder
+  instead. A folder that was renewed in the last day may belong to a run that is going and is left. Nothing whose name
+  does not start with `tmp-` is removed, and neither is a plain file. Failing to remove a folder is not an error, since
+  the sweep is only a tidy-up.
 - **Only `update` sweeps.** `check` never changes the cache, so it sweeps nothing. A relic stays until a later
   `update` uses that cache.
 
@@ -96,12 +100,15 @@ rename.
 - There is no limit on the size of the cache, and no removal of the folders of old commits. A commit that a lock
   names has to stay, and `constructo` cannot tell which locks, in which projects, still name it. To free space, remove
   the folders or the whole cache. The next `update` makes what it needs, and `check` says what is missing.
-- There is no lock between runs. A cache on a file system on which a rename of a folder is not one step, such as some
-  network file systems, can show a half-made folder to a reader. Use a cache on a local disk, or one cache for each
-  job.
-- The age of a folder is read from the clock of the machine, so a clock that is set far back keeps a relic for longer.
-  A clock that jumps forward by a day while a fetch is going can get its folder swept, which makes that run fail with
-  an error that `update` can be run again after. It does not harm a checkout.
+- The lock file is a sign that a run is going and is read only by its time. It is not locked by the operating system,
+  and runs do not wait for one another. A cache on a file system on which a rename of a folder is not one step, such
+  as some network file systems, can show a half-made folder to a reader. Use a cache on a local disk, or one cache for
+  each job.
+- The age of a lock file is read from the clock of the machine, so a clock that is set far back keeps a relic for
+  longer. A clock that jumps forward by a day while a fetch is going can get its folder swept, and so can a run that
+  is stopped for a day, since its heartbeat stops with it. That run then fails with an error, after which `update`
+  can be run again. It does not harm a checkout that is recorded: one that is half made is refused by the next
+  `update`, which compares it with a fresh one, and by `check`, whose digests do not match it.
 - The repository is cloned in full by every `update`, even if the commit is in the cache, since the commit has to be
   looked up and the checkout compared. The cache saves the checkout and the network for `check`, not the clone for
   `update`.
