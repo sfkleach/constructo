@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# The settings of CodeRabbit for this repository. Only what differs from the defaults is here.
+reviews:
+  pre_merge_checks:
+    # The docstring coverage check counts the functions of a diff that have a branch and a doc comment, and wants 80%.
+    # It cannot tell a useful comment from a restatement of the name, and most of the functions are tests whose names
+    # are sentences. Comments are written where the reason is not obvious, as CLAUDE.md asks, so the check is off.
+    docstrings:
+      mode: "off"
