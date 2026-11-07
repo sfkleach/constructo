@@ -168,6 +168,9 @@ type-checked. The problems are all reported, since each is an independent fact, 
 
 - A loaded project that has no entry is an error at the `[[import]]` that loaded it. A file of a project that matches
   its patterns but is not in the lock is an error at the entry of the project.
+- Where a project comes from is verified as well as its files. A project that the lock has from a repository at a commit,
+  and that is a folder now, or from another repository, commit or folder, is an error at its entry even if every file is
+  the same: `The project X is from A in constructo.lock but from a folder now`. Under `--dev` a folder is not verified.
 - The lock must describe exactly what is loaded. A project in the lock that is not loaded, and a file in the lock that
   is no longer in the project, are errors at their entries.
 - A project with nothing to record needs no lock file, and with none, nothing is verified. Any other project with no
