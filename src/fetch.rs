@@ -182,8 +182,9 @@ struct Heartbeat {
 }
 
 impl Heartbeat {
-    /// Starts renewing the time of the lock file, which is held open, and so not opened again each time.
-    fn start(lock: std::fs::File, every: std::time::Duration) -> Heartbeat {
+    /// Starts renewing the time of the lock file, which is held open, and so not opened again each time. A thread that
+    /// cannot be started is an error, since a run with no heartbeat could have its folder swept by another.
+    fn start(lock: std::fs::File, every: std::time::Duration) -> std::io::Result<Heartbeat> {
         let (stop, stopped) = std::sync::mpsc::channel::<()>();
         // The size of the stack is given, since otherwise it is read from `RUST_MIN_STACK` in the environment.
         let thread = std::thread::Builder::new()
@@ -192,16 +193,17 @@ impl Heartbeat {
             .spawn(move || {
                 // Only a timeout means that it is time to renew. A message or a dropped sender means stop.
                 while let Err(std::sync::mpsc::RecvTimeoutError::Timeout) = stopped.recv_timeout(every) {
-                    // A failure is ignored: the worst that follows is that the folder looks stale to a sweep.
+                    // The file was made by this run and is held open by this thread, so changing its time fails only
+                    // if the file system itself does, which the work of the fetch in the same folder runs into as
+                    // well. The result is ignored because there is nothing to do about it here, and the next interval
+                    // tries again.
                     let _ = lock.set_modified(std::time::SystemTime::now());
                 }
-            });
-        Heartbeat {
+            })?;
+        Ok(Heartbeat {
             stop: Some(stop),
-            // A thread that cannot be made only means that a run of more than a day could have its folder swept,
-            // which is not worth stopping a fetch for.
-            thread: thread.ok(),
-        }
+            thread: Some(thread),
+        })
     }
 
     fn stop(&mut self) {
@@ -262,7 +264,11 @@ impl Scratch {
                         let _ = std::fs::remove_dir(&path);
                         cannot(&lock_path, "make", e)
                     })?;
-                    let heartbeat = Heartbeat::start(lock, every);
+                    // The folder is this run's, so it is removed again if the heartbeat cannot start, as above.
+                    let heartbeat = Heartbeat::start(lock, every).map_err(|e| {
+                        let _ = std::fs::remove_dir_all(&path);
+                        ProjectError::Cannot(format!("Cannot start the heartbeat of {}: {}", path.display(), e))
+                    })?;
                     return Ok(Scratch(path, heartbeat));
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
