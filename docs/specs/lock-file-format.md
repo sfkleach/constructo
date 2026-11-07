@@ -222,6 +222,10 @@ OK: checked 2 file(s) in 2 project(s)
   puts the files in the cache and records the commit. A commit that has moved is a line `Moved the project X from commit
   A to B`. A repository that cannot be fetched, a `rev` that does not exist and a `git` that is not installed are
   errors with exit code 2, reported at the import.
+- A commit that is in the cache already is compared with a fresh checkout of it, and one that has been changed, by a
+  file that differs, is added or is missing, is an error with exit code 2 that names the file and the folder. `update`
+  does not repair it: remove the folder and run `update` again. Otherwise the changed file would be recorded as a part
+  of the commit.
 - A project with nothing to record gets no lock file, and an old one is removed so that it does not become stale.
 
 The difference can be reviewed from the output of the command, or with `git diff constructo.lock`.

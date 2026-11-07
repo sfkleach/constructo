@@ -1383,6 +1383,15 @@ if command -v git >/dev/null 2>&1; then
     else
         fail "repo: a link is checked out as a link whatever the git configuration says (exit $status, got '$out')"
     fi
+    # An update does not reuse a checkout in the cache that is not what a fresh one is, since it would record the
+    # changed file as a part of the commit.
+    printf 'enum Changed = C;\n' > "$(echo "$CONSTRUCTO_CACHE"/git/*/"$linked")/real.types"
+    out="$("$CONSTRUCTO" project update "$rp/linkapp" 2>&1)" && status=0 || status=$?
+    if [[ $status -eq 2 && "$out" == *"in the cache has been changed: real.types is not what it was"* ]]; then
+        pass "repo: update refuses a checkout in the cache that was changed"
+    else
+        fail "repo: update refuses a checkout in the cache that was changed (exit $status, got '$out')"
+    fi
     unset CONSTRUCTO_CACHE
     rm -f "$rp/secret"
     rm -rf "$rp/repo/.git" "$rp/cache/git"
