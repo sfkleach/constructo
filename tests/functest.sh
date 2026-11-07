@@ -1233,7 +1233,8 @@ if command -v git >/dev/null 2>&1; then
     mkdir "$rp/repo" "$rp/app"
     printf '[project]\nname = "example.lib"\n' > "$rp/repo/constructo.toml"
     printf 'enum Shape = Circle;\n' > "$rp/repo/shapes.types"
-    git_in_repo() { git -C "$rp/repo" -c user.name=Test -c user.email=test@example.com -c commit.gpgsign=false "$@"; }
+    # Variables such as GIT_DIR, which git sets when it runs a hook, would point git at another repository.
+    git_in_repo() { env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$rp/repo" -c user.name=Test -c user.email=test@example.com -c commit.gpgsign=false "$@"; }
     git_in_repo init --quiet --initial-branch=main
     git_in_repo add -A
     git_in_repo commit --quiet -m first

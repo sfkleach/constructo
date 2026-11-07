@@ -70,7 +70,15 @@ impl Repo {
     }
 
     pub fn git(&self, args: &[&str]) -> String {
-        let output = Command::new("git")
+        let mut command = Command::new("git");
+        // A variable such as `GIT_DIR` or `GIT_INDEX_FILE`, which git sets when it runs a hook, would make this git
+        // work on the repository of the developer and not on the one made for the test.
+        for (name, _) in std::env::vars_os() {
+            if name.to_string_lossy().starts_with("GIT_") {
+                command.env_remove(&name);
+            }
+        }
+        let output = command
             .arg("-C")
             .arg(&self.folder)
             .args([
