@@ -19,7 +19,9 @@ fetched, how, from where, and how much of a fetched repository is trusted.
 - git is run with care:
   - Hooks and submodules are off. Every call passes `-c` settings that make a checkout the same on every machine and run
     no program that a configuration file names (`core.hooksPath=/dev/null`, `core.autocrlf=false`,
-    `core.fsmonitor=false` and others). The `GIT_*` variables of the environment are removed, because they could
+    `core.fsmonitor=false` and others). `core.symlinks=true` checks a link out as a link, so that a file system that
+    cannot make links fails the checkout, which is an error to see, and does not give a plain file that holds the
+    target, which would have a digest that differs from the one made elsewhere. The `GIT_*` variables of the environment are removed, because they could
     redirect git, except `GIT_SSH`, `GIT_SSH_COMMAND` and `GIT_ASKPASS`, which say how to reach the repository.
     `GIT_ALLOW_PROTOCOL` is set to `https:ssh:file`, and `GIT_TERMINAL_PROMPT` to `0` so that git never waits for a
     password to be typed.

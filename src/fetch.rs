@@ -22,7 +22,13 @@ const KEPT_VARIABLES: [&str; 3] = ["GIT_SSH", "GIT_SSH_COMMAND", "GIT_ASKPASS"];
 
 /// The settings that every call of git is given, so that a checkout is the same on every machine and runs nothing
 /// that a configuration file names.
-const SETTINGS: [&str; 5] = [
+///
+/// `core.symlinks=true` makes git check a link out as a link, whatever the configuration of the user or the probe of
+/// the file system says. Without it a file system that cannot make links would get a plain file that holds the text of
+/// the target, and the digest of the file, which is the digest of that text, would differ from the one made on another
+/// machine. With it such a file system makes the checkout fail, which is an error to see and not a lock that differs.
+const SETTINGS: [&str; 6] = [
+    "core.symlinks=true",
     "core.hooksPath=/dev/null",
     "core.autocrlf=false",
     "core.fsmonitor=false",
