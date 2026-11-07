@@ -1268,6 +1268,45 @@ if command -v git >/dev/null 2>&1; then
     else
         fail "repo: update ignores GIT_ variables in the environment (exit $status, got '$out')"
     fi
+    # ssh is run in batch mode unless the user says how to run it. A stand-in for ssh on the PATH writes down its
+    # arguments and runs the command that git gives it here, which is what ssh would run on the host.
+    mkdir "$rp/bin" "$rp/sshapp" "$rp/sshhome"
+    cat > "$rp/bin/ssh" <<STAND_IN
+#!/bin/sh
+printf '%s\n' "\$*" >> "$rp/ssh-arguments"
+for last in "\$@"; do :; done
+exec sh -c "\$last"
+STAND_IN
+    chmod +x "$rp/bin/ssh"
+    printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lib"\nrepo = "localhost:%s"\n' \
+        "$rp/repo" > "$rp/sshapp/constructo.toml"
+    printf '[core]\n\tsshCommand = ssh -o ConfigMarker=yes\n' > "$rp/sshhome/.gitconfig"
+    ssh_update() {
+        rm -f "$rp/ssh-arguments"
+        env PATH="$rp/bin:$PATH" "$@" "$CONSTRUCTO" project update "$rp/sshapp" > /dev/null 2>&1 && status=0 || status=$?
+        said="$(cat "$rp/ssh-arguments" 2>/dev/null || true)"
+    }
+    ssh_update env -u GIT_SSH_COMMAND -u GIT_SSH HOME="$rp/nohome"
+    if [[ $status -eq 0 && "$said" == *"BatchMode=yes"* ]]; then
+        pass "repo: ssh is run in batch mode"
+    else
+        fail "repo: ssh is run in batch mode (exit $status, ssh was given '$said')"
+    fi
+    ssh_update env GIT_SSH_COMMAND="ssh -o EnvironmentMarker=yes"
+    if [[ $status -eq 0 && "$said" == *"EnvironmentMarker=yes"* && "$said" != *"BatchMode"* ]]; then
+        pass "repo: GIT_SSH_COMMAND of the user is used as it is"
+    else
+        fail "repo: GIT_SSH_COMMAND of the user is used as it is (exit $status, ssh was given '$said')"
+    fi
+    ssh_update env -u GIT_SSH_COMMAND -u GIT_SSH HOME="$rp/sshhome" XDG_CONFIG_HOME="$rp/sshhome"
+    if [[ $status -eq 0 && "$said" == *"ConfigMarker=yes"* && "$said" != *"BatchMode"* ]]; then
+        pass "repo: core.sshCommand of the user is used as it is"
+    else
+        fail "repo: core.sshCommand of the user is used as it is (exit $status, ssh was given '$said')"
+    fi
+    rm -f "$rp/ssh-arguments" "$rp/bin/ssh" "$rp/sshhome/.gitconfig" "$rp/sshapp/constructo.toml" \
+        "$rp/sshapp/constructo.lock"
+    rmdir "$rp/bin" "$rp/sshapp" "$rp/sshhome"
     printf 'enum More = M;\n' > "$rp/repo/more.types"
     git_in_repo add -A
     git_in_repo commit --quiet -m second

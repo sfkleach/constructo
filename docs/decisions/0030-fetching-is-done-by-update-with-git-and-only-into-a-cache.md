@@ -32,6 +32,11 @@ fetched, how, from where, and how much of a fetched repository is trusted.
     file of certificates, goes in the configuration of git. `GIT_ALLOW_PROTOCOL` is set to `https:ssh:file`, and
     `GIT_TERMINAL_PROMPT` to `0` so that git never waits for a password to be typed. The list is `child_environment`
     in `src/fetch.rs`.
+  - ssh is run as `ssh -o BatchMode=yes` unless the user says how to run it, with `GIT_SSH_COMMAND`,
+    `core.sshCommand` or `GIT_SSH`, which are what git looks at, in that order. In batch mode ssh fails, and does not
+    ask on the terminal, for a passphrase or whether to trust a host it has not seen. The passphrase comes from the
+    agent of ssh, and a host is trusted by connecting to it with ssh once. When an ssh fetch in batch mode fails, the
+    message says so. Asking git for `core.sshCommand` takes one more run of git before the clone.
   - Only the clone uses the system and user configuration of git, for the credential helper and the settings of ssh
     and a proxy. The steps that follow it, which find the commit and check it out, run without them
     (`GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_GLOBAL` as the null device, `GIT_ATTR_NOSYSTEM`, and no home folder, for
