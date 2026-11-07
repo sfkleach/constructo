@@ -94,6 +94,8 @@ group = "shapes"
   in the cache is an error at the import, with exit code 1.
 - A project from a repository stays inside the clone. A link in the repository that leads out of it, for the
   project-file, the folder or a types file, is an error at the import, with exit code 2, that says where it leads. A
+  link that matches a pattern is checked even if its target does not exist, and then it is an error that it leads
+  nowhere, so that a repository is not accepted on one machine and refused on another. A
   `path` import in such a project must stay inside the clone by the path as written, and so must the projects it
   reaches. It may import other repositories and built-in projects.
 - The `git` program is used, so it has to be installed. `$CONSTRUCTO_CACHE` names the cache folder. Without it the

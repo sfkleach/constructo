@@ -874,6 +874,23 @@ mod tests {
             error
         );
 
+        // A types file is a link to a file that does not exist. It is refused all the same, so that the repository is
+        // not accepted here and refused on a machine where the target is there.
+        let repo = Repo::new();
+        repo.commit("constructo.toml", LIB);
+        link(
+            &repo,
+            "missing.types",
+            Path::new("/nonexistent-constructo-target/x.types"),
+        );
+        let app = app_importing("clone-dangling-app", &repo, None);
+        let error = update_error(&app, &cache);
+        assert!(
+            error.contains("missing.types of the project example.lib is a link that leads nowhere"),
+            "{}",
+            error
+        );
+
         // The folder of the project is a link.
         let repo = Repo::new();
         let elsewhere = OnDisk::new("clone-elsewhere", &[("constructo.toml", LIB.as_bytes())]);

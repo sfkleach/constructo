@@ -238,6 +238,14 @@ impl Project {
     /// projects that they name are not loaded, which `ProjectSet::load` does. A folder that is the URI of a built-in
     /// project gives that project.
     pub fn load(folder: &Path) -> Result<Project, ProjectError> {
+        Project::load_with(folder, false)
+    }
+
+    /// As `load`. A project that is `confined` to a clone selects every link that matches its patterns, and not only
+    /// those that lead to a file, so that the check on where the links lead is made for each of them. Otherwise a link
+    /// to a file that does not exist would be left out, and the same repository would be accepted on a machine where
+    /// the target is missing and refused on one where it is there.
+    pub fn load_with(folder: &Path, confined: bool) -> Result<Project, ProjectError> {
         if let Some(uri) = folder.to_str().filter(|uri| is_builtin_source(uri)) {
             return builtin_for_uri(uri).map(Project::from_builtin).ok_or_else(|| {
                 ProjectError::Cannot(format!(
@@ -252,7 +260,7 @@ impl Project {
             .map_err(|e| ProjectError::Cannot(format!("Cannot read {}: {}", path.display(), e)))?;
         let parsed = Project::parse_file(&text, &path.display().to_string(), folder)?;
         let mut found = Vec::new();
-        walk(folder, "", true, &parsed.include, &parsed.exclude, &mut found)
+        walk(folder, "", true, confined, &parsed.include, &parsed.exclude, &mut found)
             .map_err(|e| ProjectError::Cannot(format!("Cannot read {}: {}", folder.display(), e)))?;
         found.sort();
         let files = found
@@ -683,7 +691,7 @@ impl Loader {
                     format!("The imports form a cycle: {}", names.join(" -> ")),
                 ));
             } else {
-                let mut child = Project::load(&import.folder)?;
+                let mut child = Project::load_with(&import.folder, confined.is_some())?;
                 if let Some(root) = &confined {
                     for file in &child.files {
                         let relative = file.path.strip_prefix(&child.folder).unwrap_or(&file.path);
@@ -935,6 +943,7 @@ fn walk(
     dir: &Path,
     relative: &str,
     root: bool,
+    confined: bool,
     include: &[Pattern],
     exclude: &[Pattern],
     found: &mut Vec<String>,
@@ -952,9 +961,9 @@ fn walk(
         let kind = entry.file_type()?;
         if kind.is_dir() {
             if !name.starts_with('.') && !path.join(PROJECT_FILE).is_file() {
-                walk(&path, &within, false, include, exclude, found)?;
+                walk(&path, &within, false, confined, include, exclude, found)?;
             }
-        } else if (kind.is_file() || (kind.is_symlink() && path.is_file()))
+        } else if (kind.is_file() || (kind.is_symlink() && (confined || path.is_file())))
             && include.iter().any(|pattern| pattern.matches_with(&within, MATCH))
             && !exclude.iter().any(|pattern| pattern.matches_with(&within, MATCH))
         {
@@ -1247,5 +1256,30 @@ mod tests {
             ProjectError::Cannot(message) => assert!(message.starts_with("Cannot read "), "{}", message),
             other => panic!("not a read error: {}", other),
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_to_nothing_is_selected_only_by_a_confined_project() {
+        let disk = OnDisk::new(
+            "dangling-link",
+            &[("constructo.toml", b"[project]\nname = \"example.p\"\n")],
+        );
+        let link = disk.folder.join("missing.types");
+        std::os::unix::fs::symlink("/nonexistent-constructo-target/x.types", &link).unwrap();
+        let names = |project: &Project| -> Vec<String> {
+            project
+                .files
+                .iter()
+                .map(|file| file.path.file_name().unwrap().to_string_lossy().to_string())
+                .collect()
+        };
+        // For a local project the link is left out, as it always was.
+        assert!(names(&Project::load(&disk.folder).unwrap()).is_empty());
+        assert_eq!(
+            names(&Project::load_with(&disk.folder, true).unwrap()),
+            vec!["missing.types"]
+        );
+        std::fs::remove_file(link).unwrap();
     }
 }
