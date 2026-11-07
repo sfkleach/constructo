@@ -924,12 +924,24 @@ mod tests {
     /// Sets the modified time of a file or a folder to longer ago than `STALE_AFTER`.
     fn make_stale(path: &Path) {
         let old = std::time::SystemTime::now() - STALE_AFTER - std::time::Duration::from_secs(60);
-        let file = if path.is_dir() {
-            std::fs::File::open(path)
-        } else {
-            std::fs::OpenOptions::new().write(true).open(path)
-        };
-        file.unwrap().set_modified(old).unwrap();
+        let mut options = std::fs::OpenOptions::new();
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            // The right to change the attributes, which includes the times, and the flag that lets a folder be
+            // opened at all. Opening for reading gives neither.
+            const FILE_WRITE_ATTRIBUTES: u32 = 0x100;
+            const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+            options
+                .access_mode(FILE_WRITE_ATTRIBUTES)
+                .custom_flags(FILE_FLAG_BACKUP_SEMANTICS);
+        }
+        #[cfg(not(windows))]
+        {
+            // A folder is opened for reading, and a file for writing, as `set_modified` needs on Unix.
+            options.read(path.is_dir()).write(!path.is_dir());
+        }
+        options.open(path).unwrap().set_modified(old).unwrap();
     }
 
     #[test]
