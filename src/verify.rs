@@ -961,4 +961,49 @@ mod tests {
         }
         std::fs::remove_file(app.folder.join(LOCK_FILE)).unwrap();
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_project_reached_by_a_path_and_by_the_repository_is_locked_with_the_repository_in_either_order() {
+        let scratch = Scratch::new(&std::env::temp_dir()).unwrap();
+        let cache = Cache::new(scratch.0.join("cache"));
+        let repo = Repo::new();
+        repo.commit("sibling/constructo.toml", "[project]\nname = \"example.sibling\"\n");
+        repo.commit(
+            "mid/constructo.toml",
+            "[project]\nname = \"example.lib\"\n\n[[import]]\nproject-name = \"example.sibling\"\npath = \"../sibling\"\n",
+        );
+        let import = |name: &str, subdir: &str| {
+            format!(
+                "[[import]]\nproject-name = \"{}\"\nrepo = \"{}\"\nsubdir = \"{}\"\n\n",
+                name,
+                repo.url(),
+                subdir
+            )
+        };
+        let (lib, sibling) = (import("example.lib", "mid"), import("example.sibling", "sibling"));
+        // The sibling is reached by the path of the first project and then by the repository, and the other way round.
+        for (test, imports) in [
+            ("clone-order-1", lib.clone() + &sibling),
+            ("clone-order-2", sibling + &lib),
+        ] {
+            let text = format!("[project]\nname = \"example.app\"\n\n{}", imports);
+            let app = OnDisk::new(test, &[("constructo.toml", text.as_bytes())]);
+            update_lock_with(&app.folder, Remotes::Fetch(Ok(cache.clone()))).unwrap();
+            let lock = read_lock(&app.folder).unwrap().unwrap();
+            let remote = lock.get("example.sibling").unwrap().remote.clone().expect(test);
+            assert_eq!(remote.subdir.as_deref(), Some("sibling"), "{}", test);
+            let remotes = Remotes::Locked {
+                cache: Ok(cache.clone()),
+                lock: Ok(Some(lock.clone())),
+            };
+            let set = ProjectSet::load_with(&app.folder, true, remotes).unwrap();
+            assert!(
+                verify_lock_with(&set, Some(&lock), false).unwrap().is_empty(),
+                "{}",
+                test
+            );
+            std::fs::remove_file(app.folder.join(LOCK_FILE)).unwrap();
+        }
+    }
 }
