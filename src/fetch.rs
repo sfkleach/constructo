@@ -359,9 +359,19 @@ impl Cache {
         let work = Scratch::new(&git_folder)?;
         let clone = work.0.join("clone");
         git(
-            &["clone", "--no-checkout", "--quiet", "--", url, &path_text(&clone)],
+            // No template, so that a folder of templates in the configuration of the user puts nothing in the clone.
+            &[
+                "clone",
+                "--no-checkout",
+                "--quiet",
+                "--template=",
+                "--",
+                url,
+                &path_text(&clone),
+            ],
             None,
             url,
+            Config::User,
         )?;
         // A clone has a branch of its own only for the default one. The others are the branches of the origin, so a
         // name that is not found as it is, is tried as one of those.
@@ -370,6 +380,7 @@ impl Cache {
                 &["rev-parse", "--verify", "--quiet", &format!("{}^{{commit}}", name)],
                 Some(&clone),
                 url,
+                Config::Isolated,
             )
         };
         let found = find(rev)
@@ -399,6 +410,7 @@ impl Cache {
             ],
             None,
             url,
+            Config::Isolated,
         )?;
         // A checkout in the cache is reused, but only if it is what a fresh one is. The lock records the digests of
         // what is in the cache, so a file that was changed there would be recorded as the content of the commit.
@@ -492,9 +504,25 @@ fn path_text(path: &Path) -> String {
     path.display().to_string()
 }
 
+/// Which configuration of git a call may use.
+#[derive(PartialEq, Clone, Copy)]
+enum Config {
+    /// The system and user files, as for any use of git. Fetching needs them, for the credential helper, the settings
+    /// of ssh and a proxy.
+    User,
+    /// No system or user file. A call that only reads a clone that is already here needs nothing from them, and a
+    /// repository is somebody else's: its `.gitattributes` can name a filter, such as `lfs`, and a checkout would run
+    /// the program that the configuration of the user gives for it, before the checks on the files are made, and so
+    /// give a different checkout on a machine that has no such program.
+    Isolated,
+}
+
+/// The file that is always empty.
+const NULL_DEVICE: &str = if cfg!(windows) { "NUL" } else { "/dev/null" };
+
 /// Runs git with the arguments, in the folder if there is one, and returns what it printed. The environment and the
 /// settings are those described at the top of this module. A git that is not installed is an error that says so.
-fn git(args: &[&str], folder: Option<&Path>, url: &str) -> Result<String, ProjectError> {
+fn git(args: &[&str], folder: Option<&Path>, url: &str, config: Config) -> Result<String, ProjectError> {
     let mut command = Command::new("git");
     for setting in SETTINGS {
         command.arg("-c").arg(setting);
@@ -513,6 +541,15 @@ fn git(args: &[&str], folder: Option<&Path>, url: &str) -> Result<String, Projec
         .env("GIT_ALLOW_PROTOCOL", ALLOWED_PROTOCOLS)
         // Without this git waits for a password to be typed, which nobody can see in a run of a tool.
         .env("GIT_TERMINAL_PROMPT", "0");
+    if config == Config::Isolated {
+        command
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", NULL_DEVICE)
+            .env("GIT_ATTR_NOSYSTEM", "1")
+            // Versions of git before 2.32 do not know GIT_CONFIG_GLOBAL, and look for the file in these places.
+            .env_remove("HOME")
+            .env_remove("XDG_CONFIG_HOME");
+    }
     let output = command.output().map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             ProjectError::Cannot(

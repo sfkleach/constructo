@@ -1392,6 +1392,19 @@ if command -v git >/dev/null 2>&1; then
     else
         fail "repo: update refuses a checkout in the cache that was changed (exit $status, got '$out')"
     fi
+    # The checkout does not use the configuration of the user: a filter that it names, which a .gitattributes in the
+    # repository can ask for, is not run.
+    printf '[filter "evil"]\n\tsmudge = sh -c '"'"'touch %s/ran && cat'"'"'\n' "$rp" > "$rp/home/.gitconfig"
+    printf '* filter=evil\n' > "$rp/linkrepo/.gitattributes"
+    git_in_link add -A
+    git_in_link commit --quiet -m attributes
+    out="$(HOME="$rp/home" XDG_CONFIG_HOME="$rp/home" "$CONSTRUCTO" project update "$rp/linkapp" 2>&1)" && status=0 || status=$?
+    if [[ $status -eq 0 && ! -e "$rp/ran" ]]; then
+        pass "repo: update does not run a filter from the git configuration of the user"
+    else
+        fail "repo: update does not run a filter from the git configuration of the user (exit $status, got '$out')"
+    fi
+    rm -f "$rp/ran" "$rp/linkrepo/.gitattributes"
     unset CONSTRUCTO_CACHE
     rm -f "$rp/secret"
     rm -rf "$rp/repo/.git" "$rp/cache/git"
