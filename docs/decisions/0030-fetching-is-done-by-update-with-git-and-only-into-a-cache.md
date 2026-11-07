@@ -26,6 +26,12 @@ fetched, how, from where, and how much of a fetched repository is trusted.
     `GIT_SSH_COMMAND` and `GIT_ASKPASS`, which say how to reach the repository.
     `GIT_ALLOW_PROTOCOL` is set to `https:ssh:file`, and `GIT_TERMINAL_PROMPT` to `0` so that git never waits for a
     password to be typed.
+  - Only the clone uses the system and user configuration of git, for the credential helper and the settings of ssh
+    and a proxy. The steps that follow it, which find the commit and check it out, run without them
+    (`GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_GLOBAL` as the null device, `GIT_ATTR_NOSYSTEM`, and no `HOME` or
+    `XDG_CONFIG_HOME` for versions of git that do not know `GIT_CONFIG_GLOBAL`), because the `.gitattributes` of the
+    repository can name a filter such as `lfs`, and a checkout would run the program that the configuration of the user
+    gives for it. The clone is made with no template folder.
   - A URL is one of `https://`, `ssh://` or the short form `host:path`, `file://`, or a path. `ext::` and every other
     remote helper, `git://`, `http://` and `ftp://` are refused before git is run, and so is a URL that starts with `-`.
     `--` goes before the URL in every call so that it cannot be taken for an option.
