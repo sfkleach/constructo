@@ -101,7 +101,7 @@ group = "shapes"
 - The `git` program is used, so it has to be installed. The cache folder is given by `--cache`, by `cache` in the
   `[global]` table of the configuration file, or by `$CONSTRUCTO_CACHE`. Without any of them the cache is
   `constructo` in `$XDG_CACHE_HOME` or `~/.cache`, and `%LOCALAPPDATA%` on Windows. See
-  [the cache](cache-management.md).
+  [the cache](cache-management.md) and [how git is run](git-management.md).
 
 ## Names
 

@@ -110,4 +110,5 @@ rename.
 
 - [The lock file](lock-file-format.md), for what `update` records and what `check` verifies.
 - [The project-file](project-file-format.md), for the `repo`, `rev` and `subdir` of an import.
+- [How git is run](git-management.md), for the commands that fill the cache.
 - Decisions 29 and 30, in `docs/decisions/`.

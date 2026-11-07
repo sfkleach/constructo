@@ -16,7 +16,7 @@ fetched, how, from where, and how much of a fetched repository is trusted.
   code 2 that says so. `rev` is resolved by cloning the repository in full and running
   `git rev-parse REV^{commit}`, which also gives the commit of an annotated tag. The files are checked out of the
   commit into a work tree of their own, so that a checkout has no `.git` folder.
-- git is run with care:
+- git is run with care, as `docs/specs/git-management.md` describes in full:
   - Hooks and submodules are off. Every call passes `-c` settings that make a checkout the same on every machine and run
     no program that a configuration file names (`core.hooksPath=/dev/null`, `core.autocrlf=false`,
     `core.fsmonitor=false` and others). `core.symlinks=true` checks a link out as a link, so that a file system that
