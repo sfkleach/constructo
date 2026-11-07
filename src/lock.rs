@@ -534,7 +534,8 @@ digest = \"sha256:753517eedcd17f9bae3699b7e6b2a1be5f91f4e382a3d80de5f0f59ebdc5b1
         let text = Lock::new(vec![entry.clone()]).render();
         assert!(
             text.contains(&format!(
-                "name = \"example.lib\"\nrepo = \"https://example.com/lib.git\"\ncommit = \"{}\"\nsubdir = \"shapes\"\ndigest",
+                "name = \"example.lib\"\nrepo = \"https://example.com/lib.git\"\ncommit = \"{}\"\n\
+                 subdir = \"shapes\"\ndigest",
                 commit
             )),
             "{}",

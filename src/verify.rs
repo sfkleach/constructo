@@ -678,7 +678,8 @@ mod tests {
         );
         outer.commit("libs/mid/constructo.toml", &mid);
         let app_file = format!(
-            "[project]\nname = \"example.app\"\n\n[[import]]\nproject-name = \"example.mid\"\nrepo = \"{}\"\nsubdir = \"libs/mid\"\n",
+            "[project]\nname = \"example.app\"\n\n[[import]]\nproject-name = \"example.mid\"\nrepo = \"{}\"\n\
+             subdir = \"libs/mid\"\n",
             outer.url()
         );
         let app = OnDisk::new("update-subdir-app", &[("constructo.toml", app_file.as_bytes())]);
@@ -986,7 +987,8 @@ mod tests {
         repo.commit("sibling/constructo.toml", "[project]\nname = \"example.sibling\"\n");
         repo.commit(
             "mid/constructo.toml",
-            "[project]\nname = \"example.lib\"\n\n[[import]]\nproject-name = \"example.sibling\"\npath = \"../sibling\"\n",
+            "[project]\nname = \"example.lib\"\n\n[[import]]\nproject-name = \"example.sibling\"\n\
+             path = \"../sibling\"\n",
         );
         let import = |name: &str, subdir: &str| {
             format!(
