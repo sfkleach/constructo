@@ -104,7 +104,14 @@ pub fn verify_lock_with(set: &ProjectSet, lock: Option<&Lock>, dev: bool) -> Res
         if dev && locked.remote.is_none() {
             continue;
         }
-        if !loaded.iter().any(|(_, project)| project.name == locked.name) {
+        // Every imported project counts here, and not only those that are verified. Under `--dev` an import that has
+        // changed from a repository to a folder is not in `loaded`, but the project is imported all the same.
+        let imported = set
+            .projects
+            .iter()
+            .enumerate()
+            .any(|(index, project)| index != root && !project.builtin && project.name == locked.name);
+        if !imported {
             let message = format!("The lock has the project {}, which is not imported", locked.name);
             found.push(Diagnostic::new(&lock_name, locked.pos, message));
         }
@@ -773,6 +780,30 @@ mod tests {
         };
         let set = ProjectSet::load_with(&app.folder, true, remotes).unwrap();
         assert_eq!(verify_lock_with(&set, lock.as_ref(), false).unwrap().len(), 1);
+        assert!(verify_lock_with(&set, lock.as_ref(), true).unwrap().is_empty());
+        std::fs::remove_file(app.folder.join(LOCK_FILE)).unwrap();
+    }
+
+    #[test]
+    fn dev_does_not_call_an_entry_stale_when_its_import_has_become_a_folder() {
+        let (_repo, app, cache, _scratch) = app_with_repo("dev-became-folder");
+        update_lock_with(&app.folder, Remotes::Fetch(Ok(cache.clone()))).unwrap();
+        let lock = read_lock(&app.folder).unwrap();
+        // The import of example.lib now says where a folder is, and the lock still has the repository.
+        let folder = OnDisk::new("dev-became-folder-lib", &[("constructo.toml", LIB.as_bytes())]);
+        std::fs::write(
+            app.folder.join("constructo.toml"),
+            format!(
+                "[project]\nname = \"example.app\"\n\n[[import]]\nproject-name = \"example.lib\"\npath = \"{}\"\n",
+                folder.folder.display()
+            ),
+        )
+        .unwrap();
+        let remotes = Remotes::Locked {
+            cache: Ok(cache),
+            lock: Ok(lock.clone()),
+        };
+        let set = ProjectSet::load_with(&app.folder, true, remotes).unwrap();
         assert!(verify_lock_with(&set, lock.as_ref(), true).unwrap().is_empty());
         std::fs::remove_file(app.folder.join(LOCK_FILE)).unwrap();
     }
