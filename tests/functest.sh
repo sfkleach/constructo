@@ -1238,7 +1238,8 @@ if command -v git >/dev/null 2>&1; then
     # user: a variable such as GIT_DIR, which git sets when it runs a hook, would point it at another repository, and
     # a hook or a signing setting of the developer would run on the commits.
     git_isolated() { env -i PATH="$PATH" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null git "$@"; }
-    git_in_repo() { git_isolated -C "$rp/repo" -c user.name=Test -c user.email=test@example.com -c commit.gpgsign=false "$@"; }
+    git_as_test() { git_isolated -c user.name=Test -c user.email=test@example.com -c commit.gpgsign=false "$@"; }
+    git_in_repo() { git_as_test -C "$rp/repo" "$@"; }
     git_in_repo init --quiet --initial-branch=main
     git_in_repo add -A
     git_in_repo commit --quiet -m first
@@ -1258,7 +1259,11 @@ if command -v git >/dev/null 2>&1; then
         fail "repo: the lock records the repository and the commit"
     fi
     out="$("$CONSTRUCTO" project update "$rp/app" 2>&1)" || true
-    if [[ -z "$out" ]]; then pass "repo: a second update says nothing"; else fail "repo: a second update says nothing (got '$out')"; fi
+    if [[ -z "$out" ]]; then
+        pass "repo: a second update says nothing"
+    else
+        fail "repo: a second update says nothing (got '$out')"
+    fi
     # Git is given only the variables that constructo names, so ones that would point it at another repository or at
     # other programs do not reach it.
     out="$(GIT_DIR=/nonexistent GIT_WORK_TREE=/nonexistent GIT_EXEC_PATH=/nonexistent GIT_CONFIG_GLOBAL=/nonexistent \
@@ -1283,7 +1288,8 @@ STAND_IN
     printf '[core]\n\tsshCommand = ssh -o ConfigMarker=yes\n' > "$rp/sshhome/.gitconfig"
     ssh_update() {
         rm -f "$rp/ssh-arguments"
-        env PATH="$rp/bin:$PATH" "$@" "$CONSTRUCTO" project update "$rp/sshapp" > /dev/null 2>&1 && status=0 || status=$?
+        env PATH="$rp/bin:$PATH" "$@" "$CONSTRUCTO" project update "$rp/sshapp" > /dev/null 2>&1 \
+            && status=0 || status=$?
         said="$(cat "$rp/ssh-arguments" 2>/dev/null || true)"
     }
     ssh_update env -u GIT_SSH_COMMAND -u GIT_SSH HOME="$rp/nohome"
@@ -1317,7 +1323,8 @@ STAND_IN
     else
         fail "repo: update says when the commit moves (got '$out')"
     fi
-    # The lock now holds the commit, so `check` uses the cache and never the network, even after the repository moves on.
+    # The lock now holds the commit, so `check` uses the cache and never the network, even after the repository
+    # moves on.
     printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lib"\nrepo = "%s"\n' "$rp/repo" \
         > "$rp/app/constructo.toml"
     printf 'enum Pick = A(example.lib::Shape);\n' > "$rp/app/pick.types"
@@ -1364,7 +1371,8 @@ STAND_IN
     # An empty cache has not got the locked commit, and check does not fetch it.
     mkdir "$rp/empty"
     out="$(CONSTRUCTO_CACHE="$rp/empty" "$CONSTRUCTO" check --project="$rp/app" 2>&1)" && status=0 || status=$?
-    if [[ $status -eq 1 && "$out" == *"is not in the cache; run \`constructo project update\` to fetch it ("*"line 6, col 8)" ]]; then
+    if [[ $status -eq 1 \
+        && "$out" == *"is not in the cache; run \`constructo project update\` to fetch it ("*"line 6, col 8)" ]]; then
         pass "repo: check says to run update when the cache has not got the commit"
     else
         fail "repo: check says to run update when the cache has not got the commit (exit $status, got '$out')"
@@ -1387,7 +1395,8 @@ STAND_IN
     rm -f "$cached/shapes.types"
     ln -s "$rp/secret" "$cached/shapes.types"
     out="$("$CONSTRUCTO" check --dev --project="$rp/app" 2>&1)" && status=0 || status=$?
-    if [[ $status -eq 2 && "$out" == *"shapes.types of the project example.lib leads to $rp/secret, which is outside the repository"* \
+    if [[ $status -eq 2 \
+        && "$out" == *"shapes.types of the project example.lib leads to $rp/secret, which is outside the repository"* \
         && "$out" != *"SECRET-CONTENT"* ]]; then
         pass "repo: check refuses a link that leaves the clone"
     else
@@ -1398,7 +1407,8 @@ STAND_IN
     # With no lock there is nothing that says which commit to use.
     mv "$rp/app/constructo.lock" "$rp/app/constructo.lock.off"
     out="$("$CONSTRUCTO" check --dev --project="$rp/app" 2>&1)" && status=0 || status=$?
-    if [[ $status -eq 1 && "$out" == *"but there is no constructo.lock; run \`constructo project update\` to make one"* ]]; then
+    if [[ $status -eq 1 \
+        && "$out" == *"but there is no constructo.lock; run \`constructo project update\` to make one"* ]]; then
         pass "repo: no lock is an error for a project from a repository, even with --dev"
     else
         fail "repo: no lock is an error for a project from a repository, even with --dev (exit $status, got '$out')"
@@ -1410,8 +1420,8 @@ STAND_IN
     rm -f "$rp/app/constructo.lock"
     mv "$rp/app/constructo.lock.off" "$rp/app/constructo.lock"
     rm -f "$rp/app/pick.types"
-    printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lib"\nrepo = "%s"\nrev = "nothing-here"\n' \
-        "$rp/repo" > "$rp/app/constructo.toml"
+    printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lib"\nrepo = "%s"\n%s\n' \
+        "$rp/repo" 'rev = "nothing-here"' > "$rp/app/constructo.toml"
     expect_exit "repo: a rev that does not exist is exit 2" 2 project update "$rp/app"
     printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lib"\nrepo = "ext::sh -c ls"\n' \
         > "$rp/app/constructo.toml"
@@ -1446,13 +1456,14 @@ STAND_IN
     printf '[project]\nname = "example.lnk"\n' > "$rp/linkrepo/constructo.toml"
     printf 'enum Real = R;\n' > "$rp/linkrepo/real.types"
     ln -s real.types "$rp/linkrepo/alias.types"
-    git_in_link() { git_isolated -C "$rp/linkrepo" -c user.name=Test -c user.email=test@example.com -c commit.gpgsign=false "$@"; }
+    git_in_link() { git_as_test -C "$rp/linkrepo" "$@"; }
     git_in_link init --quiet --initial-branch=main
     git_in_link add -A
     git_in_link commit --quiet -m links
     printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lnk"\nrepo = "%s"\n' "$rp/linkrepo" \
         > "$rp/linkapp/constructo.toml"
-    out="$(HOME="$rp/home" XDG_CONFIG_HOME="$rp/home" "$CONSTRUCTO" project update "$rp/linkapp" 2>&1)" && status=0 || status=$?
+    out="$(HOME="$rp/home" XDG_CONFIG_HOME="$rp/home" "$CONSTRUCTO" project update "$rp/linkapp" 2>&1)" \
+        && status=0 || status=$?
     linked="$(sed -n 's/^commit = "\(.*\)"$/\1/p' "$rp/linkapp/constructo.lock")"
     if [[ $status -eq 0 && -L "$(echo "$CONSTRUCTO_CACHE"/git/*/"$linked")/alias.types" ]]; then
         pass "repo: a link is checked out as a link whatever the git configuration says"
@@ -1474,7 +1485,8 @@ STAND_IN
     printf '* filter=evil\n' > "$rp/linkrepo/.gitattributes"
     git_in_link add -A
     git_in_link commit --quiet -m attributes
-    out="$(HOME="$rp/home" XDG_CONFIG_HOME="$rp/home" "$CONSTRUCTO" project update "$rp/linkapp" 2>&1)" && status=0 || status=$?
+    out="$(HOME="$rp/home" XDG_CONFIG_HOME="$rp/home" "$CONSTRUCTO" project update "$rp/linkapp" 2>&1)" \
+        && status=0 || status=$?
     if [[ $status -eq 0 && ! -e "$rp/ran" ]]; then
         pass "repo: update does not run a filter from the git configuration of the user"
     else

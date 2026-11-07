@@ -168,7 +168,8 @@ impl Config {
                     ),
                     Key::new(
                         "dev",
-                        "Do not verify the imported projects that are folders on disk against constructo.lock. Projects from a repository are still verified.",
+                        "Do not verify the imported projects that are folders on disk against constructo.lock. \
+                         Projects from a repository are still verified.",
                         self.dev(),
                     ),
                 ],
