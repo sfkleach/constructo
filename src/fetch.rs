@@ -96,8 +96,7 @@ pub fn validate_url(url: &str) -> Result<(), String> {
     // The short form of ssh, `[USER@]HOST:PATH`, has a colon before any slash. A path to a folder has no colon, except
     // after the letter of a drive.
     let head = url.split('/').next().unwrap_or(url);
-    let is_drive = head.len() >= 2 && head.as_bytes()[0].is_ascii_alphabetic() && head.as_bytes()[1] == b':';
-    if head.contains(':') && !is_drive {
+    if head.contains(':') && !is_drive(head) {
         let host = match head.rsplit_once('@') {
             Some((user, _)) if user.contains(':') => return Err(no_secrets("a password")),
             Some((_, host)) => host,
@@ -389,6 +388,17 @@ impl Cache {
         Scratch::sweep(&git_folder);
         let work = Scratch::new(&git_folder)?;
         let clone = work.0.join("clone");
+        // Whether the configuration of the user says how to run ssh. `git config --get` fails when it does not, and a
+        // git that cannot be run fails here too, which the clone then reports. It is run in the folder of this run,
+        // which is not a repository, so only the system and user files are read, unless the cache is itself inside
+        // a repository, whose configuration is then the user's own as well.
+        let ssh_configured = git(
+            &["config", "--get", "core.sshCommand"],
+            Some(&work.0),
+            url,
+            Config::User { ssh_configured: true },
+        )
+        .is_ok();
         git(
             // No template, so that a folder of templates in the configuration of the user puts nothing in the clone.
             &[
@@ -402,7 +412,7 @@ impl Cache {
             ],
             None,
             url,
-            Config::User,
+            Config::User { ssh_configured },
         )?;
         // A clone has a branch of its own only for the default one. The others are the branches of the origin, so a
         // name that is not found as it is, is tried as one of those.
@@ -539,14 +549,20 @@ fn path_text(path: &Path) -> String {
 #[derive(PartialEq, Clone, Copy, Debug)]
 pub(crate) enum Config {
     /// The system and user files, as for any use of git. Fetching needs them, for the credential helper, the settings
-    /// of ssh and a proxy.
-    User,
+    /// of ssh and a proxy. `ssh_configured` says whether the configuration of git says how to run ssh, with
+    /// `core.sshCommand`. If neither it nor the environment does, ssh is run in batch mode (see `BATCH_SSH`).
+    User { ssh_configured: bool },
     /// No system or user file. A call that only reads a clone that is already here needs nothing from them, and a
     /// repository is somebody else's: its `.gitattributes` can name a filter, such as `lfs`, and a checkout would run
     /// the program that the configuration of the user gives for it, before the checks on the files are made, and so
     /// give a different checkout on a machine that has no such program.
     Isolated,
 }
+
+/// How ssh is run when the user has not said. In batch mode ssh never asks for anything on the terminal, such as a
+/// passphrase or whether to trust a host it has not seen, and fails instead, since a fetch is not a conversation. A
+/// passphrase comes from the agent of ssh, and a host is trusted by connecting to it once with ssh.
+const BATCH_SSH: &str = "ssh -o BatchMode=yes";
 
 /// The file that is always empty.
 const NULL_DEVICE: &str = if cfg!(windows) { "NUL" } else { "/dev/null" };
@@ -598,9 +614,14 @@ pub(crate) fn child_environment(
     get: impl Fn(&str) -> Option<OsString>,
 ) -> Vec<(&'static str, OsString)> {
     let passed = match config {
-        Config::User => [PASSED_ALWAYS, PASSED_FOR_FETCHING].concat(),
+        Config::User { .. } => [PASSED_ALWAYS, PASSED_FOR_FETCHING].concat(),
         Config::Isolated => PASSED_ALWAYS.to_vec(),
     };
+    // The order in which git looks for how to run ssh is `GIT_SSH_COMMAND`, `core.sshCommand`, then `GIT_SSH`, so
+    // the default is only given when none of them is there, and it never overrides a choice of the user.
+    let batch = config == Config::User { ssh_configured: false }
+        && get("GIT_SSH_COMMAND").is_none()
+        && get("GIT_SSH").is_none();
     let mut environment: Vec<(&'static str, OsString)> = passed
         .into_iter()
         .filter_map(|name| get(name).map(|value| (name, value)))
@@ -609,6 +630,9 @@ pub(crate) fn child_environment(
     set("GIT_ALLOW_PROTOCOL", ALLOWED_PROTOCOLS);
     // Without this git waits for a password to be typed, which nobody can see in a run of a tool.
     set("GIT_TERMINAL_PROMPT", "0");
+    if batch {
+        set("GIT_SSH_COMMAND", BATCH_SSH);
+    }
     if config == Config::Isolated {
         // No `HOME` is passed either, for versions of git before 2.32, which do not know `GIT_CONFIG_GLOBAL`.
         set("GIT_CONFIG_NOSYSTEM", "1");
@@ -619,7 +643,8 @@ pub(crate) fn child_environment(
 }
 
 /// Runs git with the arguments, in the folder if there is one, and returns what it printed. Its environment is the one
-/// that `child_environment` gives, and nothing else, and its settings are `SETTINGS`. A git that is not installed is an error that says so.
+/// that `child_environment` gives, and nothing else, and its settings are `SETTINGS`. A git that is not installed is
+/// an error that says so.
 fn git(args: &[&str], folder: Option<&Path>, url: &str, config: Config) -> Result<String, ProjectError> {
     let mut command = Command::new("git");
     for setting in SETTINGS {
@@ -629,9 +654,11 @@ fn git(args: &[&str], folder: Option<&Path>, url: &str, config: Config) -> Resul
     if let Some(folder) = folder {
         command.current_dir(folder);
     }
-    command
-        .env_clear()
-        .envs(child_environment(config, |name| std::env::var_os(name)));
+    let environment = child_environment(config, |name| std::env::var_os(name));
+    let batch = environment
+        .iter()
+        .any(|(name, value)| *name == "GIT_SSH_COMMAND" && value == BATCH_SSH);
+    command.env_clear().envs(environment);
     let output = command.output().map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             ProjectError::Cannot(
@@ -642,11 +669,53 @@ fn git(args: &[&str], folder: Option<&Path>, url: &str, config: Config) -> Resul
         }
     })?;
     if !output.status.success() {
-        let said = String::from_utf8_lossy(&output.stderr);
-        let said = said.trim().lines().last().unwrap_or("it failed");
-        return Err(ProjectError::Cannot(format!("Git failed for {}: {}", url, said)));
+        let mut message = format!(
+            "Git failed for {}: {}",
+            url,
+            failure(&String::from_utf8_lossy(&output.stderr))
+        );
+        if batch && is_ssh(url) {
+            message.push_str(
+                " (ssh is run in batch mode, so it cannot ask for a passphrase or whether to trust the host: use the \
+                 agent of ssh, connect to the host with ssh once, or say how to run ssh with core.sshCommand or \
+                 GIT_SSH_COMMAND)",
+            );
+        }
+        return Err(ProjectError::Cannot(message));
     }
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+/// What git said when it failed, on one line: the lines up to the first that starts with `fatal:` or `error:`. The
+/// cause, such as `Host key verification failed.` from ssh, often comes before that line, and advice after it.
+fn failure(stderr: &str) -> String {
+    let mut said = Vec::new();
+    for line in stderr.lines().map(str::trim).filter(|line| !line.is_empty()) {
+        said.push(line);
+        if line.starts_with("fatal:") || line.starts_with("error:") {
+            break;
+        }
+    }
+    if said.is_empty() {
+        "it failed".to_string()
+    } else {
+        said.join(" ")
+    }
+}
+
+/// Whether git reaches the repository by ssh: an `ssh://` URL, or the short form `[USER@]HOST:PATH`, which has a colon
+/// before any slash that is not after the letter of a drive.
+fn is_ssh(url: &str) -> bool {
+    if let Some((scheme, _)) = url.split_once("://") {
+        return scheme == "ssh";
+    }
+    let head = url.split('/').next().unwrap_or(url);
+    head.contains(':') && !is_drive(head)
+}
+
+/// Whether the text starts with the letter of a drive and a colon, as in `C:`.
+fn is_drive(head: &str) -> bool {
+    head.len() >= 2 && head.as_bytes()[0].is_ascii_alphabetic() && head.as_bytes()[1] == b':'
 }
 
 #[cfg(test)]
@@ -913,7 +982,7 @@ mod tests {
 
     #[test]
     fn a_fetch_is_given_what_reaching_a_repository_needs_and_nothing_else() {
-        let environment = environment_of(Config::User, &OUTSIDE);
+        let environment = environment_of(Config::User { ssh_configured: false }, &OUTSIDE);
         for name in ["PATH", "HOME", "SSH_AUTH_SOCK", "https_proxy", "GIT_SSH_COMMAND"] {
             assert_eq!(
                 environment.get(name).map(String::as_str),
@@ -957,9 +1026,59 @@ mod tests {
 
     #[test]
     fn a_variable_that_is_not_set_is_not_passed() {
-        let environment = environment_of(Config::User, &[]);
+        let environment = environment_of(Config::User { ssh_configured: false }, &[]);
         let names: Vec<&str> = environment.keys().map(String::as_str).collect();
-        assert_eq!(names, ["GIT_ALLOW_PROTOCOL", "GIT_TERMINAL_PROMPT"]);
+        assert_eq!(names, ["GIT_ALLOW_PROTOCOL", "GIT_SSH_COMMAND", "GIT_TERMINAL_PROMPT"]);
+    }
+
+    #[test]
+    fn ssh_is_run_in_batch_mode_unless_the_user_says_how_to_run_it() {
+        let ssh =
+            |config: Config, outside: &[(&str, &str)]| environment_of(config, outside).get("GIT_SSH_COMMAND").cloned();
+        let fetching = Config::User { ssh_configured: false };
+        assert_eq!(ssh(fetching, &[]).as_deref(), Some(BATCH_SSH));
+        // The choice of the user wins, whether it is in the environment or in the configuration of git.
+        assert_eq!(
+            ssh(fetching, &[("GIT_SSH_COMMAND", "ssh -i k")]).as_deref(),
+            Some("ssh -i k")
+        );
+        assert_eq!(ssh(fetching, &[("GIT_SSH", "/usr/bin/plink")]), None);
+        assert_eq!(ssh(Config::User { ssh_configured: true }, &[]), None);
+        // A call that only reads the clone does not use ssh at all.
+        assert_eq!(ssh(Config::Isolated, &[]), None);
+    }
+
+    #[test]
+    fn the_message_of_git_keeps_the_cause_and_leaves_out_the_advice() {
+        let stderr = "Host key verification failed.\r\nfatal: Could not read from remote repository.\n\nPlease make \
+                      sure you have the correct access rights\nand the repository exists.\n";
+        assert_eq!(
+            failure(stderr),
+            "Host key verification failed. fatal: Could not read from remote repository."
+        );
+        assert_eq!(failure("warning: x\n"), "warning: x");
+        assert_eq!(failure(""), "it failed");
+    }
+
+    #[test]
+    fn a_url_that_git_reaches_by_ssh_is_told_apart() {
+        for url in [
+            "ssh://git@example.com/lib",
+            "git@github.com:example/lib.git",
+            "example.com:lib",
+        ] {
+            assert!(is_ssh(url), "{}", url);
+        }
+        for url in [
+            "https://example.com/lib",
+            "file:///srv/lib",
+            "/srv/lib",
+            "../lib",
+            "C:/repos/lib",
+            "./a:b/lib",
+        ] {
+            assert!(!is_ssh(url), "{}", url);
+        }
     }
 
     #[test]
