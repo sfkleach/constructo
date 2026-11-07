@@ -155,8 +155,10 @@ const SCRATCH_PREFIX: &str = "tmp-";
 /// How often the folder of a run that is going has its time changed. It is much less than `STALE_AFTER`.
 const HEARTBEAT: std::time::Duration = std::time::Duration::from_secs(60 * 60);
 
-/// The size of the stack of the heartbeat thread.
-const HEARTBEAT_STACK: usize = 64 * 1024;
+/// The size of the stack of the heartbeat thread, which is the size that Rust gives a thread when none is given. A
+/// stack that is too small aborts the whole process, and a large one costs only address space, since memory is used
+/// only for the part of the stack that is touched.
+const HEARTBEAT_STACK: usize = 2 * 1024 * 1024;
 
 /// How long a scratch folder may go unchanged before it is taken to belong to a run that was killed. A run that is
 /// going changes the time every `HEARTBEAT`, so it never gets this old.
@@ -175,8 +177,7 @@ struct Heartbeat {
 impl Heartbeat {
     fn start(folder: PathBuf, every: std::time::Duration) -> Heartbeat {
         let (stop, stopped) = std::sync::mpsc::channel::<()>();
-        // The size of the stack is given, since otherwise it is read from `RUST_MIN_STACK` in the environment. The
-        // thread does almost nothing, so a small one is plenty.
+        // The size of the stack is given, since otherwise it is read from `RUST_MIN_STACK` in the environment.
         let thread = std::thread::Builder::new()
             .name("heartbeat".to_string())
             .stack_size(HEARTBEAT_STACK)
