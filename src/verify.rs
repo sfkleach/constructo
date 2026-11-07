@@ -122,6 +122,21 @@ pub fn verify_lock_with(set: &ProjectSet, lock: Option<&Lock>, dev: bool) -> Res
 /// Compares the files of a project with the lock entry for it, adding a diagnostic for each difference, in the order of
 /// the paths. The digest of the project follows from the digests of its files, so a difference in it is shown by them.
 fn compare(lock_name: &str, locked: &LockedProject, actual: &LockedProject, found: &mut Vec<Diagnostic>) {
+    // Where the project comes from is part of what the lock pins. The files can be the same while the lock still says
+    // that the project is from a repository at a commit, and it is a folder now, or the other way round.
+    if locked.remote != actual.remote {
+        let say =
+            |remote: &Option<LockedRemote>| remote.as_ref().map_or("a folder".to_string(), LockedRemote::describe);
+        let message = format!(
+            "The project {} is from {} in {} but from {} now; {}",
+            locked.name,
+            say(&locked.remote),
+            LOCK_FILE,
+            say(&actual.remote),
+            UPDATE
+        );
+        found.push(Diagnostic::new(lock_name, locked.pos, message));
+    }
     for (path, now) in &actual.files {
         match locked.files.get(path) {
             None => {
@@ -1005,5 +1020,44 @@ mod tests {
             );
             std::fs::remove_file(app.folder.join(LOCK_FILE)).unwrap();
         }
+    }
+
+    #[test]
+    fn a_project_that_changes_from_a_repository_to_a_folder_with_the_same_files_is_noticed() {
+        let (_repo, app, cache, _scratch) = app_with_repo("became-folder-same");
+        update_lock_with(&app.folder, Remotes::Fetch(Ok(cache.clone()))).unwrap();
+        let lock = read_lock(&app.folder).unwrap();
+        let folder = OnDisk::new(
+            "became-folder-same-lib",
+            &[
+                ("constructo.toml", LIB.as_bytes()),
+                ("shapes.types", b"enum Shape = Circle;\n"),
+            ],
+        );
+        std::fs::write(
+            app.folder.join("constructo.toml"),
+            format!(
+                "[project]\nname = \"example.app\"\n\n[[import]]\nproject-name = \"example.lib\"\npath = \"{}\"\n",
+                folder.folder.display()
+            ),
+        )
+        .unwrap();
+        let remotes = Remotes::Locked {
+            cache: Ok(cache),
+            lock: Ok(lock.clone()),
+        };
+        let set = ProjectSet::load_with(&app.folder, true, remotes).unwrap();
+        let found = verify_lock_with(&set, lock.as_ref(), false).unwrap();
+        assert_eq!(found.len(), 1, "{:?}", found);
+        let message = found[0].to_string();
+        assert!(message.contains("The project example.lib is from "), "{}", message);
+        assert!(
+            message.contains("but from a folder now; run `constructo project update`"),
+            "{}",
+            message
+        );
+        // A folder is not verified under `--dev`, so it is left alone there.
+        assert!(verify_lock_with(&set, lock.as_ref(), true).unwrap().is_empty());
+        std::fs::remove_file(app.folder.join(LOCK_FILE)).unwrap();
     }
 }
