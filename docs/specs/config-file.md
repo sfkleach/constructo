@@ -62,6 +62,7 @@ subcommand. Today there is one subcommand, `check`.
 | `allow-refs`    | boolean | `false` | `--allow-refs`, `--no-allow-refs`       |
 | `infer-limit`   | integer | `10000` | `--infer-limit=N`                       |
 | `default-limit` | integer | `10000` | `--default-limit=N`                     |
+| `dev`           | boolean | `false` | `--dev`, `--no-dev`                     |
 
 A limit is a whole number that is not negative.
 

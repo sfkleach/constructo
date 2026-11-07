@@ -4,4 +4,4 @@ name = "example.app"
 [[import]]
 project-name = "example.enum"
 group = "const"
-source = "../lib"
+path = "../lib"

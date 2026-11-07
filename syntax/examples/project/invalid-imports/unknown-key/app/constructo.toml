@@ -1,8 +1,8 @@
-# expect: unknown field `version`, expected one of `project-name`, `source`, `group`
+# expect: unknown field `version`, expected one of `project-name`, `path`, `repo`, `rev`, `subdir`, `builtin`, `group`
 [project]
 name = "example.app"
 
 [[import]]
 project-name = "example.lib"
-source = "../lib"
+path = "../lib"
 version = "1"

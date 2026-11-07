@@ -45,11 +45,14 @@ pub struct CheckSettings {
     pub allow_refs: Option<bool>,
     pub infer_limit: Option<usize>,
     pub default_limit: Option<usize>,
+    /// Whether to skip the verification of the lock file.
+    pub dev: Option<bool>,
 }
 
 impl Config {
     /// Reads the settings from the text of a configuration file. `name` is the name of the file in diagnostics.
     pub fn parse(text: &str, name: &str) -> Result<Config, Diagnostic> {
+        let text = crate::lexer::strip_bom(text);
         toml::from_str(text).map_err(|e| {
             let offset = e.span().map_or(0, |span| span.start);
             Diagnostic::new(name, Pos::at(text, offset), e.message())
@@ -57,7 +60,7 @@ impl Config {
     }
 
     /// The settings that a run uses, with every key of the tables that `constructo check` has set.
-    pub fn effective(options: &CheckOptions, prelude: bool, verbose: bool) -> Config {
+    pub fn effective(options: &CheckOptions, prelude: bool, verbose: bool, dev: bool) -> Config {
         Config {
             global: Global { verbose: Some(verbose) },
             experimental: ExperimentalSettings {
@@ -71,6 +74,7 @@ impl Config {
                 allow_refs: Some(options.allow_refs),
                 infer_limit: Some(options.infer_limit),
                 default_limit: Some(options.default_limit),
+                dev: Some(dev),
             },
         }
     }
@@ -131,6 +135,11 @@ impl Config {
                         "The most nodes that the default value of an omitted argument may have.",
                         options.default_limit,
                     ),
+                    Key::new(
+                        "dev",
+                        "Do not verify the imported projects that are folders on disk against constructo.lock. Projects from a repository are still verified.",
+                        self.dev(),
+                    ),
                 ],
                 ),
             ];
@@ -169,6 +178,11 @@ impl Config {
         self.check.prelude.unwrap_or(true)
     }
 
+    /// Whether the verification of the lock file is skipped, which is not one of the `CheckOptions` either.
+    pub fn dev(&self) -> bool {
+        self.check.dev.unwrap_or(false)
+    }
+
     /// Whether to report each input that was checked, which is not one of the `CheckOptions` either.
     pub fn verbose(&self) -> bool {
         self.global.verbose.unwrap_or(false)
@@ -200,6 +214,12 @@ mod tests {
     fn error(text: &str) -> (u32, u32, String) {
         let d = Config::parse(text, "c.toml").unwrap_err();
         (d.pos.line, d.pos.col, d.message)
+    }
+
+    #[test]
+    fn a_byte_order_mark_is_not_a_part_of_the_file() {
+        let with = Config::parse("\u{feff}[check]\nallow-refs = true\n", "c.toml").unwrap();
+        assert_eq!(with, Config::parse("[check]\nallow-refs = true\n", "c.toml").unwrap());
     }
 
     #[test]
@@ -243,7 +263,7 @@ mod tests {
             experimental: Experimental::all(),
             ..CheckOptions::default()
         };
-        let config = Config::effective(&options, false, true);
+        let config = Config::effective(&options, false, true, true);
         let text = config.to_toml();
         assert!(
             text.contains("[check]\n") && text.contains("infer-limit = 7\n") && text.contains("continue = false\n")
@@ -251,7 +271,8 @@ mod tests {
         assert!(text.contains("# Load the standard prelude"), "{}", text);
         assert_eq!(Config::parse(&text, "c.toml").unwrap(), config);
         assert_eq!(config.check_options(), options);
-        assert!(!config.prelude() && config.verbose());
+        assert!(!config.prelude() && config.verbose() && config.dev());
+        assert!(text.contains("dev = true\n"), "{}", text);
     }
 
     #[test]

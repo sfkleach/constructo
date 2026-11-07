@@ -4,4 +4,4 @@ name = "example.app"
 # With no group the prelude can only be named by its full name, and the bare names are not there.
 [[import]]
 project-name = "constructo.prelude"
-source = "constructo:/prelude"
+builtin = "constructo:/prelude"

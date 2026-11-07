@@ -4,4 +4,4 @@ name = "example.app"
 
 [[import]]
 project-name = "constructo.prelude"
-source = "../prelude"
+path = "../prelude"

@@ -405,6 +405,16 @@ else
 fi
 rm -f "$at_dir/Shape@x.y.types" "$at_dir/two.types"
 rmdir "$at_dir"
+# A byte order mark at the start of a file is removed, as rustc does, so an editor that adds one does no harm.
+bom_dir="$(mktemp -d)"
+printf '\xEF\xBB\xBFenum Shape = Circle { radius: Float };\n' > "$bom_dir/shape.types"
+printf '\xEF\xBB\xBFCircle { radius: 1.0 }\n' > "$bom_dir/circle.values"
+printf '\xEF\xBB\xBF[project]\nname = "a.b"\n' > "$bom_dir/constructo.toml"
+expect_exit "a byte order mark is removed from a types file and a values file" 0 check \
+    "$bom_dir/shape.types" "$bom_dir/circle.values"
+expect_exit "a byte order mark is removed from a project file" 0 check --dev --project="$bom_dir"
+rm -f "$bom_dir/shape.types" "$bom_dir/circle.values" "$bom_dir/constructo.toml"
+rmdir "$bom_dir"
 # The prelude consts are ordinary consts, so they are only known when the prelude is loaded.
 stdin_exit "null is accepted with the prelude" 0 'null'
 stdin_exit "true and false are accepted with the prelude" 0 '[true, false]; Some(null)'
@@ -692,7 +702,7 @@ PROJECTS="$(dirname "$0")/../syntax/examples/project"
 SHAPES="$PROJECTS/valid/shapes"
 for d in "$PROJECTS"/valid/*/; do
     d="${d%/}"
-    expect_exit "project/valid/$(basename "$d")" 0 check --project="$d"
+    expect_exit "project/valid/$(basename "$d")" 0 check --dev --project="$d"
 done
 # Each invalid project-file names its expected error, which is reported in the usual form with exit code 2.
 for d in "$PROJECTS"/invalid/*/; do
@@ -700,53 +710,53 @@ for d in "$PROJECTS"/invalid/*/; do
     [[ -f "$d/constructo.toml" ]] || continue
     expected="$(sed -n 's|^# expect: ||p' "$d/constructo.toml")"
     actual=0
-    err="$("$CONSTRUCTO" check --project="$d" 2>&1 >/dev/null)" || actual=$?
+    err="$("$CONSTRUCTO" check --dev --project="$d" 2>&1 >/dev/null)" || actual=$?
     if [[ "$actual" -eq 2 && "$err" == "ERROR: $expected ($d/constructo.toml, line "* ]]; then
         pass "project/invalid/$(basename "$d")"
     else
         fail "project/invalid/$(basename "$d") (expected exit 2 with '$expected', got exit $actual and '$err')"
     fi
 done
-expect_exit "a folder with no project-file is a usage error" 2 check --project="$PROJECTS/invalid/no-project-file"
-err="$("$CONSTRUCTO" check --project="$PROJECTS/invalid/no-project-file" 2>&1 >/dev/null || true)"
+expect_exit "a folder with no project-file is a usage error" 2 check --dev --project="$PROJECTS/invalid/no-project-file"
+err="$("$CONSTRUCTO" check --dev --project="$PROJECTS/invalid/no-project-file" 2>&1 >/dev/null || true)"
 if [[ "$err" == "ERROR: Cannot read $PROJECTS/invalid/no-project-file/constructo.toml: "* ]]; then
     pass "a folder with no project-file is reported"
 else
     fail "a folder with no project-file is reported (got '$err')"
 fi
-expect_exit "a folder that does not exist is a usage error" 2 check --project=nothing-here
-expect_exit "--project can only be given once" 2 check --project="$SHAPES" --project="$SHAPES"
+expect_exit "a folder that does not exist is a usage error" 2 check --dev --project=nothing-here
+expect_exit "--project can only be given once" 2 check --dev --project="$SHAPES" --project="$SHAPES"
 expect_exit "--project needs a folder" 2 check --project
 expect_exit "--project is not accepted without a subcommand" 2 --project="$SHAPES"
 
 # The files of the project are the types files that its patterns name, in order, and nothing else.
-listing="$("$CONSTRUCTO" check -v --project="$SHAPES" 2>&1)"
+listing="$("$CONSTRUCTO" check -v --dev --project="$SHAPES" 2>&1)"
 expected_listing="OK: $SHAPES (project com.example.shapes)
 OK: $SHAPES/circles/shape.types (data-types)
 OK: $SHAPES/root.types (data-types)
-OK: checked 2 file(s)"
+OK: checked 2 file(s) in 1 project(s)"
 if [[ "$listing" == "$expected_listing" ]]; then
     pass "project: the types files are listed in order, without hidden, nested or other files"
 else
     fail "project: the types files are listed in order (got '$listing')"
 fi
-listing="$("$CONSTRUCTO" check -v --project="$PROJECTS/valid/patterns" 2>&1)"
+listing="$("$CONSTRUCTO" check -v --dev --project="$PROJECTS/valid/patterns" 2>&1)"
 if [[ "$listing" == *"/lib/b.types"* && "$listing" == *"/src/a.types"* && "$listing" != *"generated"* \
     && "$listing" != *"other.types"* ]]; then
     pass "project: include and exclude choose the files"
 else
     fail "project: include and exclude choose the files (got '$listing')"
 fi
-listing="$("$CONSTRUCTO" check -v --project="$PROJECTS/valid/imports-only" 2>&1)"
+listing="$("$CONSTRUCTO" check -v --dev --project="$PROJECTS/valid/imports-only" 2>&1)"
 if [[ "$listing" == "OK: $PROJECTS/valid/imports-only (project example.importsonly)
-OK: checked 0 file(s)" ]]; then
+OK: checked 0 file(s) in 1 project(s)" ]]; then
     pass "project: a project with no types files is accepted"
 else
     fail "project: a project with no types files is accepted (got '$listing')"
 fi
 
 # A file that the project includes as a types file must not hold values.
-err="$("$CONSTRUCTO" check --project="$PROJECTS/rejected/values-in-types" 2>&1 >/dev/null)" && actual=0 || actual=$?
+err="$("$CONSTRUCTO" check --dev --project="$PROJECTS/rejected/values-in-types" 2>&1 >/dev/null)" && actual=0 || actual=$?
 if [[ "$actual" -eq 1 && "$err" == "ERROR: The project includes this file as a types file but it holds data-values ($PROJECTS/rejected/values-in-types/notes.types, line 1, col 1)" ]]; then
     pass "project: a values file that the patterns include is reported"
 else
@@ -756,9 +766,9 @@ fi
 # Imports: every project that is imported is loaded once, before the project that imports it.
 IMPORTS="$PROJECTS/valid-imports"
 for root in diamond/app two-groups/app chain/a; do
-    expect_exit "project/valid-imports/$root" 0 check --project="$IMPORTS/$root"
+    expect_exit "project/valid-imports/$root" 0 check --dev --project="$IMPORTS/$root"
 done
-project_names() { "$CONSTRUCTO" check -v --project="$1" 2>&1 | sed -n 's|.*(project \(.*\))$|\1|p' | tr '\n' ' '; }
+project_names() { "$CONSTRUCTO" check -v --dev --project="$1" 2>&1 | sed -n 's|.*(project \([^,)]*\)[,)].*$|\1|p' | tr '\n' ' '; }
 order="$(project_names "$IMPORTS/diamond/app")"
 if [[ "$order" == "example.base example.left example.right example.app " ]]; then
     pass "imports: a project that is imported twice is loaded once, before the projects that import it"
@@ -771,22 +781,22 @@ if [[ "$order" == "example.c example.b example.a " ]]; then
 else
     fail "imports: a project is loaded when it is imported indirectly (got '$order')"
 fi
-count="$("$CONSTRUCTO" check -v --project="$IMPORTS/two-groups/app" 2>&1 | grep -c '(project ')"
+count="$("$CONSTRUCTO" check -v --dev --project="$IMPORTS/two-groups/app" 2>&1 | grep -c '(project ')"
 if [[ "$count" -eq 2 ]]; then
     pass "imports: one project in several groups is still loaded once"
 else
     fail "imports: one project in several groups is still loaded once (got $count)"
 fi
 # A relative source is relative to the folder of the project that imports, and not to the current folder.
-if (cd "$IMPORTS/diamond" && "$CONSTRUCTO" check --project=app >/dev/null 2>&1); then
+if (cd "$IMPORTS/diamond" && "$CONSTRUCTO" check --dev --project=app >/dev/null 2>&1); then
     pass "imports: a relative source is relative to the importing project"
 else
     fail "imports: a relative source is relative to the importing project"
 fi
 absolute="$(mktemp -d)"
-printf '[project]\nname = "example.absolute"\n\n[[import]]\nproject-name = "example.lib"\nsource = "%s"\n' \
+printf '[project]\nname = "example.absolute"\n\n[[import]]\nproject-name = "example.lib"\npath = "%s"\n' \
     "$(cd "$IMPORTS/two-groups/lib" && pwd)" > "$absolute/constructo.toml"
-expect_exit "imports: a source may be an absolute path" 0 check --project="$absolute"
+expect_exit "imports: a source may be an absolute path" 0 check --dev --project="$absolute"
 rm -f "$absolute/constructo.toml"
 rmdir "$absolute"
 # An error in an imported project is reported against that project.
@@ -794,12 +804,12 @@ broken="$(mktemp -d)"
 mkdir "$broken/lib" "$broken/app"
 printf '[project]\nname = "example.lib"\n' > "$broken/lib/constructo.toml"
 echo "enum Lib = Lib(Missing);" > "$broken/lib/lib.types"
-printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lib"\nsource = "../lib"\n' \
+printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lib"\npath = "../lib"\n' \
     > "$broken/app/constructo.toml"
 echo "enum App = App;" > "$broken/app/app.types"
-expect_exit "imports: a type error in an imported project fails the run" 1 check --project="$broken/app"
-listing="$("$CONSTRUCTO" check -v --project="$broken/app" 2>/dev/null || true)"
-if [[ "$listing" == *"FAILED: $broken/app/../lib (project example.lib)"* \
+expect_exit "imports: a type error in an imported project fails the run" 1 check --dev --project="$broken/app"
+listing="$("$CONSTRUCTO" check -v --dev --project="$broken/app" 2>/dev/null || true)"
+if [[ "$listing" == *"FAILED: $broken/app/../lib (project example.lib, unverified)"* \
     && "$listing" == *"OK: $broken/app (project example.app)"* ]]; then
     pass "imports: the project with the error is the one reported as failed"
 else
@@ -812,7 +822,7 @@ for d in "$PROJECTS"/invalid-imports/*/; do
     d="${d%/}"
     expected="$(sed -n 's|^# expect: ||p' "$d/app/constructo.toml")"
     actual=0
-    err="$("$CONSTRUCTO" check --project="$d/app" 2>&1 >/dev/null)" || actual=$?
+    err="$("$CONSTRUCTO" check --dev --project="$d/app" 2>&1 >/dev/null)" || actual=$?
     if [[ "$actual" -eq 2 && "$err" == "ERROR: $expected"* ]]; then
         pass "project/invalid-imports/$(basename "$d")"
     else
@@ -821,20 +831,20 @@ for d in "$PROJECTS"/invalid-imports/*/; do
 done
 # Names: each project has its own names, which are written with a group or the full name of the project.
 NAMES="$PROJECTS/valid-names"
-expect_exit "project/valid-names/qualified" 0 check --project="$NAMES/qualified/app" "$NAMES/qualified/app/values.values"
-expect_exit "project/valid-names/keyword-parts" 0 check --project="$NAMES/keyword-parts/app" "$NAMES/keyword-parts/app/values.values"
+expect_exit "project/valid-names/qualified" 0 check --dev --project="$NAMES/qualified/app" "$NAMES/qualified/app/values.values"
+expect_exit "project/valid-names/keyword-parts" 0 check --dev --project="$NAMES/keyword-parts/app" "$NAMES/keyword-parts/app/values.values"
 for case in bundle same-names group; do
-    expect_exit "project/valid-names/$case" 0 check --project="$NAMES/$case/app"
+    expect_exit "project/valid-names/$case" 0 check --dev --project="$NAMES/$case/app"
 done
 # A const of another project is a reference to a const, which needs the option as any other does.
-expect_exit "project/valid-names/not-transitive" 0 check --allow-refs --project="$NAMES/not-transitive/app"
-expect_exit "a const of another project is a reference" 1 check --project="$NAMES/not-transitive/app"
+expect_exit "project/valid-names/not-transitive" 0 check --allow-refs --dev --project="$NAMES/not-transitive/app"
+expect_exit "a const of another project is a reference" 1 check --dev --project="$NAMES/not-transitive/app"
 # Each invalid case names its expected error, which starts the message, and the exit code is 1.
 for d in "$PROJECTS"/invalid-names/*/; do
     d="${d%/}"
     expected="$(sed -n '1s|^// expect: ||p' "$d/app/app.types")"
     actual=0
-    err="$("$CONSTRUCTO" check --project="$d/app" 2>&1 >/dev/null)" || actual=$?
+    err="$("$CONSTRUCTO" check --dev --project="$d/app" 2>&1 >/dev/null)" || actual=$?
     if [[ "$actual" -eq 1 && "$err" == "ERROR: $expected"* ]]; then
         pass "project/invalid-names/$(basename "$d")"
     else
@@ -842,13 +852,13 @@ for d in "$PROJECTS"/invalid-names/*/; do
     fi
 done
 # A name is shown as it would be written in the file the message is about.
-listing="$("$CONSTRUCTO" check -v --project="$NAMES/qualified/app" 2>/dev/null)"
+listing="$("$CONSTRUCTO" check -v --dev --project="$NAMES/qualified/app" 2>/dev/null)"
 if [[ "$listing" == *"const unit: example.lib::Shape"* && "$listing" == *"const holder: Holder"* ]]; then
     pass "names: a type of another project is shown in full, and one of the project itself is bare"
 else
     fail "names: a type of another project is shown in full, and one of the project itself is bare (got '$listing')"
 fi
-listing="$("$CONSTRUCTO" check -v --project="$NAMES/bundle/app" 2>/dev/null)"
+listing="$("$CONSTRUCTO" check -v --dev --project="$NAMES/bundle/app" 2>/dev/null)"
 if [[ "$listing" == *"const c: Shape"* && "$listing" != *"example.lib::"* ]]; then
     pass "names: a type of a project that is imported into local is bare"
 else
@@ -857,52 +867,52 @@ fi
 # The files given with a project are written in the project's own namespace, with its own imports.
 extra="$(mktemp)"
 echo "enum Extra = Extra(lib::Shape);" > "$extra"
-expect_exit "names: a types file that is given is written in the project" 0 check --project="$NAMES/qualified/app" "$extra"
+expect_exit "names: a types file that is given is written in the project" 0 check --dev --project="$NAMES/qualified/app" "$extra"
 echo "enum Holder = Other;" > "$extra"
 expect_exit "names: a type in a given file that the project declares is a duplicate" 1 \
-    check --project="$NAMES/qualified/app" "$extra"
+    check --dev --project="$NAMES/qualified/app" "$extra"
 echo "enum Extra = Extra(example.other::Shape);" > "$extra"
 expect_exit "names: a given file cannot name a project that was not imported" 1 \
-    check --project="$NAMES/qualified/app" "$extra"
+    check --dev --project="$NAMES/qualified/app" "$extra"
 rm -f "$extra"
 # The standard prelude is the built-in project constructo.prelude, which every project imports into local unless it
 # imports it itself.
 PRELUDES="$PROJECTS/valid-prelude"
 for case in override explicit-local full-name no-group; do
-    expect_exit "project/valid-prelude/$case" 0 check --project="$PRELUDES/$case/app"
+    expect_exit "project/valid-prelude/$case" 0 check --dev --project="$PRELUDES/$case/app"
 done
 # An import of the prelude is the project's own statement, so --no-prelude leaves it alone.
 for case in override explicit-local no-group; do
     expect_exit "prelude: --no-prelude keeps the explicit import in $case" 0 \
-        check --no-prelude --project="$PRELUDES/$case/app"
+        check --no-prelude --dev --project="$PRELUDES/$case/app"
 done
 expect_exit "prelude: --no-prelude removes the implicit import" 1 \
-    check --no-prelude --project="$PRELUDES/full-name/app"
+    check --no-prelude --dev --project="$PRELUDES/full-name/app"
 expect_exit "prelude: --prelude gives the implicit import back" 0 \
-    check --config="$CONFIG/precedence/no-prelude.toml" --prelude --project="$PRELUDES/full-name/app"
+    check --config="$CONFIG/precedence/no-prelude.toml" --prelude --dev --project="$PRELUDES/full-name/app"
 expect_exit "prelude: prelude = false in the settings file removes the implicit import" 1 \
-    check --config="$CONFIG/precedence/no-prelude.toml" --project="$PRELUDES/full-name/app"
+    check --config="$CONFIG/precedence/no-prelude.toml" --dev --project="$PRELUDES/full-name/app"
 # The imported projects get the prelude as well, so they can use Option and Bool.
 nested="$(mktemp -d)"
 mkdir "$nested/lib" "$nested/app"
 printf '[project]\nname = "example.lib"\n' > "$nested/lib/constructo.toml"
 echo "enum Lib = Lib(Option<Bool>);" > "$nested/lib/lib.types"
-printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lib"\nsource = "../lib"\n' \
+printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lib"\npath = "../lib"\n' \
     > "$nested/app/constructo.toml"
 echo "enum App = App;" > "$nested/app/app.types"
-expect_exit "prelude: an imported project has the prelude too" 0 check --project="$nested/app"
+expect_exit "prelude: an imported project has the prelude too" 0 check --dev --project="$nested/app"
 expect_exit "prelude: --no-prelude removes it from the imported project as well" 1 \
-    check --no-prelude --project="$nested/app"
+    check --no-prelude --dev --project="$nested/app"
 rm -f "$nested/lib/constructo.toml" "$nested/lib/lib.types" "$nested/app/constructo.toml" "$nested/app/app.types"
 rmdir "$nested/lib" "$nested/app" "$nested"
 # The built-in project is never reported, and its file is shown by its URI.
-listing="$("$CONSTRUCTO" check -v --project="$PRELUDES/explicit-local/app" 2>/dev/null)"
+listing="$("$CONSTRUCTO" check -v --dev --project="$PRELUDES/explicit-local/app" 2>/dev/null)"
 if [[ "$listing" != *"constructo.prelude"* && "$listing" != *"constructo:/"* && "$listing" == *"(project example.app)"* ]]; then
     pass "prelude: the built-in project is not reported"
 else
     fail "prelude: the built-in project is not reported (got '$listing')"
 fi
-expect_exit "prelude: the reserved prefix is refused in a project-file" 2 check --project="$PROJECTS/invalid/reserved-name"
+expect_exit "prelude: the reserved prefix is refused in a project-file" 2 check --dev --project="$PROJECTS/invalid/reserved-name"
 echo "enum Bool = No, Yes;" > "$forward_types"
 expect_exit "prelude: files without a project may declare a name that the prelude has" 0 check "$forward_types"
 echo "enum Bool = No, Yes; const b: Bool = Yes;" > "$forward_types"
@@ -914,16 +924,16 @@ else
 fi
 expect_exit "prelude: --no-prelude is the way out for files without a project" 0 check --no-prelude "$forward_types"
 # The values to check come after the project, and a failed project is reported as such.
-expect_exit "project: values are type-checked against the project" 0 check --project="$SHAPES" "$SHAPES/values/shapes.values"
+expect_exit "project: values are type-checked against the project" 0 check --dev --project="$SHAPES" "$SHAPES/values/shapes.values"
 echo "Circle { radius: \"wide\" }" > "$forward_values"
-expect_exit "project: a type error in the values fails" 1 check --project="$SHAPES" "$forward_values"
-expect_exit "project: --stdin is checked against the project" 0 check --project="$SHAPES" --stdin < "$SHAPES/values/shapes.values"
+expect_exit "project: a type error in the values fails" 1 check --dev --project="$SHAPES" "$forward_values"
+expect_exit "project: --stdin is checked against the project" 0 check --dev --project="$SHAPES" --stdin < "$SHAPES/values/shapes.values"
 expect_exit "project: more types files may follow on the command line" 0 \
-    check --project="$SHAPES" "$EXAMPLES/valid/message.types" "$SHAPES/values/shapes.values"
+    check --dev --project="$SHAPES" "$EXAMPLES/valid/message.types" "$SHAPES/values/shapes.values"
 expect_exit "project: but not after a values file" 1 \
-    check --project="$SHAPES" "$SHAPES/values/shapes.values" "$EXAMPLES/valid/message.types"
-expect_exit "project: --no-type-check applies" 0 check --no-type-check --project="$SHAPES" "$forward_values"
-verbose="$("$CONSTRUCTO" check -v --project="$SHAPES" "$forward_values" 2>/dev/null || true)"
+    check --dev --project="$SHAPES" "$SHAPES/values/shapes.values" "$EXAMPLES/valid/message.types"
+expect_exit "project: --no-type-check applies" 0 check --no-type-check --dev --project="$SHAPES" "$forward_values"
+verbose="$("$CONSTRUCTO" check -v --dev --project="$SHAPES" "$forward_values" 2>/dev/null || true)"
 verbose="${verbose%%$'\n'*}"
 if [[ "$verbose" == "OK: $SHAPES (project com.example.shapes)" ]]; then
     pass "project: verbose mode reports the project"
@@ -934,19 +944,19 @@ fi
 bool_project="$(mktemp -d)"
 printf '[project]\nname = "example.ownbool"\n' > "$bool_project/constructo.toml"
 printf 'enum Bool = No, Yes;\nconst flag: Bool = Yes;\n' > "$bool_project/bool.types"
-expect_exit "project: its own Bool is ambiguous with the prelude where it is used" 1 check --project="$bool_project"
-err="$("$CONSTRUCTO" check --project="$bool_project" 2>&1 >/dev/null || true)"
+expect_exit "project: its own Bool is ambiguous with the prelude where it is used" 1 check --dev --project="$bool_project"
+err="$("$CONSTRUCTO" check --dev --project="$bool_project" 2>&1 >/dev/null || true)"
 if [[ "$err" == "ERROR: The name Bool is ambiguous: it could be example.ownbool::Bool or constructo.prelude::Bool"* ]]; then
     pass "project: the ambiguity names both candidates"
 else
     fail "project: the ambiguity names both candidates (got '$err')"
 fi
-expect_exit "project: its own Bool is fine with --no-prelude" 0 check --no-prelude --project="$bool_project"
+expect_exit "project: its own Bool is fine with --no-prelude" 0 check --no-prelude --dev --project="$bool_project"
 # Settings come from --config and the arguments only, never from the project-file.
-expect_exit "project: --config still applies" 0 check --config="$CONFIG/precedence/no-prelude.toml" --project="$bool_project"
+expect_exit "project: --config still applies" 0 check --config="$CONFIG/precedence/no-prelude.toml" --dev --project="$bool_project"
 expect_exit "project: --prelude overrides --config" 1 \
-    check --config="$CONFIG/precedence/no-prelude.toml" --prelude --project="$bool_project"
-verbose="$("$CONSTRUCTO" check -v --project="$bool_project" 2>/dev/null || true)"
+    check --config="$CONFIG/precedence/no-prelude.toml" --prelude --dev --project="$bool_project"
+verbose="$("$CONSTRUCTO" check -v --dev --project="$bool_project" 2>/dev/null || true)"
 verbose="${verbose%%$'\n'*}"
 if [[ "$verbose" == "FAILED: $bool_project (project example.ownbool)" ]]; then
     pass "project: a project whose file fails is reported as failed"
@@ -1000,7 +1010,7 @@ else
     fail "print-config: an argument overrides the file"
 fi
 if printed | grep -qxF "# Load the standard prelude, with Bool and Option." \
-    && [[ "$(printed | grep -c '^# ')" -eq 9 ]]; then
+    && [[ "$(printed | grep -c '^# ')" -eq 10 ]]; then
     pass "print-config: every key has a comment"
 else
     fail "print-config: every key has a comment"
@@ -1019,6 +1029,382 @@ else
     fail "print-config: the output can be loaded with --config"
 fi
 rm -f "$reloadable"
+echo ""
+
+# The lock file. The digests are worked out here with sha256sum, so they do not depend on the code that is being tested.
+echo "Lock file"
+sha() { if command -v sha256sum >/dev/null; then sha256sum; else shasum -a 256; fi | cut -d' ' -f1; }
+digest_of() { tr -d '\r' < "$1" | sha; }
+lk="$(mktemp -d)"
+mkdir "$lk/lib" "$lk/app"
+printf '[project]\nname = "example.lib"\n' > "$lk/lib/constructo.toml"
+printf 'enum Shape = Circle;\r\n' > "$lk/lib/shapes.types"
+printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lib"\npath = "../lib"\n' > "$lk/app/constructo.toml"
+printf 'enum App = App;\n' > "$lk/app/app.types"
+# Writes the lock file of the app from the files of the lib as they are now, with the extra lines given as the files.
+write_lock() {
+    local toml shapes project
+    toml="$(digest_of "$lk/lib/constructo.toml")"
+    shapes="$(digest_of "$lk/lib/shapes.types")"
+    project="$(printf 'constructo.toml sha256:%s\nshapes.types sha256:%s\n' "$toml" "$shapes" | sha)"
+    {
+        printf 'version = 1\n\n[[project]]\nname = "example.lib"\ndigest = "sha256:%s"\n\n[project.files]\n' "$project"
+        printf '"constructo.toml" = "sha256:%s"\n"shapes.types" = "sha256:%s"\n' "$toml" "$shapes"
+    } > "$lk/app/constructo.lock"
+}
+# The first line of the errors, or the exit code, of a run on the app.
+lock_errors() { "$CONSTRUCTO" check "$@" --project="$lk/app" 2>&1 >/dev/null || true; }
+lock_exit() { local code=0; "$CONSTRUCTO" check "$@" --project="$lk/app" >/dev/null 2>&1 || code=$?; echo "$code"; }
+lock_expect() {
+    local name="$1" want="$2" pattern="$3"; shift 3
+    local code out
+    code="$(lock_exit "$@")"
+    out="$(lock_errors "$@")"
+    if [[ "$code" -eq "$want" && "$out" == $pattern ]]; then pass "$name"; else fail "$name (exit $code, got '$out')"; fi
+}
+lock_expect "lock: a project that imports another needs a lock file" 1 \
+    "ERROR: The project imports example.lib, but there is no constructo.lock; run \`constructo project update\` to make one ($lk/app/constructo.toml, line 5, col 16)"
+lock_expect "lock: --dev does not need the lock file" 0 ""  --dev
+write_lock
+lock_expect "lock: a lock that matches the files is accepted" 0 ""
+printf 'enum Shape = Square;\r\n' > "$lk/lib/shapes.types"
+lock_expect "lock: a changed file is a mismatch" 1 \
+    "ERROR: Checksum mismatch for shapes.types of project example.lib: the lock has sha256:* but the file has sha256:* ($lk/app/constructo.lock, line 9, col 18)"
+lock_expect "lock: --dev skips the verification" 0 "" --dev
+lock_expect "lock: --no-dev undoes --dev" 1 "ERROR: Checksum mismatch for shapes.types*" --dev --no-dev
+printf 'enum Shape = Circle;\r\n' > "$lk/lib/shapes.types"
+lock_expect "lock: the digest is of the file with the line endings of LF" 0 ""
+printf 'enum Shape = Circle;\n' > "$lk/lib/shapes.types"
+lock_expect "lock: LF and CRLF line endings give the same digest" 0 ""
+printf '\xEF\xBB\xBFenum Shape = Circle;\n' > "$lk/lib/shapes.types"
+lock_expect "lock: a byte order mark does not change the digest" 0 ""
+printf 'enum Shape = Circle;\r\n' > "$lk/lib/shapes.types"
+printf 'enum More = M;\n' > "$lk/lib/more.types"
+lock_expect "lock: a file that the lock does not have is reported" 1 \
+    "ERROR: The file more.types of project example.lib is not in constructo.lock; run \`constructo project update\` to record it ($lk/app/constructo.lock, line 4, col 8)"
+rm -f "$lk/lib/more.types"
+mv "$lk/lib/shapes.types" "$lk/shapes.types.moved"
+lock_expect "lock: a file that has gone is reported" 1 \
+    "ERROR: The lock has the file shapes.types of project example.lib, which is no longer in the project ($lk/app/constructo.lock, line 9, col 18)"
+mv "$lk/shapes.types.moved" "$lk/lib/shapes.types"
+printf '[project]\nname = "example.lib"\n# changed\n' > "$lk/lib/constructo.toml"
+lock_expect "lock: a change to the project-file of the import is a mismatch" 1 \
+    "ERROR: Checksum mismatch for constructo.toml of project example.lib*"
+printf '[project]\nname = "example.lib"\n' > "$lk/lib/constructo.toml"
+lock_expect "lock: the files are accepted again once they are as they were" 0 ""
+# A lock that lists a project that is not imported, and one that is damaged.
+cp "$lk/app/constructo.lock" "$lk/good.lock"
+printf '\n[[project]]\nname = "example.old"\ndigest = "sha256:%s"\n\n[project.files]\n' "$(printf '' | sha)" >> "$lk/app/constructo.lock"
+lock_expect "lock: a project in the lock that is not imported is reported" 1 \
+    "ERROR: The lock has the project example.old, which is not imported ($lk/app/constructo.lock, line 12, col 8)"
+printf 'version = 2\n' > "$lk/app/constructo.lock"
+lock_expect "lock: a lock of another version is exit 2" 2 \
+    "ERROR: Unsupported lock file version 2; this version of constructo reads version 1 ($lk/app/constructo.lock, line 1, col 11)"
+printf 'not toml [' > "$lk/app/constructo.lock"
+lock_expect "lock: a lock that does not parse is exit 2" 2 "ERROR: * ($lk/app/constructo.lock, line 1, col *)"
+lock_expect "lock: --dev skips a lock that does not parse" 0 "" --dev
+cp "$lk/good.lock" "$lk/app/constructo.lock"
+# The check of types and values comes after the lock, so a mismatch is reported without them.
+printf 'Nonsense(\n' > "$lk/values.values"
+printf 'enum Shape = Square;\n' > "$lk/lib/shapes.types"
+code=0
+"$CONSTRUCTO" check --project="$lk/app" "$lk/values.values" >/dev/null 2>&1 || code=$?
+if [[ "$code" -eq 1 ]] && [[ "$("$CONSTRUCTO" check --project="$lk/app" "$lk/values.values" 2>&1)" == "ERROR: Checksum mismatch"* ]]; then
+    pass "lock: the lock is verified before the values are read"
+else
+    fail "lock: the lock is verified before the values are read"
+fi
+# The setting can come from a configuration file, and an option overrides it.
+printf '[check]\ndev = true\n' > "$lk/settings.toml"
+lock_expect "lock: dev can be set in the configuration file" 0 "" --config="$lk/settings.toml"
+lock_expect "lock: --no-dev overrides the configuration file" 1 "ERROR: Checksum mismatch*" \
+    --config="$lk/settings.toml" --no-dev
+if prints "dev = false" && prints "dev = true" --dev && prints "dev = true" --config="$lk/settings.toml" \
+    && prints "dev = false" --config="$lk/settings.toml" --no-dev && prints "dev = false" --dev --no-dev; then
+    pass "lock: print-config shows dev"
+else
+    fail "lock: print-config shows dev"
+fi
+# Verbose mode says which projects were verified, and counts the projects.
+write_lock
+loud="$("$CONSTRUCTO" check -v --project="$lk/app" 2>&1)"
+expected_loud="OK: $lk/app/../lib (project example.lib, verified)
+OK: $lk/app/../lib/shapes.types (data-types)
+OK: $lk/app (project example.app)
+OK: $lk/app/app.types (data-types)
+OK: checked 2 file(s) in 2 project(s)"
+if [[ "$loud" == "$expected_loud" ]]; then
+    pass "lock: verbose mode says that an imported project is verified, and the root says nothing"
+else
+    fail "lock: verbose mode says verified (got '$loud')"
+fi
+loud="$("$CONSTRUCTO" check -v --dev --project="$lk/app" 2>&1)"
+if [[ "$loud" == *"(project example.lib, unverified)"* && "$loud" == *"(project example.app)"* \
+    && "$loud" == *"OK: checked 2 file(s) in 2 project(s)" ]]; then
+    pass "lock: verbose mode says that a project is unverified under --dev"
+else
+    fail "lock: verbose mode says unverified under --dev (got '$loud')"
+fi
+# A run with no project, and a project with nothing to record, have no lock to verify.
+expect_exit "lock: files alone have no lock" 0 check "$TYPED/schema.types"
+expect_exit "lock: a project with no imports needs no lock file" 0 check --project="$SHAPES"
+expect_exit "lock: a project that imports only the prelude needs no lock file" 0 check --project="$PRELUDES/explicit-local/app"
+rm -f "$lk/lib/constructo.toml" "$lk/lib/shapes.types" "$lk/app/constructo.toml" "$lk/app/app.types"
+rm -f "$lk/app/constructo.lock" "$lk/good.lock" "$lk/values.values" "$lk/settings.toml"
+rmdir "$lk/lib" "$lk/app" "$lk"
+echo ""
+
+# Updating the lock. The lock file that is written is compared with one made here from sha256sum.
+echo "Updating the lock"
+up="$(mktemp -d)"
+mkdir "$up/lib" "$up/app"
+printf '[project]\nname = "example.lib"\n' > "$up/lib/constructo.toml"
+printf 'enum Shape = Circle;\r\n' > "$up/lib/shapes.types"
+printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lib"\npath = "../lib"\n' > "$up/app/constructo.toml"
+# The lock that the update is expected to write, from the files of the lib as they are now.
+expected_lock() {
+    local toml shapes project
+    toml="$(digest_of "$up/lib/constructo.toml")"
+    shapes="$(digest_of "$up/lib/shapes.types")"
+    project="$(printf 'constructo.toml sha256:%s\nshapes.types sha256:%s\n' "$toml" "$shapes" | sha)"
+    printf '# This file is generated by `constructo project update`. Do not edit it.\n'
+    printf 'version = 1\n\n[[project]]\nname = "example.lib"\ndigest = "sha256:%s"\n\n[project.files]\n' "$project"
+    printf '"constructo.toml" = "sha256:%s"\n"shapes.types" = "sha256:%s"\n' "$toml" "$shapes"
+}
+out="$("$CONSTRUCTO" project update "$up/app" 2>&1)" || true
+if [[ "$out" == "Added the project example.lib (sha256:"*")" && "$(wc -l <<< "$out")" -eq 1 ]]; then
+    pass "update: a new lock says that it added the project"
+else
+    fail "update: a new lock says that it added the project (got '$out')"
+fi
+if [[ "$(cat "$up/app/constructo.lock")" == "$(expected_lock)" ]]; then
+    pass "update: the lock has the digests that sha256sum gives"
+else
+    fail "update: the lock has the digests that sha256sum gives"
+fi
+expect_exit "update: check accepts the lock that was written" 0 check --project="$up/app"
+out="$("$CONSTRUCTO" project update "$up/app" 2>&1)" || true
+if [[ -z "$out" ]]; then pass "update: a lock that is up to date prints nothing"; else fail "update: up to date prints nothing (got '$out')"; fi
+out="$(cd "$up/app" && "$CONSTRUCTO" project update 2>&1)" || true
+if [[ -z "$out" ]]; then pass "update: the folder defaults to the current folder"; else fail "update: default folder (got '$out')"; fi
+printf 'enum Shape = Square;\n' > "$up/lib/shapes.types"
+expect_exit "update: check rejects a changed file" 1 check --project="$up/app"
+out="$("$CONSTRUCTO" project update "$up/app" 2>&1)" || true
+if [[ "$out" == "Changed the file shapes.types of project example.lib (sha256:"*" to sha256:"*")" ]]; then
+    pass "update: a changed file is reported with the old and the new digest"
+else
+    fail "update: a changed file is reported (got '$out')"
+fi
+expect_exit "update: check accepts the changed file once it is recorded" 0 check --project="$up/app"
+printf 'not a lock [' > "$up/app/constructo.lock"
+out="$("$CONSTRUCTO" project update "$up/app" 2>&1)" || true
+if [[ "$out" == "Replaced the constructo.lock that could not be used: "* ]]; then
+    pass "update: a lock that does not parse is replaced and the first line says so"
+else
+    fail "update: a lock that does not parse is replaced (got '$out')"
+fi
+expect_exit "update: check accepts the replaced lock" 0 check --project="$up/app"
+# Nothing is type-checked.
+printf 'enum Bad = Missing(Nothing);\n' > "$up/lib/bad.types"
+expect_exit "update: a type error does not stop an update" 0 project update "$up/app"
+rm -f "$up/lib/bad.types"
+# A project that imports nothing has nothing to record, so its old lock is removed.
+printf '[project]\nname = "example.app"\n' > "$up/app/constructo.toml"
+out="$("$CONSTRUCTO" project update "$up/app" 2>&1)" || true
+if [[ "$out" == "Removed the project example.lib (sha256:"*")" && ! -e "$up/app/constructo.lock" ]]; then
+    pass "update: a project with nothing to record has no lock"
+else
+    fail "update: a project with nothing to record has no lock (got '$out')"
+fi
+expect_exit "update: no lock is made for a project with nothing to record" 0 project update "$up/app"
+if [[ ! -e "$up/app/constructo.lock" ]]; then pass "update: and none was written"; else fail "update: and none was written"; fi
+# Problems are exit 2, as for check.
+expect_exit "update: a folder that does not exist is exit 2" 2 project update "$up/nowhere"
+printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.other"\npath = "../lib"\n' > "$up/app/constructo.toml"
+expect_exit "update: a project that cannot be loaded is exit 2" 2 project update "$up/app"
+rm -f "$up/lib/constructo.toml" "$up/lib/shapes.types" "$up/app/constructo.toml" "$up/app/constructo.lock"
+rmdir "$up/lib" "$up/app" "$up"
+echo ""
+
+# Projects in a git repository (Step 6). Only `project update` fetches, and it records the commit in the lock.
+echo "=== Projects in a repository ==="
+if command -v git >/dev/null 2>&1; then
+    rp="$(mktemp -d)"
+    mkdir "$rp/repo" "$rp/app"
+    printf '[project]\nname = "example.lib"\n' > "$rp/repo/constructo.toml"
+    printf 'enum Shape = Circle;\n' > "$rp/repo/shapes.types"
+    # Variables such as GIT_DIR, which git sets when it runs a hook, would point git at another repository.
+    git_in_repo() { env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$rp/repo" -c user.name=Test -c user.email=test@example.com -c commit.gpgsign=false "$@"; }
+    git_in_repo init --quiet --initial-branch=main
+    git_in_repo add -A
+    git_in_repo commit --quiet -m first
+    commit="$(git_in_repo rev-parse HEAD)"
+    printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lib"\nrepo = "%s"\n' "$rp/repo" \
+        > "$rp/app/constructo.toml"
+    export CONSTRUCTO_CACHE="$rp/cache"
+    out="$("$CONSTRUCTO" project update "$rp/app" 2>&1)" || true
+    if [[ "$out" == "Added the project example.lib from $rp/repo at $commit (sha256:"*")" ]]; then
+        pass "repo: update fetches the project and says what it added"
+    else
+        fail "repo: update fetches the project and says what it added (got '$out')"
+    fi
+    if grep -q "^commit = \"$commit\"\$" "$rp/app/constructo.lock" && grep -q '^repo = ' "$rp/app/constructo.lock"; then
+        pass "repo: the lock records the repository and the commit"
+    else
+        fail "repo: the lock records the repository and the commit"
+    fi
+    out="$("$CONSTRUCTO" project update "$rp/app" 2>&1)" || true
+    if [[ -z "$out" ]]; then pass "repo: a second update says nothing"; else fail "repo: a second update says nothing (got '$out')"; fi
+    printf 'enum More = M;\n' > "$rp/repo/more.types"
+    git_in_repo add -A
+    git_in_repo commit --quiet -m second
+    moved="$(git_in_repo rev-parse HEAD)"
+    out="$("$CONSTRUCTO" project update "$rp/app" 2>&1)" || true
+    if [[ "$out" == "Moved the project example.lib from commit $commit to $moved"* ]]; then
+        pass "repo: update says when the commit moves"
+    else
+        fail "repo: update says when the commit moves (got '$out')"
+    fi
+    # The lock now holds the commit, so `check` uses the cache and never the network, even after the repository moves on.
+    printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lib"\nrepo = "%s"\n' "$rp/repo" \
+        > "$rp/app/constructo.toml"
+    printf 'enum Pick = A(example.lib::Shape);\n' > "$rp/app/pick.types"
+    expect_exit "repo: check passes from the cache" 0 check --project="$rp/app"
+    out="$("$CONSTRUCTO" check --verbose --project="$rp/app" 2>&1)" || true
+    if [[ "$out" == *"(project example.lib, verified)"* ]]; then
+        pass "repo: verbose says the project from a repository is verified"
+    else
+        fail "repo: verbose says the project from a repository is verified (got '$out')"
+    fi
+    expect_exit "repo: check passes under --dev too" 0 check --dev --project="$rp/app"
+    out="$("$CONSTRUCTO" check --dev --verbose --project="$rp/app" 2>&1)" || true
+    if [[ "$out" == *"(project example.lib, verified)"* ]]; then
+        pass "repo: --dev does not make a project from a repository unverified"
+    else
+        fail "repo: --dev does not make a project from a repository unverified (got '$out')"
+    fi
+    git_in_repo commit --quiet --allow-empty -m third
+    expect_exit "repo: check does not follow a repository that moved on" 0 check --project="$rp/app"
+    # An empty cache has not got the locked commit, and check does not fetch it.
+    mkdir "$rp/empty"
+    out="$(CONSTRUCTO_CACHE="$rp/empty" "$CONSTRUCTO" check --project="$rp/app" 2>&1)" && status=0 || status=$?
+    if [[ $status -eq 1 && "$out" == *"is not in the cache; run \`constructo project update\` to fetch it ("*"line 6, col 8)" ]]; then
+        pass "repo: check says to run update when the cache has not got the commit"
+    else
+        fail "repo: check says to run update when the cache has not got the commit (exit $status, got '$out')"
+    fi
+    if [[ ! -e "$rp/empty/git" ]]; then pass "repo: and it did not fetch"; else fail "repo: and it did not fetch"; fi
+    rmdir "$rp/empty"
+    # A file in the cache that was changed is a checksum mismatch, whatever --dev says.
+    locked="$(sed -n 's/^commit = "\(.*\)"$/\1/p' "$rp/app/constructo.lock")"
+    cached="$(echo "$CONSTRUCTO_CACHE"/git/*/"$locked")"
+    chmod u+w "$cached/shapes.types"
+    printf 'enum Shape = Square;\n' > "$cached/shapes.types"
+    out="$("$CONSTRUCTO" check --dev --project="$rp/app" 2>&1)" && status=0 || status=$?
+    if [[ $status -eq 1 && "$out" == "ERROR: Checksum mismatch for shapes.types of project example.lib"* ]]; then
+        pass "repo: a changed file in the cache is a checksum mismatch, even with --dev"
+    else
+        fail "repo: a changed file in the cache is a checksum mismatch, even with --dev (exit $status, got '$out')"
+    fi
+    # A link in the cache that leads out of the clone is refused, and nothing of what it leads to is shown.
+    printf 'SECRET-CONTENT\n' > "$rp/secret"
+    rm -f "$cached/shapes.types"
+    ln -s "$rp/secret" "$cached/shapes.types"
+    out="$("$CONSTRUCTO" check --dev --project="$rp/app" 2>&1)" && status=0 || status=$?
+    if [[ $status -eq 2 && "$out" == *"shapes.types of the project example.lib leads to $rp/secret, which is outside the repository"* \
+        && "$out" != *"SECRET-CONTENT"* ]]; then
+        pass "repo: check refuses a link that leaves the clone"
+    else
+        fail "repo: check refuses a link that leaves the clone (exit $status, got '$out')"
+    fi
+    rm -f "$cached/shapes.types"
+    printf 'enum Shape = Circle;\n' > "$cached/shapes.types"
+    # With no lock there is nothing that says which commit to use.
+    mv "$rp/app/constructo.lock" "$rp/app/constructo.lock.off"
+    out="$("$CONSTRUCTO" check --dev --project="$rp/app" 2>&1)" && status=0 || status=$?
+    if [[ $status -eq 1 && "$out" == *"but there is no constructo.lock; run \`constructo project update\` to make one"* ]]; then
+        pass "repo: no lock is an error for a project from a repository, even with --dev"
+    else
+        fail "repo: no lock is an error for a project from a repository, even with --dev (exit $status, got '$out')"
+    fi
+    # A lock that does not parse is exit 2, and --dev does not excuse it for a project from a repository.
+    printf 'not a lock' > "$rp/app/constructo.lock"
+    expect_exit "repo: a lock that does not parse is exit 2" 2 check --project="$rp/app"
+    expect_exit "repo: and is exit 2 under --dev when a repository needs it" 2 check --dev --project="$rp/app"
+    rm -f "$rp/app/constructo.lock"
+    mv "$rp/app/constructo.lock.off" "$rp/app/constructo.lock"
+    rm -f "$rp/app/pick.types"
+    printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lib"\nrepo = "%s"\nrev = "nothing-here"\n' \
+        "$rp/repo" > "$rp/app/constructo.toml"
+    expect_exit "repo: a rev that does not exist is exit 2" 2 project update "$rp/app"
+    printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lib"\nrepo = "ext::sh -c ls"\n' \
+        > "$rp/app/constructo.toml"
+    expect_exit "repo: a remote helper is refused with exit 2" 2 project update "$rp/app"
+    # A link that leaves the clone stops an update, and so does a path import that leaves it.
+    printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lib"\nrepo = "%s"\n' "$rp/repo" \
+        > "$rp/app/constructo.toml"
+    ln -s "$rp/secret" "$rp/repo/bad.types"
+    git_in_repo add -A
+    git_in_repo commit --quiet -m link
+    out="$("$CONSTRUCTO" project update "$rp/app" 2>&1)" && status=0 || status=$?
+    if [[ $status -eq 2 && "$out" == *"bad.types of the project example.lib leads to $rp/secret"* ]]; then
+        pass "repo: update refuses a link that leaves the clone"
+    else
+        fail "repo: update refuses a link that leaves the clone (exit $status, got '$out')"
+    fi
+    rm -f "$rp/repo/bad.types"
+    printf '[project]\nname = "example.lib"\n\n[[import]]\nproject-name = "example.other"\npath = "../elsewhere"\n' \
+        > "$rp/repo/constructo.toml"
+    git_in_repo add -A
+    git_in_repo commit --quiet -m escape
+    out="$("$CONSTRUCTO" project update "$rp/app" 2>&1)" && status=0 || status=$?
+    if [[ $status -eq 2 && "$out" == *"leaves the repository that the project example.lib is in"* ]]; then
+        pass "repo: update refuses a path that leaves the clone"
+    else
+        fail "repo: update refuses a path that leaves the clone (exit $status, got '$out')"
+    fi
+    # A link in a repository is checked out as a link, whatever the configuration of the user says, so that the digest
+    # is the same on every machine. A configuration with `symlinks = false` would give a plain file with the target.
+    mkdir "$rp/linkrepo" "$rp/linkapp" "$rp/home"
+    printf '[core]\n\tsymlinks = false\n' > "$rp/home/.gitconfig"
+    printf '[project]\nname = "example.lnk"\n' > "$rp/linkrepo/constructo.toml"
+    printf 'enum Real = R;\n' > "$rp/linkrepo/real.types"
+    ln -s real.types "$rp/linkrepo/alias.types"
+    git_in_link() { env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$rp/linkrepo" -c user.name=Test -c user.email=test@example.com -c commit.gpgsign=false "$@"; }
+    git_in_link init --quiet --initial-branch=main
+    git_in_link add -A
+    git_in_link commit --quiet -m links
+    printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lnk"\nrepo = "%s"\n' "$rp/linkrepo" \
+        > "$rp/linkapp/constructo.toml"
+    out="$(HOME="$rp/home" XDG_CONFIG_HOME="$rp/home" "$CONSTRUCTO" project update "$rp/linkapp" 2>&1)" && status=0 || status=$?
+    linked="$(sed -n 's/^commit = "\(.*\)"$/\1/p' "$rp/linkapp/constructo.lock")"
+    if [[ $status -eq 0 && -L "$(echo "$CONSTRUCTO_CACHE"/git/*/"$linked")/alias.types" ]]; then
+        pass "repo: a link is checked out as a link whatever the git configuration says"
+    else
+        fail "repo: a link is checked out as a link whatever the git configuration says (exit $status, got '$out')"
+    fi
+    # An update does not reuse a checkout in the cache that is not what a fresh one is, since it would record the
+    # changed file as a part of the commit.
+    printf 'enum Changed = C;\n' > "$(echo "$CONSTRUCTO_CACHE"/git/*/"$linked")/real.types"
+    out="$("$CONSTRUCTO" project update "$rp/linkapp" 2>&1)" && status=0 || status=$?
+    if [[ $status -eq 2 && "$out" == *"in the cache has been changed: real.types is not what it was"* ]]; then
+        pass "repo: update refuses a checkout in the cache that was changed"
+    else
+        fail "repo: update refuses a checkout in the cache that was changed (exit $status, got '$out')"
+    fi
+    unset CONSTRUCTO_CACHE
+    rm -f "$rp/secret"
+    rm -rf "$rp/repo/.git" "$rp/cache/git"
+    rm -f "$rp/repo/constructo.toml" "$rp/repo/shapes.types" "$rp/repo/more.types" "$rp/app/constructo.toml" \
+        "$rp/app/constructo.lock"
+    rm -rf "$rp/linkrepo/.git" "$rp/cache/git"
+    rm -f "$rp/linkrepo/constructo.toml" "$rp/linkrepo/real.types" "$rp/linkrepo/alias.types" \
+        "$rp/linkapp/constructo.toml" "$rp/linkapp/constructo.lock" "$rp/home/.gitconfig"
+    rmdir "$rp/linkrepo" "$rp/linkapp" "$rp/home"
+    rmdir "$rp/repo" "$rp/app" "$rp/cache" "$rp"
+else
+    echo "  SKIP: git is not installed"
+fi
 echo ""
 
 TOTAL=$(( PASS + FAIL ))

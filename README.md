@@ -30,10 +30,18 @@ Deploy {
 ```
 
 The project provides a Rust library for processing Constructo files and the
-`constructo` command-line tool. Today `constructo check` validates the syntax
-and consistency of data-type declarations (duplicates, unknown types, generic
-arity and so on) and loads a small standard prelude declaring `Bool` and
-`Option<T>`; checking data values against those types is planned. See
-[docs/vision.md](docs/vision.md) for the intended use and
+`constructo` command-line tool. `constructo check` validates the syntax and
+consistency of data-type declarations (duplicates, unknown types, generic
+arity and so on), checks data values against those types, and loads a small
+standard prelude declaring `Bool` and `Option<T>`.
+
+Types can be organised into *projects*: a folder with a `constructo.toml` that
+names the project and lists the projects it imports, whether from a folder, from
+a git repository at a pinned revision, or built in. `constructo project update`
+records a checksum of every imported project in `constructo.lock`, and
+`constructo check --project=FOLDER` verifies it. See the
+[formats](docs/specs/project-file-format.md) for the details.
+
+See [docs/vision.md](docs/vision.md) for the intended use and
 [syntax/](syntax/grammar.md) for the grammars and examples. It is open source
 under the MIT licence.

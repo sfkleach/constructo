@@ -1,5 +1,9 @@
 use clap::{ArgAction, ArgMatches, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use constructo::diagnostics::{Diagnostic, Pos};
+use constructo::fetch::Cache;
+use constructo::lock::Lock;
+use constructo::project::{ProjectError, Remotes};
+use constructo::verify::{read_lock, update_lock, verify_lock_with};
 use constructo::{
     check_in_projects, source_kind, syntax_error, CheckOptions, Config, Experimental, InputFile, Layout, Outcome,
     Project, ProjectInfo, ProjectSet, Source, SourceKind,
@@ -82,8 +86,23 @@ fn setting(on: bool, off: bool, default: bool) -> bool {
     }
 }
 
+/// The subcommands of `constructo project`.
+#[derive(Subcommand, Debug)]
+enum ProjectCommand {
+    /// Write constructo.lock, which records the checksums of the projects that the project imports, and say what
+    /// changed
+    Update {
+        /// The folder of the project [default: the current folder]
+        folder: Option<PathBuf>,
+    },
+}
+
 #[derive(Subcommand, Debug)]
 enum Command {
+    /// Work with a project
+    #[command(subcommand)]
+    Project(ProjectCommand),
+
     /// Check the syntax and type-correctness of Constructo files
     #[command(after_help = "\
 Settings can also be put in a TOML file that is named with --config=PATH. An option on the command line overrides the \
@@ -181,6 +200,15 @@ https://github.com/sfkleach/constructo/blob/main/docs/specs/config-file.md")]
         #[arg(long, overrides_with = "verbose")]
         no_verbose: bool,
 
+        /// Do not verify the imported projects that are folders on disk against constructo.lock, and do not need
+        /// the file for them. For a project that is being developed. Projects from a repository are still verified
+        #[arg(long, short, overrides_with = "no_dev")]
+        dev: bool,
+
+        /// Verify the imported projects against constructo.lock [default]
+        #[arg(long, overrides_with = "dev")]
+        no_dev: bool,
+
         /// Print the settings that the run would use, after the defaults, --config and the other options, as a
         /// commented TOML file that --config can read, and exit without checking. It is a template for a config file
         #[arg(long)]
@@ -238,6 +266,21 @@ fn main() -> ExitCode {
         Err(code) => return code,
     };
     match cli.command {
+        Command::Project(ProjectCommand::Update { folder }) => {
+            let folder = folder.unwrap_or_else(|| PathBuf::from("."));
+            match update_lock(&folder) {
+                Ok(lines) => {
+                    for line in lines {
+                        println!("{}", line);
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("{}", e);
+                    ExitCode::from(EXIT_USAGE)
+                }
+            }
+        }
         Command::Check {
             stdin,
             prelude,
@@ -256,6 +299,8 @@ fn main() -> ExitCode {
             no_experimental: _,
             verbose,
             no_verbose,
+            dev,
+            no_dev,
             print_config,
             project,
             files,
@@ -276,24 +321,77 @@ fn main() -> ExitCode {
             };
             let load_prelude = setting(prelude, no_prelude, config.prelude());
             let verbose = setting(verbose, no_verbose, config.verbose());
+            let dev = setting(dev, no_dev, config.dev());
             if print_config {
-                print!("{}", Config::effective(&options, load_prelude, verbose).to_toml());
+                print!("{}", Config::effective(&options, load_prelude, verbose, dev).to_toml());
                 return ExitCode::SUCCESS;
             }
             // The project is read after the settings, so that a problem with either is reported by itself. There is
             // always a project: without one named it is a virtual project with nothing but the prelude.
+            //
+            // The lock is read first, since the projects in repositories are loaded from the commits that it names. A
+            // run with no project named has no lock. A problem with the lock file itself is a problem with the
+            // invocation.
+            let lock = match project.as_deref() {
+                Some(folder) => read_lock(folder),
+                None => Ok(None),
+            };
+            // A lock that cannot be used is reported at once, unless `--dev` means it is not needed. A project in a
+            // repository needs it whatever `--dev` says, and then it is reported when that project is reached.
+            if let (Err(e), false) = (&lock, dev) {
+                eprintln!("{}", e);
+                return ExitCode::from(EXIT_USAGE);
+            }
             let set = match project.as_deref() {
-                Some(folder) => ProjectSet::load(folder, load_prelude),
+                Some(folder) => {
+                    let cache = Cache::from_environment().map_err(|e| match e {
+                        ProjectError::Cannot(message) => message,
+                        other => other.to_string(),
+                    });
+                    ProjectSet::load_with(
+                        folder,
+                        load_prelude,
+                        Remotes::Locked {
+                            cache,
+                            lock: lock.clone(),
+                        },
+                    )
+                }
                 None => Ok(ProjectSet::unnamed(load_prelude)),
             };
             let set = match set {
                 Ok(set) => set,
                 Err(e) => {
                     eprintln!("{}", e);
-                    return ExitCode::from(EXIT_USAGE);
+                    let unlocked = matches!(e, ProjectError::Unverified(_));
+                    return ExitCode::from(if unlocked { EXIT_ERRORS } else { EXIT_USAGE });
                 }
             };
-            check(stdin, verbose, &options, &set, &files)
+            // The lock is verified before anything else is read, and only when a project was named. `--dev` leaves
+            // out the projects that are folders on disk, and not those from repositories.
+            if project.is_some() {
+                if let Some(code) = verify_projects(&set, lock.as_ref().ok().and_then(Option::as_ref), dev) {
+                    return code;
+                }
+            }
+            check(stdin, verbose, dev, &options, &set, &files)
+        }
+    }
+}
+
+/// Verifies the projects against the lock file of the root project. The result is the exit code if there is a problem.
+fn verify_projects(set: &ProjectSet, lock: Option<&Lock>, dev: bool) -> Option<ExitCode> {
+    match verify_lock_with(set, lock, dev) {
+        Ok(found) if found.is_empty() => None,
+        Ok(found) => {
+            for diagnostic in &found {
+                eprintln!("{}", diagnostic);
+            }
+            Some(ExitCode::from(EXIT_ERRORS))
+        }
+        Err(e) => {
+            eprintln!("{}", e);
+            Some(ExitCode::from(EXIT_USAGE))
         }
     }
 }
@@ -333,7 +431,14 @@ fn read_input(file: &InputFile) -> std::io::Result<String> {
     }
 }
 
-fn check(stdin: bool, verbose: bool, options: &CheckOptions, set: &ProjectSet, files: &[PathBuf]) -> ExitCode {
+fn check(
+    stdin: bool,
+    verbose: bool,
+    dev: bool,
+    options: &CheckOptions,
+    set: &ProjectSet,
+    files: &[PathBuf],
+) -> ExitCode {
     // The inputs are read one at a time, and reading stops at the first syntax error. That way an unreadable later
     // input cannot hide an earlier syntax error, which is the error the run is meant to stop at. The files of the
     // projects come first, and the project says that they are types files.
@@ -400,6 +505,7 @@ fn check(stdin: bool, verbose: bool, options: &CheckOptions, set: &ProjectSet, f
         }
         start += project.files.len();
     }
+    let counted = ranges.len();
     if verbose {
         // Each project is reported just before its files, and it has failed if any one of them has.
         let mut pending: VecDeque<(usize, &Project)> = ranges.into();
@@ -412,7 +518,23 @@ fn check(stdin: bool, verbose: bool, options: &CheckOptions, set: &ProjectSet, f
                 let end = (start + project.files.len()).min(report.outcomes.len());
                 let failed = report.outcomes[start.min(end)..end].contains(&Outcome::Failed);
                 let label = if failed { "FAILED" } else { "OK" };
-                println!("{}: {} (project {})", label, project.folder.display(), project.name);
+                // The root project is not in the lock. Any other project that is loaded was checked against it, unless
+                // that was switched off.
+                let checked = if std::ptr::eq(project, set.root()) {
+                    ""
+                } else if dev && project.remote.is_none() && project.confined.is_none() {
+                    // A project from a repository is verified whatever `--dev` says.
+                    ", unverified"
+                } else {
+                    ", verified"
+                };
+                println!(
+                    "{}: {} (project {}{})",
+                    label,
+                    project.folder.display(),
+                    project.name,
+                    checked
+                );
             }
         };
         for (index, ((source, outcome), kind)) in sources.iter().zip(&report.outcomes).zip(&report.kinds).enumerate() {
@@ -441,7 +563,13 @@ fn check(stdin: bool, verbose: bool, options: &CheckOptions, set: &ProjectSet, f
     }
     if report.is_ok() {
         if verbose {
-            println!("OK: checked {} file(s)", sources.len() - hidden.len());
+            // The projects that are counted are the root and the imported ones, and not the built-in ones. A run with
+            // no project named has none to count.
+            let files = sources.len() - hidden.len();
+            match counted {
+                0 => println!("OK: checked {} file(s)", files),
+                projects => println!("OK: checked {} file(s) in {} project(s)", files, projects),
+            }
         }
         ExitCode::SUCCESS
     } else {

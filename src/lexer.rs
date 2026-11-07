@@ -49,8 +49,15 @@ pub struct Token {
     pub pos: Pos,
 }
 
+/// Removes a byte order mark from the start of the text, as `rustc` does for a source file. Some editors add one, and it
+/// is not a part of the text: the first character that is left is at line 1, col 1.
+pub fn strip_bom(text: &str) -> &str {
+    text.strip_prefix('\u{feff}').unwrap_or(text)
+}
+
 /// Splits `text` into tokens, always ending with a single `Tok::Eof`.
 pub fn lex(text: &str) -> Vec<Token> {
+    let text = strip_bom(text);
     let chars: Vec<char> = text.chars().collect();
     let mut tokens = Vec::new();
     let (mut i, mut line, mut col) = (0usize, 1u32, 1u32);
@@ -335,6 +342,16 @@ mod tests {
     #[test]
     fn reports_invalid_characters() {
         assert_eq!(toks("é"), vec![Tok::Invalid('é'), Tok::Eof]);
+    }
+
+    #[test]
+    fn a_leading_byte_order_mark_is_not_a_token_or_a_column() {
+        let with = lex("\u{feff}enum A = X;");
+        assert_eq!(with, lex("enum A = X;"));
+        assert_eq!(with[0].pos, Pos { line: 1, col: 1 });
+        // Only one at the start is removed, and any other is not a part of a name.
+        assert_eq!(lex("\u{feff}\u{feff}A")[0].tok, Tok::Invalid('\u{feff}'));
+        assert_eq!(lex("A\u{feff}")[1].tok, Tok::Invalid('\u{feff}'));
     }
 
     #[test]
