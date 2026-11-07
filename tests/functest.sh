@@ -1233,8 +1233,11 @@ if command -v git >/dev/null 2>&1; then
     mkdir "$rp/repo" "$rp/app"
     printf '[project]\nname = "example.lib"\n' > "$rp/repo/constructo.toml"
     printf 'enum Shape = Circle;\n' > "$rp/repo/shapes.types"
-    # Variables such as GIT_DIR, which git sets when it runs a hook, would point git at another repository.
-    git_in_repo() { env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$rp/repo" -c user.name=Test -c user.email=test@example.com -c commit.gpgsign=false "$@"; }
+    # The git that builds the fixtures gets an environment of its own, with no configuration of the system or the
+    # user: a variable such as GIT_DIR, which git sets when it runs a hook, would point it at another repository, and
+    # a hook or a signing setting of the developer would run on the commits.
+    git_isolated() { env -i PATH="$PATH" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null git "$@"; }
+    git_in_repo() { git_isolated -C "$rp/repo" -c user.name=Test -c user.email=test@example.com -c commit.gpgsign=false "$@"; }
     git_in_repo init --quiet --initial-branch=main
     git_in_repo add -A
     git_in_repo commit --quiet -m first
@@ -1255,6 +1258,15 @@ if command -v git >/dev/null 2>&1; then
     fi
     out="$("$CONSTRUCTO" project update "$rp/app" 2>&1)" || true
     if [[ -z "$out" ]]; then pass "repo: a second update says nothing"; else fail "repo: a second update says nothing (got '$out')"; fi
+    # Git is given only the variables that constructo names, so ones that would point it at another repository or at
+    # other programs do not reach it.
+    out="$(GIT_DIR=/nonexistent GIT_WORK_TREE=/nonexistent GIT_EXEC_PATH=/nonexistent GIT_CONFIG_GLOBAL=/nonexistent \
+        "$CONSTRUCTO" project update "$rp/app" 2>&1)" && status=0 || status=$?
+    if [[ $status -eq 0 && -z "$out" ]]; then
+        pass "repo: update ignores GIT_ variables in the environment"
+    else
+        fail "repo: update ignores GIT_ variables in the environment (exit $status, got '$out')"
+    fi
     printf 'enum More = M;\n' > "$rp/repo/more.types"
     git_in_repo add -A
     git_in_repo commit --quiet -m second
@@ -1370,7 +1382,7 @@ if command -v git >/dev/null 2>&1; then
     printf '[project]\nname = "example.lnk"\n' > "$rp/linkrepo/constructo.toml"
     printf 'enum Real = R;\n' > "$rp/linkrepo/real.types"
     ln -s real.types "$rp/linkrepo/alias.types"
-    git_in_link() { env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$rp/linkrepo" -c user.name=Test -c user.email=test@example.com -c commit.gpgsign=false "$@"; }
+    git_in_link() { git_isolated -C "$rp/linkrepo" -c user.name=Test -c user.email=test@example.com -c commit.gpgsign=false "$@"; }
     git_in_link init --quiet --initial-branch=main
     git_in_link add -A
     git_in_link commit --quiet -m links

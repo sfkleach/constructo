@@ -8,17 +8,13 @@
 
 use crate::project::ProjectError;
 use sha2::{Digest, Sha256};
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 /// The transports that git may use, which is also what `GIT_ALLOW_PROTOCOL` is set to.
 const ALLOWED_PROTOCOLS: &str = "https:ssh:file";
-
-/// The variables of the environment whose name starts with `GIT_` that are kept, since they say how to reach the
-/// repository and are the user's own. Every other one is removed, because it could redirect git to another repository
-/// or another program.
-const KEPT_VARIABLES: [&str; 3] = ["GIT_SSH", "GIT_SSH_COMMAND", "GIT_ASKPASS"];
 
 /// The settings that every call of git is given, so that a checkout is the same on every machine and runs nothing
 /// that a configuration file names.
@@ -504,9 +500,9 @@ fn path_text(path: &Path) -> String {
     path.display().to_string()
 }
 
-/// Which configuration of git a call may use.
-#[derive(PartialEq, Clone, Copy)]
-enum Config {
+/// Which configuration of git a call may use, and so which variables of the environment it is given.
+#[derive(PartialEq, Clone, Copy, Debug)]
+pub(crate) enum Config {
     /// The system and user files, as for any use of git. Fetching needs them, for the credential helper, the settings
     /// of ssh and a proxy.
     User,
@@ -520,8 +516,75 @@ enum Config {
 /// The file that is always empty.
 const NULL_DEVICE: &str = if cfg!(windows) { "NUL" } else { "/dev/null" };
 
-/// Runs git with the arguments, in the folder if there is one, and returns what it printed. The environment and the
-/// settings are those described at the top of this module. A git that is not installed is an error that says so.
+/// The variables that every call of git is passed from the environment of `constructo`: what is needed to find and run
+/// programs at all. `PATH` is how git finds ssh and the helpers that a configuration names.
+const PASSED_ALWAYS: &[&str] = if cfg!(windows) {
+    &["PATH", "PATHEXT", "SYSTEMROOT", "COMSPEC", "TEMP", "TMP"]
+} else {
+    &["PATH", "TMPDIR"]
+};
+
+/// The variables that a call with `Config::User` is passed as well, which are what reaching a repository needs:
+///
+/// - the home folder, where git finds the configuration of the user and with it the credential helper;
+/// - the agent of ssh, and the three variables of git that say how to run ssh or ask for a password;
+/// - the proxy, in the forms that curl reads (it ignores `HTTP_PROXY` in capitals on purpose), and the certificates of
+///   the authorities that OpenSSL is to trust.
+const PASSED_FOR_FETCHING: &[&str] = &[
+    "HOME",
+    "XDG_CONFIG_HOME",
+    "USERPROFILE",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "SSH_AUTH_SOCK",
+    "GIT_SSH",
+    "GIT_SSH_COMMAND",
+    "GIT_ASKPASS",
+    "http_proxy",
+    "https_proxy",
+    "HTTPS_PROXY",
+    "all_proxy",
+    "ALL_PROXY",
+    "no_proxy",
+    "NO_PROXY",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+];
+
+/// The whole environment of a call of git, given a function that reads a variable of the environment of
+/// `constructo`. Git starts with nothing else, so a variable that is not named here cannot reach it: in particular not
+/// `GIT_DIR`, `GIT_WORK_TREE` and `GIT_INDEX_FILE`, which would point it at another repository, nor `GIT_EXEC_PATH`
+/// and `GIT_CONFIG_*`, which would make it run other programs, nor the locale, so that git speaks the same on every
+/// machine. The variables that git is given a value for come after the ones that are passed, and win over them.
+pub(crate) fn child_environment(
+    config: Config,
+    get: impl Fn(&str) -> Option<OsString>,
+) -> Vec<(&'static str, OsString)> {
+    let passed = match config {
+        Config::User => [PASSED_ALWAYS, PASSED_FOR_FETCHING].concat(),
+        Config::Isolated => PASSED_ALWAYS.to_vec(),
+    };
+    let mut environment: Vec<(&'static str, OsString)> = passed
+        .into_iter()
+        .filter_map(|name| get(name).map(|value| (name, value)))
+        .collect();
+    let mut set = |name: &'static str, value: &str| environment.push((name, OsString::from(value)));
+    set("GIT_ALLOW_PROTOCOL", ALLOWED_PROTOCOLS);
+    // Without this git waits for a password to be typed, which nobody can see in a run of a tool.
+    set("GIT_TERMINAL_PROMPT", "0");
+    if config == Config::Isolated {
+        // No `HOME` is passed either, for versions of git before 2.32, which do not know `GIT_CONFIG_GLOBAL`.
+        set("GIT_CONFIG_NOSYSTEM", "1");
+        set("GIT_CONFIG_GLOBAL", NULL_DEVICE);
+        set("GIT_ATTR_NOSYSTEM", "1");
+    }
+    environment
+}
+
+/// Runs git with the arguments, in the folder if there is one, and returns what it printed. Its environment is the one
+/// that `child_environment` gives, and nothing else, and its settings are `SETTINGS`. A git that is not installed is an error that says so.
 fn git(args: &[&str], folder: Option<&Path>, url: &str, config: Config) -> Result<String, ProjectError> {
     let mut command = Command::new("git");
     for setting in SETTINGS {
@@ -531,25 +594,9 @@ fn git(args: &[&str], folder: Option<&Path>, url: &str, config: Config) -> Resul
     if let Some(folder) = folder {
         command.current_dir(folder);
     }
-    for (name, _) in std::env::vars_os() {
-        let name = name.to_string_lossy().to_string();
-        if name.starts_with("GIT_") && !KEPT_VARIABLES.contains(&name.as_str()) {
-            command.env_remove(&name);
-        }
-    }
     command
-        .env("GIT_ALLOW_PROTOCOL", ALLOWED_PROTOCOLS)
-        // Without this git waits for a password to be typed, which nobody can see in a run of a tool.
-        .env("GIT_TERMINAL_PROMPT", "0");
-    if config == Config::Isolated {
-        command
-            .env("GIT_CONFIG_NOSYSTEM", "1")
-            .env("GIT_CONFIG_GLOBAL", NULL_DEVICE)
-            .env("GIT_ATTR_NOSYSTEM", "1")
-            // Versions of git before 2.32 do not know GIT_CONFIG_GLOBAL, and look for the file in these places.
-            .env_remove("HOME")
-            .env_remove("XDG_CONFIG_HOME");
-    }
+        .env_clear()
+        .envs(child_environment(config, |name| std::env::var_os(name)));
     let output = command.output().map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             ProjectError::Cannot(
@@ -778,6 +825,80 @@ mod tests {
         refused("sub/b.types is missing");
         std::fs::write(first.path.join("sub/b.types"), "enum B = Y;\n").unwrap();
         assert_eq!(cache.fetch(&url, None).unwrap(), first);
+    }
+
+    /// The environment of a call of git, as a map, given the variables of the environment of `constructo`.
+    fn environment_of(config: Config, outside: &[(&str, &str)]) -> std::collections::BTreeMap<String, String> {
+        let get = |name: &str| outside.iter().find(|(k, _)| *k == name).map(|(_, v)| OsString::from(v));
+        child_environment(config, get)
+            .into_iter()
+            .map(|(name, value)| (name.to_string(), value.to_string_lossy().to_string()))
+            .collect()
+    }
+
+    const OUTSIDE: [(&str, &str); 11] = [
+        ("PATH", "/bin"),
+        ("HOME", "/home/u"),
+        ("SSH_AUTH_SOCK", "/run/agent"),
+        ("https_proxy", "http://proxy:8080"),
+        ("GIT_SSH_COMMAND", "ssh -i key"),
+        ("GIT_DIR", "/elsewhere/.git"),
+        ("GIT_EXEC_PATH", "/elsewhere/libexec"),
+        ("GIT_CONFIG_GLOBAL", "/elsewhere/config"),
+        ("GIT_ALLOW_PROTOCOL", "ext"),
+        ("LANG", "fr_FR.UTF-8"),
+        ("SOMETHING_ELSE", "x"),
+    ];
+
+    #[test]
+    fn a_fetch_is_given_what_reaching_a_repository_needs_and_nothing_else() {
+        let environment = environment_of(Config::User, &OUTSIDE);
+        for name in ["PATH", "HOME", "SSH_AUTH_SOCK", "https_proxy", "GIT_SSH_COMMAND"] {
+            assert_eq!(
+                environment.get(name).map(String::as_str),
+                OUTSIDE.iter().find(|(k, _)| *k == name).map(|(_, v)| *v),
+                "{}",
+                name
+            );
+        }
+        for name in [
+            "GIT_DIR",
+            "GIT_EXEC_PATH",
+            "GIT_CONFIG_GLOBAL",
+            "LANG",
+            "SOMETHING_ELSE",
+        ] {
+            assert!(!environment.contains_key(name), "{} should not be passed", name);
+        }
+        // The values that git is given win over any that the environment has.
+        assert_eq!(environment["GIT_ALLOW_PROTOCOL"], ALLOWED_PROTOCOLS);
+        assert_eq!(environment["GIT_TERMINAL_PROMPT"], "0");
+        assert!(!environment.contains_key("GIT_CONFIG_NOSYSTEM"));
+    }
+
+    #[test]
+    fn a_call_that_only_reads_the_clone_has_no_configuration_and_no_home() {
+        let environment = environment_of(Config::Isolated, &OUTSIDE);
+        let names: Vec<&str> = environment.keys().map(String::as_str).collect();
+        assert_eq!(
+            names,
+            [
+                "GIT_ALLOW_PROTOCOL",
+                "GIT_ATTR_NOSYSTEM",
+                "GIT_CONFIG_GLOBAL",
+                "GIT_CONFIG_NOSYSTEM",
+                "GIT_TERMINAL_PROMPT",
+                "PATH"
+            ]
+        );
+        assert_eq!(environment["GIT_CONFIG_GLOBAL"], NULL_DEVICE);
+    }
+
+    #[test]
+    fn a_variable_that_is_not_set_is_not_passed() {
+        let environment = environment_of(Config::User, &[]);
+        let names: Vec<&str> = environment.keys().map(String::as_str).collect();
+        assert_eq!(names, ["GIT_ALLOW_PROTOCOL", "GIT_TERMINAL_PROMPT"]);
     }
 
     #[test]

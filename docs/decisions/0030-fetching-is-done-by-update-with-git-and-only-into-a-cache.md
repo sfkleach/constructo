@@ -22,14 +22,20 @@ fetched, how, from where, and how much of a fetched repository is trusted.
     `core.fsmonitor=false` and others). `core.symlinks=true` checks a link out as a link, so that a file system that
     cannot make links fails the checkout, which is an error to see, and does not give a plain file that holds the
     target, which would have a digest that differs from the one made elsewhere.
-    The `GIT_*` variables of the environment are removed, because they could redirect git, except `GIT_SSH`,
-    `GIT_SSH_COMMAND` and `GIT_ASKPASS`, which say how to reach the repository.
-    `GIT_ALLOW_PROTOCOL` is set to `https:ssh:file`, and `GIT_TERMINAL_PROMPT` to `0` so that git never waits for a
-    password to be typed.
+  - git starts with an empty environment and is given only the variables that `constructo` names, so a variable is
+    never passed to it by accident. Every call gets `PATH` (and `TMPDIR`, or on Windows the few variables that any
+    program needs). The clone also gets what reaching a repository needs: the home folder, where git finds the
+    configuration of the user, the agent of ssh, `GIT_SSH`, `GIT_SSH_COMMAND` and `GIT_ASKPASS`, the variables of a
+    proxy that curl reads, and `SSL_CERT_FILE` and `SSL_CERT_DIR`. Nothing else reaches git: not `GIT_DIR` and the
+    other variables that would point it at another repository or other programs, not the locale, so that its messages
+    are the same everywhere, and not `GIT_SSL_NO_VERIFY`. A setting that is needed and is not on the list, such as a
+    file of certificates, goes in the configuration of git. `GIT_ALLOW_PROTOCOL` is set to `https:ssh:file`, and
+    `GIT_TERMINAL_PROMPT` to `0` so that git never waits for a password to be typed. The list is `child_environment`
+    in `src/fetch.rs`.
   - Only the clone uses the system and user configuration of git, for the credential helper and the settings of ssh
     and a proxy. The steps that follow it, which find the commit and check it out, run without them
-    (`GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_GLOBAL` as the null device, `GIT_ATTR_NOSYSTEM`, and no `HOME` or
-    `XDG_CONFIG_HOME` for versions of git that do not know `GIT_CONFIG_GLOBAL`), because the `.gitattributes` of the
+    (`GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_GLOBAL` as the null device, `GIT_ATTR_NOSYSTEM`, and no home folder, for
+    versions of git that do not know `GIT_CONFIG_GLOBAL`), because the `.gitattributes` of the
     repository can name a filter such as `lfs`, and a checkout would run the program that the configuration of the user
     gives for it. The clone is made with no template folder.
   - A URL is one of `https://`, `ssh://` or the short form `host:path`, `file://`, or a path. `ext::` and every other

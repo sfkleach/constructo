@@ -1,6 +1,6 @@
 //! Helpers for the unit tests that need files on disk.
 
-use crate::fetch::Scratch;
+use crate::fetch::{child_environment, Config, Scratch};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -71,13 +71,12 @@ impl Repo {
 
     pub fn git(&self, args: &[&str]) -> String {
         let mut command = Command::new("git");
-        // A variable such as `GIT_DIR` or `GIT_INDEX_FILE`, which git sets when it runs a hook, would make this git
-        // work on the repository of the developer and not on the one made for the test.
-        for (name, _) in std::env::vars_os() {
-            if name.to_string_lossy().starts_with("GIT_") {
-                command.env_remove(&name);
-            }
-        }
+        // The same environment as the git that fetches, with no configuration of the system or the user, so that a
+        // variable such as `GIT_DIR`, which git sets when it runs a hook, or a hook or signing setting in the
+        // configuration of the developer, cannot reach the repository that is made for the test.
+        command
+            .env_clear()
+            .envs(child_environment(Config::Isolated, |name| std::env::var_os(name)));
         let output = command
             .arg("-C")
             .arg(&self.folder)
