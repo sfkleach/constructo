@@ -1363,11 +1363,35 @@ if command -v git >/dev/null 2>&1; then
     else
         fail "repo: update refuses a path that leaves the clone (exit $status, got '$out')"
     fi
+    # A link in a repository is checked out as a link, whatever the configuration of the user says, so that the digest
+    # is the same on every machine. A configuration with `symlinks = false` would give a plain file with the target.
+    mkdir "$rp/linkrepo" "$rp/linkapp" "$rp/home"
+    printf '[core]\n\tsymlinks = false\n' > "$rp/home/.gitconfig"
+    printf '[project]\nname = "example.lnk"\n' > "$rp/linkrepo/constructo.toml"
+    printf 'enum Real = R;\n' > "$rp/linkrepo/real.types"
+    ln -s real.types "$rp/linkrepo/alias.types"
+    git_in_link() { env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$rp/linkrepo" -c user.name=Test -c user.email=test@example.com -c commit.gpgsign=false "$@"; }
+    git_in_link init --quiet --initial-branch=main
+    git_in_link add -A
+    git_in_link commit --quiet -m links
+    printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lnk"\nrepo = "%s"\n' "$rp/linkrepo" \
+        > "$rp/linkapp/constructo.toml"
+    out="$(HOME="$rp/home" XDG_CONFIG_HOME="$rp/home" "$CONSTRUCTO" project update "$rp/linkapp" 2>&1)" && status=0 || status=$?
+    linked="$(sed -n 's/^commit = "\(.*\)"$/\1/p' "$rp/linkapp/constructo.lock")"
+    if [[ $status -eq 0 && -L "$(echo "$CONSTRUCTO_CACHE"/git/*/"$linked")/alias.types" ]]; then
+        pass "repo: a link is checked out as a link whatever the git configuration says"
+    else
+        fail "repo: a link is checked out as a link whatever the git configuration says (exit $status, got '$out')"
+    fi
     unset CONSTRUCTO_CACHE
     rm -f "$rp/secret"
     rm -rf "$rp/repo/.git" "$rp/cache/git"
     rm -f "$rp/repo/constructo.toml" "$rp/repo/shapes.types" "$rp/repo/more.types" "$rp/app/constructo.toml" \
         "$rp/app/constructo.lock"
+    rm -rf "$rp/linkrepo/.git" "$rp/cache/git"
+    rm -f "$rp/linkrepo/constructo.toml" "$rp/linkrepo/real.types" "$rp/linkrepo/alias.types" \
+        "$rp/linkapp/constructo.toml" "$rp/linkapp/constructo.lock" "$rp/home/.gitconfig"
+    rmdir "$rp/linkrepo" "$rp/linkapp" "$rp/home"
     rmdir "$rp/repo" "$rp/app" "$rp/cache" "$rp"
 else
     echo "  SKIP: git is not installed"
