@@ -237,4 +237,5 @@ The difference can be reviewed from the output of the command, or with `git diff
 
 - [The project-file](project-file-format.md), which says how a project's files are found.
 - [Resolving identifiers](resolving-identifiers.md).
+- [The cache](cache-management.md), where the files of a project from a repository are kept.
 - Decisions 24 to 28 in `docs/decisions/`, of which 27 and 28 are about the lock file and `--dev`.
