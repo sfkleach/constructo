@@ -137,9 +137,9 @@ Following the style in https://keepachangelog.com/en/1.0.0/
   - A project can come from a git repository, with `repo`, `rev` and `subdir` (decisions 29 and 30). Only
     `constructo project update` fetches: it resolves the `rev` to a commit, puts the files in a cache and records the
     commit in the lock. `constructo check` never uses the network, and loads the project from the commit in the lock
-    and the cache. The cache is `$CONSTRUCTO_CACHE`, or `constructo` under `$XDG_CACHE_HOME` or `~/.cache`. The `git`
-    program does the work, with hooks and the user's git configuration switched off, and only https, ssh and local
-    repositories are allowed. A project from a repository must stay inside its clone, and `--dev` does not make it
+    and the cache. The cache is `$CONSTRUCTO_CACHE`, or `constructo` under `$XDG_CACHE_HOME` or `~/.cache`, and
+    `docs/specs/cache-management.md` says how it is kept. The `git` program does the work, with hooks and the user's
+    git configuration switched off, and only https, ssh and local repositories are allowed. A project from a repository must stay inside its clone, and `--dev` does not make it
     unverified.
   - The library has the `project`, `lock`, `verify` and `fetch` modules.
 
