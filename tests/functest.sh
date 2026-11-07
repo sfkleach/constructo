@@ -1292,7 +1292,9 @@ STAND_IN
             && status=0 || status=$?
         said="$(cat "$rp/ssh-arguments" 2>/dev/null || true)"
     }
-    ssh_update env -u GIT_SSH_COMMAND -u GIT_SSH HOME="$rp/nohome"
+    # Both places of the user's git configuration are empty folders, so that no core.sshCommand is found there. A
+    # core.sshCommand in the system configuration would still be found, since constructo reads that for the clone.
+    ssh_update env -u GIT_SSH_COMMAND -u GIT_SSH HOME="$rp/nohome" XDG_CONFIG_HOME="$rp/nohome"
     if [[ $status -eq 0 && "$said" == *"BatchMode=yes"* ]]; then
         pass "repo: ssh is run in batch mode"
     else
