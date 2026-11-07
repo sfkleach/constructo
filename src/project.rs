@@ -130,6 +130,16 @@ pub struct Remote {
     pub subdir: Option<String>,
 }
 
+impl Remote {
+    /// The remote as a person would say it, such as `https://example.com/lib.git at 9f2c...`, with the folder if any.
+    fn describe(&self) -> String {
+        match &self.subdir {
+            Some(subdir) => format!("{} at {} in {}", redact(&self.url), self.commit, subdir),
+            None => format!("{} at {}", redact(&self.url), self.commit),
+        }
+    }
+}
+
 /// Where the projects that are in git repositories come from when a project is loaded.
 #[derive(Debug, Clone, Default)]
 pub enum Remotes {
@@ -682,6 +692,32 @@ impl Loader {
             }
             let target = if let Some(&done) = self.done.get(&child_canonical) {
                 self.check_name_of(&file, import, name_pos, &self.projects[done].name)?;
+                // The project may have been reached first by a `path` from another project in the same clone. It is
+                // the same project, so it takes on the repository that this import names, or else the lock would
+                // record it with no repository and a later `check` would not find its entry.
+                if let Some(remote) = &remote {
+                    match &self.projects[done].remote {
+                        None => {
+                            if self.projects[done].confined.is_none() {
+                                let loaded = &self.projects[done];
+                                check_files_inside(confined.as_deref().unwrap_or(Path::new("")), loaded)
+                                    .map_err(|m| problem(source_pos, m))?;
+                                self.projects[done].confined = confined.clone();
+                            }
+                            self.projects[done].remote = Some(remote.clone());
+                        }
+                        Some(first) if first != remote => {
+                            let message = format!(
+                                "The project {} is imported from {} and from {}, which are not the same",
+                                self.projects[done].name,
+                                first.describe(),
+                                remote.describe()
+                            );
+                            return Err(problem(source_pos, message));
+                        }
+                        Some(_) => {}
+                    }
+                }
                 done
             } else if let Some(at) = self.stack.iter().position(|(path, _)| *path == child_canonical) {
                 let mut names: Vec<&str> = self.stack[at..].iter().map(|(_, name)| name.as_str()).collect();
@@ -693,11 +729,7 @@ impl Loader {
             } else {
                 let mut child = Project::load_with(&import.folder, confined.is_some())?;
                 if let Some(root) = &confined {
-                    for file in &child.files {
-                        let relative = file.path.strip_prefix(&child.folder).unwrap_or(&file.path);
-                        check_inside(root, &file.path, &relative.display().to_string(), &child.name)
-                            .map_err(|m| problem(source_pos, m))?;
-                    }
+                    check_files_inside(root, &child).map_err(|m| problem(source_pos, m))?;
                 }
                 child.remote = remote;
                 child.confined = confined;
@@ -819,6 +851,15 @@ fn check_inside(root: &Path, path: &Path, what: &str, project: &str) -> Result<(
         )),
         Err(_) => Ok(()),
     }
+}
+
+/// Checks that each types file of a project that is inside a clone is inside it still once the links are followed.
+fn check_files_inside(root: &Path, project: &Project) -> Result<(), String> {
+    for file in &project.files {
+        let relative = file.path.strip_prefix(&project.folder).unwrap_or(&file.path);
+        check_inside(root, &file.path, &relative.display().to_string(), &project.name)?;
+    }
+    Ok(())
 }
 
 /// The folder of a project in a repository as the lock records it. The lock must have an entry for the project that is
