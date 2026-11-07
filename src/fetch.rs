@@ -383,9 +383,6 @@ impl Cache {
             )));
         }
         let path = self.checkout_path(url, &commit);
-        if path.is_dir() {
-            return Ok(Fetched { commit, path });
-        }
         // The files go in a work tree apart from the clone, so that the checkout has no `.git` folder.
         let tree = work.0.join("tree");
         std::fs::create_dir(&tree).map_err(|e| cannot(&tree, "make", e))?;
@@ -403,6 +400,21 @@ impl Cache {
             None,
             url,
         )?;
+        // A checkout in the cache is reused, but only if it is what a fresh one is. The lock records the digests of
+        // what is in the cache, so a file that was changed there would be recorded as the content of the commit.
+        if path.is_dir() {
+            return match differences(&tree, &path) {
+                None => Ok(Fetched { commit, path }),
+                Some(difference) => Err(ProjectError::Cannot(format!(
+                    "The checkout of the commit {} of {} in the cache has been changed: {}. Remove the folder {} and \
+                     run `constructo project update` again",
+                    commit,
+                    redact(url),
+                    difference,
+                    path.display()
+                ))),
+            };
+        }
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| cannot(parent, "make", e))?;
         }
@@ -414,6 +426,66 @@ impl Cache {
         }
         Ok(Fetched { commit, path })
     }
+}
+
+/// What a folder holds at a path: a folder, a file with the digest of its bytes, or a link with its target.
+#[derive(PartialEq)]
+enum Entry {
+    Folder,
+    File(String),
+    Link(PathBuf),
+}
+
+/// Every path under the folder, written with `/` and relative to it, with what is at it. Links are not followed.
+fn entries(folder: &Path) -> std::io::Result<std::collections::BTreeMap<String, Entry>> {
+    fn visit(root: &Path, folder: &Path, found: &mut std::collections::BTreeMap<String, Entry>) -> std::io::Result<()> {
+        for item in std::fs::read_dir(folder)? {
+            let item = item?;
+            let path = item.path();
+            let relative = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            let kind = item.file_type()?;
+            if kind.is_symlink() {
+                found.insert(relative, Entry::Link(std::fs::read_link(&path)?));
+            } else if kind.is_dir() {
+                found.insert(relative, Entry::Folder);
+                visit(root, &path, found)?;
+            } else {
+                let digest = Sha256::digest(std::fs::read(&path)?);
+                found.insert(
+                    relative,
+                    Entry::File(digest.iter().map(|byte| format!("{:02x}", byte)).collect()),
+                );
+            }
+        }
+        Ok(())
+    }
+    let mut found = std::collections::BTreeMap::new();
+    visit(folder, folder, &mut found)?;
+    Ok(found)
+}
+
+/// How the folder in the cache differs from a fresh checkout, or `None` if it does not. The first difference by path
+/// is described. A folder that cannot be read is a difference too.
+fn differences(fresh: &Path, cached: &Path) -> Option<String> {
+    let (fresh, cached) = match (entries(fresh), entries(cached)) {
+        (Ok(fresh), Ok(cached)) => (fresh, cached),
+        (_, Err(e)) => return Some(format!("it cannot be read ({})", e)),
+        (Err(e), _) => return Some(format!("the fresh checkout cannot be read ({})", e)),
+    };
+    let paths: std::collections::BTreeSet<&String> = fresh.keys().chain(cached.keys()).collect();
+    for path in paths {
+        match (fresh.get(path), cached.get(path)) {
+            (Some(a), Some(b)) if a == b => {}
+            (Some(_), Some(_)) => return Some(format!("{} is not what it was", path)),
+            (Some(_), None) => return Some(format!("{} is missing", path)),
+            (None, _) => return Some(format!("{} is not in the commit", path)),
+        }
+    }
+    None
 }
 
 fn path_text(path: &Path) -> String {
@@ -640,6 +712,38 @@ mod tests {
     }
 
     #[test]
+    fn a_checkout_in_the_cache_that_was_changed_is_refused() {
+        let repo = Repo::new();
+        repo.commit("a.types", "enum A = X;\n");
+        repo.commit("sub/b.types", "enum B = Y;\n");
+        let (cache, _scratch) = cache();
+        let url = repo.url();
+        let first = cache.fetch(&url, None).unwrap();
+        // A second fetch of the same commit finds the checkout as it was.
+        assert_eq!(cache.fetch(&url, None).unwrap(), first);
+        let refused = |what: &str| {
+            let error = cache.fetch(&url, None).unwrap_err().to_string();
+            assert!(error.contains("in the cache has been changed"), "{}", error);
+            assert!(error.contains(what), "{}", error);
+            assert!(error.contains(&first.path.display().to_string()), "{}", error);
+            assert!(error.contains("constructo project update"), "{}", error);
+        };
+        // A file that is changed.
+        std::fs::write(first.path.join("a.types"), "enum A = Z;\n").unwrap();
+        refused("a.types is not what it was");
+        std::fs::write(first.path.join("a.types"), "enum A = X;\n").unwrap();
+        // A file that is added.
+        std::fs::write(first.path.join("extra.types"), "").unwrap();
+        refused("extra.types is not in the commit");
+        std::fs::remove_file(first.path.join("extra.types")).unwrap();
+        // A file that is removed.
+        std::fs::remove_file(first.path.join("sub/b.types")).unwrap();
+        refused("sub/b.types is missing");
+        std::fs::write(first.path.join("sub/b.types"), "enum B = Y;\n").unwrap();
+        assert_eq!(cache.fetch(&url, None).unwrap(), first);
+    }
+
+    #[test]
     fn a_branch_a_tag_and_the_default_are_found_as_commits() {
         let repo = Repo::new();
         let first = repo.commit("a.types", "enum A = X;\n");
@@ -678,10 +782,16 @@ mod tests {
         assert!(!fetched.path.join(".git").exists());
         assert_eq!(cache.lookup(&url, &first), Some(fetched.path.clone()));
         assert_eq!(cache.lookup(&url, &"0".repeat(40)), None);
-        // Fetching it again finds it there and leaves it alone.
-        std::fs::write(fetched.path.join("marker"), "x").unwrap();
+        // Fetching it again finds it there and leaves it alone, unless it has been changed.
         assert_eq!(cache.fetch(&url, Some(&first)).unwrap(), fetched);
-        assert!(fetched.path.join("marker").exists());
+        std::fs::write(fetched.path.join("marker"), "x").unwrap();
+        assert!(cache.fetch(&url, Some(&first)).is_err());
+        assert!(
+            fetched.path.join("marker").exists(),
+            "a changed checkout is refused and not repaired"
+        );
+        std::fs::remove_file(fetched.path.join("marker")).unwrap();
+        assert_eq!(cache.fetch(&url, Some(&first)).unwrap(), fetched);
         // Nothing is left behind next to the checkouts but the folders of the repositories.
         let names: Vec<_> = std::fs::read_dir(cache.root.join("git"))
             .unwrap()

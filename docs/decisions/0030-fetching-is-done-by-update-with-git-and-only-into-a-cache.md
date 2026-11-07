@@ -35,7 +35,9 @@ fetched, how, from where, and how much of a fetched repository is trusted.
 - The cache is `$CONSTRUCTO_CACHE`, or else `constructo` in the cache folder of the user (`$XDG_CACHE_HOME` or
   `~/.cache`, and `%LOCALAPPDATA%` on Windows). A checkout is `git/KEY/COMMIT/`, where KEY is the first 16 hexadecimal
   digits of the SHA-256 of the URL as written. A checkout is made in a folder of its own and renamed into place, and is
-  never changed afterwards, so any number of projects share it.
+  never changed afterwards, so any number of projects share it. `update` checks that, by comparing a checkout that is
+  in the cache already with a fresh one, and refuses one that differs, so that a changed file is not recorded in the
+  lock as a part of the commit.
 - A fetched project is confined to its clone. The project-file, the folder of the project and every types file must be
   inside the clone once links are followed. A link that leaves it is an error at the import with exit code 2 that says
   where the link leads, and is raised before the project-file is read, so that nothing of the file it leads to can be
