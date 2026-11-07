@@ -156,6 +156,9 @@ const SCRATCH_PREFIX: &str = "tmp-";
 /// How often the folder of a run that is going has its time changed. It is much less than `STALE_AFTER`.
 const HEARTBEAT: std::time::Duration = std::time::Duration::from_secs(60 * 60);
 
+/// The size of the stack of the heartbeat thread.
+const HEARTBEAT_STACK: usize = 64 * 1024;
+
 /// How long a scratch folder may go unchanged before it is taken to belong to a run that was killed. A run that is
 /// going changes the time every `HEARTBEAT`, so it never gets this old.
 const STALE_AFTER: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
@@ -173,18 +176,25 @@ struct Heartbeat {
 impl Heartbeat {
     fn start(folder: PathBuf, every: std::time::Duration) -> Heartbeat {
         let (stop, stopped) = std::sync::mpsc::channel::<()>();
-        let thread = std::thread::spawn(move || {
-            // Only a timeout means that it is time to touch the folder. A message or a dropped sender means stop.
-            while let Err(std::sync::mpsc::RecvTimeoutError::Timeout) = stopped.recv_timeout(every) {
-                // A failure is ignored: the worst that follows is that the folder looks old to a sweep.
-                if let Ok(file) = std::fs::File::open(&folder) {
-                    let _ = file.set_modified(std::time::SystemTime::now());
+        // The size of the stack is given, since otherwise it is read from `RUST_MIN_STACK` in the environment. The
+        // thread does almost nothing, so a small one is plenty.
+        let thread = std::thread::Builder::new()
+            .name("heartbeat".to_string())
+            .stack_size(HEARTBEAT_STACK)
+            .spawn(move || {
+                // Only a timeout means that it is time to touch the folder. A message or a dropped sender means stop.
+                while let Err(std::sync::mpsc::RecvTimeoutError::Timeout) = stopped.recv_timeout(every) {
+                    // A failure is ignored: the worst that follows is that the folder looks old to a sweep.
+                    if let Ok(file) = std::fs::File::open(&folder) {
+                        let _ = file.set_modified(std::time::SystemTime::now());
+                    }
                 }
-            }
-        });
+            });
         Heartbeat {
             stop: Some(stop),
-            thread: Some(thread),
+            // A thread that cannot be made only means that a run of more than a day could have its folder swept,
+            // which is not worth stopping a fetch for.
+            thread: thread.ok(),
         }
     }
 }
