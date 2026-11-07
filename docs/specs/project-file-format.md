@@ -98,8 +98,9 @@ group = "shapes"
   nowhere, so that a repository is not accepted on one machine and refused on another. A
   `path` import in such a project must stay inside the clone by the path as written, and so must the projects it
   reaches. It may import other repositories and built-in projects.
-- The `git` program is used, so it has to be installed. `$CONSTRUCTO_CACHE` names the cache folder. Without it the
-  cache is `constructo` in `$XDG_CACHE_HOME` or `~/.cache`, and `%LOCALAPPDATA%` on Windows. See
+- The `git` program is used, so it has to be installed. The cache folder is given by `--cache`, by `cache` in the
+  `[global]` table of the configuration file, or by `$CONSTRUCTO_CACHE`. Without any of them the cache is
+  `constructo` in `$XDG_CACHE_HOME` or `~/.cache`, and `%LOCALAPPDATA%` on Windows. See
   [the cache](cache-management.md).
 
 ## Names

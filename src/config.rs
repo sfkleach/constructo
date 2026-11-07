@@ -25,6 +25,19 @@ pub struct Config {
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Global {
     pub verbose: Option<bool>,
+    /// The folder of the cache of projects from repositories. A relative one is relative to the folder of the file,
+    /// which the program that reads the file has to apply, since the file is parsed from its text alone.
+    #[serde(deserialize_with = "non_empty_path")]
+    pub cache: Option<std::path::PathBuf>,
+}
+
+/// A path that is not empty, since an empty one would be the current folder by accident.
+fn non_empty_path<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<std::path::PathBuf>, D::Error> {
+    let text = String::deserialize(deserializer)?;
+    if text.is_empty() {
+        return Err(serde::de::Error::custom("the folder cannot be empty"));
+    }
+    Ok(Some(std::path::PathBuf::from(text)))
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
@@ -60,9 +73,18 @@ impl Config {
     }
 
     /// The settings that a run uses, with every key of the tables that `constructo check` has set.
-    pub fn effective(options: &CheckOptions, prelude: bool, verbose: bool, dev: bool) -> Config {
+    pub fn effective(
+        options: &CheckOptions,
+        prelude: bool,
+        verbose: bool,
+        dev: bool,
+        cache: Option<&std::path::Path>,
+    ) -> Config {
         Config {
-            global: Global { verbose: Some(verbose) },
+            global: Global {
+                verbose: Some(verbose),
+                cache: cache.map(std::path::Path::to_path_buf),
+            },
             experimental: ExperimentalSettings {
                 some_query: Some(options.experimental.some_query),
             },
@@ -87,11 +109,20 @@ impl Config {
             [
                 (
                     "global",
-                    vec![Key::new(
-                        "verbose",
-                        "Report each input that was checked.",
-                        self.verbose(),
-                    )],
+                    vec![
+                        Key::new("verbose", "Report each input that was checked.", self.verbose()),
+                        // A cache that is not given is left to the environment, which is not written into the file.
+                        Key {
+                            name: "cache",
+                            comment: "The folder of the cache of projects from repositories. Without it, \
+                                      CONSTRUCTO_CACHE, or else the cache folder of the user.",
+                            value: self
+                                .global
+                                .cache
+                                .as_ref()
+                                .map(|cache| toml::Value::String(cache.display().to_string()).to_string()),
+                        },
+                    ],
                 ),
                 (
                     "experimental",
@@ -148,7 +179,10 @@ impl Config {
             .map(|(table, keys)| {
                 let lines: Vec<String> = keys
                     .iter()
-                    .map(|key| format!("# {}\n{} = {}\n", key.comment, key.name, key.value))
+                    .map(|key| match &key.value {
+                        Some(value) => format!("# {}\n{} = {}\n", key.comment, key.name, value),
+                        None => format!("# {}\n# {} = \"FOLDER\"\n", key.comment, key.name),
+                    })
                     .collect();
                 format!("[{}]\n{}", table, lines.join("\n"))
             })
@@ -193,8 +227,9 @@ impl Config {
 struct Key {
     name: &'static str,
     comment: &'static str,
-    /// The value in TOML syntax.
-    value: String,
+    /// The value in TOML syntax, or `None` for a key that has no value unless it is given, which is written as a
+    /// comment.
+    value: Option<String>,
 }
 
 impl Key {
@@ -202,7 +237,7 @@ impl Key {
         Key {
             name,
             comment,
-            value: value.to_string(),
+            value: Some(value.to_string()),
         }
     }
 }
@@ -263,7 +298,7 @@ mod tests {
             experimental: Experimental::all(),
             ..CheckOptions::default()
         };
-        let config = Config::effective(&options, false, true, true);
+        let config = Config::effective(&options, false, true, true, None);
         let text = config.to_toml();
         assert!(
             text.contains("[check]\n") && text.contains("infer-limit = 7\n") && text.contains("continue = false\n")
@@ -273,6 +308,21 @@ mod tests {
         assert_eq!(config.check_options(), options);
         assert!(!config.prelude() && config.verbose() && config.dev());
         assert!(text.contains("dev = true\n"), "{}", text);
+        // A cache that is not given is a comment, so that the environment is not written into the file.
+        assert!(text.contains("# cache = \"FOLDER\"\n"), "{}", text);
+        let config = Config::effective(&options, false, true, true, Some(std::path::Path::new("/var/cache/c")));
+        let text = config.to_toml();
+        assert!(text.contains("\ncache = \"/var/cache/c\"\n"), "{}", text);
+        assert_eq!(Config::parse(&text, "c.toml").unwrap(), config);
+    }
+
+    #[test]
+    fn the_cache_is_a_folder_that_is_not_empty() {
+        let config = Config::parse("[global]\ncache = \"../cache\"\n", "c.toml").unwrap();
+        assert_eq!(config.global.cache, Some(std::path::PathBuf::from("../cache")));
+        let (line, col, message) = error("[global]\ncache = \"\"\n");
+        assert_eq!((line, col), (2, 9));
+        assert!(message.contains("the folder cannot be empty"), "{}", message);
     }
 
     #[test]

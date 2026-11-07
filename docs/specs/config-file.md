@@ -1,7 +1,8 @@
 # The configuration file
 
 A configuration file gives the settings that the command-line options would. It is read when it is named with
-`--config=PATH`. There is no search for a file, so a run depends only on its command line and the file it names.
+`--config=PATH`. There is no search for a file, so a run depends only on its command line and the file it names,
+except that the folder of the cache can come from the environment when neither gives it.
 
 ## Writing a file
 
@@ -42,6 +43,12 @@ subcommand. Today there is one subcommand, `check`.
 | Key       | Type    | Default | Option                      |
 |-----------|---------|---------|-----------------------------|
 | `verbose` | boolean | `false` | `--verbose`, `--no-verbose` |
+| `cache`   | string  | none    | `--cache=FOLDER`            |
+
+`cache` is the folder of the cache of projects from git repositories. A relative folder is relative to the folder of
+the configuration file, and an empty one is an error. Without it, and without `--cache`, the folder comes from the
+environment, as [the cache](cache-management.md) says. `--print-config` writes it as a comment, `# cache = "FOLDER"`,
+unless a folder was given, so that the template does not carry the environment of the run that wrote it.
 
 ### `[experimental]`
 
