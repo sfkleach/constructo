@@ -168,9 +168,10 @@ type-checked. The problems are all reported, since each is an independent fact, 
 
 - A loaded project that has no entry is an error at the `[[import]]` that loaded it. A file of a project that matches
   its patterns but is not in the lock is an error at the entry of the project.
-- Where a project comes from is verified as well as its files. A project that the lock has from a repository at a commit,
-  and that is a folder now, or from another repository, commit or folder, is an error at its entry even if every file is
-  the same: `The project X is from A in constructo.lock but from a folder now`. Under `--dev` a folder is not verified.
+- Where a project comes from is verified as well as its files. A project that the lock has from a repository at a
+  commit, and that is a folder now, or from another repository, commit or folder, is an error at its entry even if
+  every file is the same: `The project X is from A in constructo.lock but from a folder now`. Under `--dev` a folder
+  is not verified.
 - The lock must describe exactly what is loaded. A project in the lock that is not loaded, and a file in the lock that
   is no longer in the project, are errors at their entries.
 - A project with nothing to record needs no lock file, and with none, nothing is verified. Any other project with no
@@ -186,9 +187,9 @@ The built-in projects are never verified.
 ### The option `--dev`
 
 `-d, --dev` switches off verification of the lock for the projects that are folders on disk, and a missing lock file is
-then not an error. It means "I am developing, trust what is on disk". It is a setting like the other boolean options: `dev` in the
-`[check]` table of a [configuration file](config-file.md), with the negative form `--no-dev`, and it is shown by
-`--print-config`.
+then not an error. It means "I am developing, trust what is on disk". It is a setting like the other boolean options:
+`dev` in the `[check]` table of a [configuration file](config-file.md), with the negative form `--no-dev`, and it is
+shown by `--print-config`.
 
 A project from a repository cannot be edited, so `--dev` does not apply to it, nor to a project that it imports by a
 `path`. Such a project is loaded from the commit in the lock and verified as without `--dev`, so the lock is read when
@@ -205,12 +206,12 @@ OK: . (project example.app)
 OK: checked 2 file(s) in 2 project(s)
 ```
 
-- An imported project is `verified`, or `unverified` under `--dev` if it is a folder on disk. The root project is not in the lock, so its line says
-  neither, and the built-in projects are not reported.
+- An imported project is `verified`, or `unverified` under `--dev` if it is a folder on disk. The root project is not
+  in the lock, so its line says neither, and the built-in projects are not reported.
 - The count at the end is of the projects as well as the files. The projects counted are the root and the imported ones.
   A run with no `--project` has no project to count, and the count is of files only.
-- A diagnostic does not say which project it is from. The path of the file shows where it came from, and the project line
-  connects the folder to the name.
+- A diagnostic does not say which project it is from. The path of the file shows where it came from, and the project
+  line connects the folder to the name.
 
 ## Updating the lock
 
