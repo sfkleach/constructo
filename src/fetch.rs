@@ -148,18 +148,62 @@ pub fn url_key(url: &str) -> String {
         .collect()
 }
 
+/// The start of the name of a scratch folder.
+const SCRATCH_PREFIX: &str = "tmp-";
+
+/// How long a scratch folder may go unchanged before it is taken to belong to a run that was killed. No fetch takes
+/// anything like as long.
+const STALE_AFTER: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
 /// A folder that is made for a while and removed, with what is in it, when it is dropped.
 pub(crate) struct Scratch(pub(crate) PathBuf);
 
 impl Scratch {
-    /// Makes a new folder with a name of its own in the folder given.
+    /// Makes a new folder with a name of its own in the folder given. The name has the process, the time and a count
+    /// in it. A folder that is there already is left alone, since it may belong to a run that is still going (in a
+    /// container that shares the cache, a process number is not unique), and another name is tried.
     pub(crate) fn new(parent: &Path) -> Result<Scratch, ProjectError> {
         static COUNT: AtomicU32 = AtomicU32::new(0);
         std::fs::create_dir_all(parent).map_err(|e| cannot(parent, "make", e))?;
-        let name = format!("tmp-{}-{}", std::process::id(), COUNT.fetch_add(1, Ordering::Relaxed));
-        let path = parent.join(name);
-        std::fs::create_dir(&path).map_err(|e| cannot(&path, "make", e))?;
-        Ok(Scratch(path))
+        loop {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |since| since.as_nanos());
+            let name = format!(
+                "{}{}-{}-{}",
+                SCRATCH_PREFIX,
+                std::process::id(),
+                nanos,
+                COUNT.fetch_add(1, Ordering::Relaxed)
+            );
+            let path = parent.join(name);
+            match std::fs::create_dir(&path) {
+                Ok(()) => return Ok(Scratch(path)),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(cannot(&path, "make", e)),
+            }
+        }
+    }
+
+    /// Removes the scratch folders in the folder given that were last changed more than `STALE_AFTER` ago. A run
+    /// that is killed leaves its folder behind, and nothing else would ever remove it. A folder that is younger may
+    /// belong to a run that is still going, so it is left. This is a tidy-up, so a failure to do any of it is ignored.
+    pub(crate) fn sweep(parent: &Path) {
+        let Ok(entries) = std::fs::read_dir(parent) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let old = entry
+                .metadata()
+                .and_then(|meta| meta.modified())
+                .ok()
+                .and_then(|modified| modified.elapsed().ok())
+                .is_some_and(|age| age > STALE_AFTER);
+            // The prefix is checked first, so that nothing is removed that this module did not make.
+            if old && entry.file_name().to_string_lossy().starts_with(SCRATCH_PREFIX) && entry.path().is_dir() {
+                let _ = std::fs::remove_dir_all(entry.path());
+            }
+        }
     }
 }
 
@@ -251,6 +295,7 @@ impl Cache {
             )));
         }
         let git_folder = self.root.join("git");
+        Scratch::sweep(&git_folder);
         let work = Scratch::new(&git_folder)?;
         let clone = work.0.join("clone");
         git(
@@ -490,6 +535,29 @@ mod tests {
     fn cache() -> (Cache, Scratch) {
         let scratch = Scratch::new(&std::env::temp_dir()).unwrap();
         (Cache::new(scratch.0.join("cache")), scratch)
+    }
+
+    #[test]
+    fn a_scratch_folder_that_is_there_already_is_skipped_and_an_old_one_is_swept() {
+        let (_cache, scratch) = cache();
+        let parent = scratch.0.join("git");
+        let first = Scratch::new(&parent).unwrap();
+        let second = Scratch::new(&parent).unwrap();
+        assert_ne!(first.0, second.0);
+        // Only a folder with the prefix is ever swept, and only when it is old, so none of these goes.
+        std::fs::create_dir(parent.join("other")).unwrap();
+        Scratch::sweep(&parent);
+        assert!(first.0.is_dir() && second.0.is_dir() && parent.join("other").is_dir());
+        let old = std::time::SystemTime::now() - STALE_AFTER - std::time::Duration::from_secs(60);
+        let stale = parent.join("tmp-1-1-1");
+        std::fs::create_dir(&stale).unwrap();
+        std::fs::File::open(&stale).unwrap().set_modified(old).unwrap();
+        let unrelated = parent.join("unrelated");
+        std::fs::create_dir(&unrelated).unwrap();
+        std::fs::File::open(&unrelated).unwrap().set_modified(old).unwrap();
+        Scratch::sweep(&parent);
+        assert!(!stale.exists(), "the old scratch folder should go");
+        assert!(unrelated.is_dir() && first.0.is_dir());
     }
 
     #[test]
