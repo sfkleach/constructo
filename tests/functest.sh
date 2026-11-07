@@ -1010,7 +1010,8 @@ else
     fail "print-config: an argument overrides the file"
 fi
 if printed | grep -qxF "# Load the standard prelude, with Bool and Option." \
-    && [[ "$(printed | grep -c '^# ')" -eq 10 ]]; then
+    && [[ "$(printed | grep '^# ' | grep -vc '^# cache = ')" -eq 11 ]] \
+    && printed | grep -qxF '# cache = "FOLDER"'; then
     pass "print-config: every key has a comment"
 else
     fail "print-config: every key has a comment"
@@ -1282,6 +1283,30 @@ if command -v git >/dev/null 2>&1; then
         > "$rp/app/constructo.toml"
     printf 'enum Pick = A(example.lib::Shape);\n' > "$rp/app/pick.types"
     expect_exit "repo: check passes from the cache" 0 check --project="$rp/app"
+    # The cache can be given explicitly, by --cache or by the configuration file, and that wins over the environment.
+    CONSTRUCTO_CACHE="$rp/empty" expect_exit "repo: --cache wins over CONSTRUCTO_CACHE" 0 \
+        check --cache="$rp/cache" --project="$rp/app"
+    mkdir "$rp/conf"
+    printf '[global]\ncache = "../cache"\n' > "$rp/conf/settings.toml"
+    out="$(cd / && CONSTRUCTO_CACHE="$rp/empty" "$CONSTRUCTO" --config="$rp/conf/settings.toml" check \
+        --project="$rp/app" 2>&1)" && status=0 || status=$?
+    if [[ $status -eq 0 ]]; then
+        pass "repo: a relative cache in a configuration file is relative to the file"
+    else
+        fail "repo: a relative cache in a configuration file is relative to the file (exit $status, got '$out')"
+    fi
+    out="$(cd "$rp" && "$CONSTRUCTO" check --print-config --cache=cache 2>&1)" || true
+    if grep -qxF "cache = \"$rp/cache\"" <<< "$out"; then
+        pass "repo: --print-config writes the cache that was given as an absolute path"
+    else
+        fail "repo: --print-config writes the cache that was given as an absolute path (got '$out')"
+    fi
+    out="$(CONSTRUCTO_CACHE=cache "$CONSTRUCTO" check --project="$rp/app" 2>&1)" && status=0 || status=$?
+    if [[ $status -eq 2 && "$out" == *"CONSTRUCTO_CACHE is cache, which is not an absolute path"* ]]; then
+        pass "repo: a relative CONSTRUCTO_CACHE is refused"
+    else
+        fail "repo: a relative CONSTRUCTO_CACHE is refused (exit $status, got '$out')"
+    fi
     out="$("$CONSTRUCTO" check --verbose --project="$rp/app" 2>&1)" || true
     if [[ "$out" == *"(project example.lib, verified)"* ]]; then
         pass "repo: verbose says the project from a repository is verified"
@@ -1425,7 +1450,8 @@ if command -v git >/dev/null 2>&1; then
     rm -rf "$rp/linkrepo/.git" "$rp/cache/git"
     rm -f "$rp/linkrepo/constructo.toml" "$rp/linkrepo/real.types" "$rp/linkrepo/alias.types" \
         "$rp/linkapp/constructo.toml" "$rp/linkapp/constructo.lock" "$rp/home/.gitconfig"
-    rmdir "$rp/linkrepo" "$rp/linkapp" "$rp/home"
+    rm -f "$rp/conf/settings.toml"
+    rmdir "$rp/linkrepo" "$rp/linkapp" "$rp/home" "$rp/conf"
     rmdir "$rp/repo" "$rp/app" "$rp/cache" "$rp"
 else
     echo "  SKIP: git is not installed"

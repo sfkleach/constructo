@@ -8,14 +8,23 @@ killed leaves behind is cleared away. The projects themselves are described in
 
 ## Where it is
 
-The cache is a folder. It is the first of these that is set:
+The cache is a folder. It is the first of these that is given:
 
-1. `$CONSTRUCTO_CACHE`.
-2. `constructo` in `$XDG_CACHE_HOME`, or in `~/.cache` if that is not set (on Windows, in `%LOCALAPPDATA%`).
+1. `--cache=FOLDER` on the command line, before or after the subcommand.
+2. `cache` in the `[global]` table of the [configuration file](config-file.md). A relative folder is relative to the
+   folder of the configuration file, so the file means the same wherever it is used from.
+3. `$CONSTRUCTO_CACHE`, which must be an absolute path. A relative one is an error with exit code 2, since it would
+   depend on the folder that the run is in.
+4. `constructo` in `$XDG_CACHE_HOME`, or in `$HOME/.cache` if that is not set (on Windows, in `%LOCALAPPDATA%`). A
+   relative one of these is ignored, as the XDG specification says.
 
-A variable that is empty counts as not set. If none can be found, a command that needs the cache stops with exit code 2
-and says to set `CONSTRUCTO_CACHE`. Only `constructo project update` writes to the cache. `constructo check` only reads
-it, and never changes anything in it.
+The first two say in the invocation where the cache is, and are the ones to prefer, in CI especially. The variables are
+there so that a cache can be shared without being named each time. A variable that is empty counts as not set, and an
+empty folder in the first two is an error. A relative `--cache` is made absolute against the current folder, so that
+`--print-config` writes a folder that means the same from anywhere. If no folder can be found, a command that needs the
+cache stops with exit code 2 and says how to give one. Nothing about the cache is looked at unless a project from a
+repository is reached. Only `constructo project update` writes to the cache. `constructo check` only reads it, and
+never changes anything in it.
 
 ## What is in it
 

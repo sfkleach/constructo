@@ -3,7 +3,7 @@ use constructo::diagnostics::{Diagnostic, Pos};
 use constructo::fetch::Cache;
 use constructo::lock::Lock;
 use constructo::project::{ProjectError, Remotes};
-use constructo::verify::{read_lock, update_lock, verify_lock_with};
+use constructo::verify::{read_lock, update_lock_with, verify_lock_with};
 use constructo::{
     check_in_projects, source_kind, syntax_error, CheckOptions, Config, Experimental, InputFile, Layout, Outcome,
     Project, ProjectInfo, ProjectSet, Source, SourceKind,
@@ -11,7 +11,7 @@ use constructo::{
 use std::collections::{HashSet, VecDeque};
 use std::ffi::OsString;
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 /// The exit code when the inputs contain errors.
@@ -26,6 +26,11 @@ struct Cli {
     /// `constructo check --print-config` writes a file to start from
     #[arg(long, global = true, value_name = "PATH")]
     config: Option<PathBuf>,
+
+    /// The folder of the cache of projects from git repositories. Without it, `cache` in the [global] table of the
+    /// --config file, then CONSTRUCTO_CACHE, then `constructo` in the cache folder of the user
+    #[arg(long, global = true, value_name = "FOLDER")]
+    cache: Option<PathBuf>,
 
     #[command(subcommand)]
     command: Command,
@@ -235,7 +240,8 @@ fn config_occurrences(args: impl IntoIterator<Item = OsString>) -> usize {
         .count()
 }
 
-/// Reads the configuration file named by `--config`, if there is one.
+/// Reads the configuration file named by `--config`, if there is one. A `cache` in it that is relative is made relative
+/// to the folder of the file, so that the file means the same wherever it is used from.
 fn load_config(path: Option<&PathBuf>) -> Result<Config, ExitCode> {
     let Some(path) = path else {
         return Ok(Config::default());
@@ -244,9 +250,41 @@ fn load_config(path: Option<&PathBuf>) -> Result<Config, ExitCode> {
         eprintln!("ERROR: Cannot read {}: {}", path.display(), e);
         ExitCode::from(EXIT_USAGE)
     })?;
-    Config::parse(&text, &path.display().to_string()).map_err(|diagnostic| {
+    let mut config = Config::parse(&text, &path.display().to_string()).map_err(|diagnostic| {
         eprintln!("{}", diagnostic);
         ExitCode::from(EXIT_USAGE)
+    })?;
+    if let Some(cache) = &config.global.cache {
+        if cache.is_relative() {
+            let folder = path.parent().unwrap_or(Path::new(""));
+            config.global.cache = Some(folder.join(cache));
+        }
+    }
+    Ok(config)
+}
+
+/// The folder of the cache that was given, by `--cache` or by the configuration file, which wins in that order, as an
+/// absolute path, so that what `--print-config` writes means the same from any folder. `None` leaves the cache to
+/// the environment.
+fn given_cache(option: Option<&Path>, config: &Config) -> Result<Option<PathBuf>, ExitCode> {
+    let Some(folder) = option.or(config.global.cache.as_deref()) else {
+        return Ok(None);
+    };
+    if folder.as_os_str().is_empty() {
+        eprintln!("ERROR: The folder of the cache cannot be empty");
+        return Err(ExitCode::from(EXIT_USAGE));
+    }
+    std::path::absolute(folder).map(Some).map_err(|e| {
+        eprintln!("ERROR: Cannot use {} as the cache: {}", folder.display(), e);
+        ExitCode::from(EXIT_USAGE)
+    })
+}
+
+/// The cache that a run uses, as the loader takes it: an error is kept until a project from a repository needs it.
+fn cache_for(given: Option<&Path>) -> Result<Cache, String> {
+    Cache::resolve(given).map_err(|e| match e {
+        ProjectError::Cannot(message) => message,
+        other => other.to_string(),
     })
 }
 
@@ -265,10 +303,14 @@ fn main() -> ExitCode {
         Ok(config) => config,
         Err(code) => return code,
     };
+    let cache = match given_cache(cli.cache.as_deref(), &config) {
+        Ok(cache) => cache,
+        Err(code) => return code,
+    };
     match cli.command {
         Command::Project(ProjectCommand::Update { folder }) => {
             let folder = folder.unwrap_or_else(|| PathBuf::from("."));
-            match update_lock(&folder) {
+            match update_lock_with(&folder, Remotes::Fetch(cache_for(cache.as_deref()))) {
                 Ok(lines) => {
                     for line in lines {
                         println!("{}", line);
@@ -323,7 +365,10 @@ fn main() -> ExitCode {
             let verbose = setting(verbose, no_verbose, config.verbose());
             let dev = setting(dev, no_dev, config.dev());
             if print_config {
-                print!("{}", Config::effective(&options, load_prelude, verbose, dev).to_toml());
+                print!(
+                    "{}",
+                    Config::effective(&options, load_prelude, verbose, dev, cache.as_deref()).to_toml()
+                );
                 return ExitCode::SUCCESS;
             }
             // The project is read after the settings, so that a problem with either is reported by itself. There is
@@ -343,20 +388,14 @@ fn main() -> ExitCode {
                 return ExitCode::from(EXIT_USAGE);
             }
             let set = match project.as_deref() {
-                Some(folder) => {
-                    let cache = Cache::from_environment().map_err(|e| match e {
-                        ProjectError::Cannot(message) => message,
-                        other => other.to_string(),
-                    });
-                    ProjectSet::load_with(
-                        folder,
-                        load_prelude,
-                        Remotes::Locked {
-                            cache,
-                            lock: lock.clone(),
-                        },
-                    )
-                }
+                Some(folder) => ProjectSet::load_with(
+                    folder,
+                    load_prelude,
+                    Remotes::Locked {
+                        cache: cache_for(cache.as_deref()),
+                        lock: lock.clone(),
+                    },
+                ),
                 None => Ok(ProjectSet::unnamed(load_prelude)),
             };
             let set = match set {

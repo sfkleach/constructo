@@ -304,8 +304,18 @@ impl Cache {
         Cache { root }
     }
 
+    /// The cache in the folder that is given, which comes from `--cache` or the configuration file, or else the one
+    /// that the environment names.
+    pub fn resolve(given: Option<&Path>) -> Result<Cache, ProjectError> {
+        match given {
+            Some(folder) => Ok(Cache::new(folder.to_path_buf())),
+            None => Cache::from_environment(),
+        }
+    }
+
     /// The cache that the environment names: `$CONSTRUCTO_CACHE`, or else `constructo` in the cache folder of the user,
-    /// which is `$XDG_CACHE_HOME` or `~/.cache`, or `%LOCALAPPDATA%` on Windows.
+    /// which is `$XDG_CACHE_HOME` or `~/.cache`, or `%LOCALAPPDATA%` on Windows. A variable that is empty counts as
+    /// not set.
     pub fn from_environment() -> Result<Cache, ProjectError> {
         Cache::from_variables(|name| {
             std::env::var_os(name)
@@ -315,19 +325,34 @@ impl Cache {
     }
 
     /// As `from_environment`, with the variables given by a function so that it can be tried without changing them.
+    ///
+    /// A folder from the environment has to be absolute, since a relative one would depend on the folder that the run
+    /// happens to be in, which is a second thing that nobody can see. A relative `CONSTRUCTO_CACHE` was set for
+    /// `constructo`, so it is an error. The others are the user's general settings, and the XDG specification says
+    /// that a relative one is to be ignored, so they are.
     fn from_variables(get: impl Fn(&str) -> Option<PathBuf>) -> Result<Cache, ProjectError> {
         if let Some(root) = get("CONSTRUCTO_CACHE") {
+            if !root.is_absolute() {
+                return Err(ProjectError::Cannot(format!(
+                    "CONSTRUCTO_CACHE is {}, which is not an absolute path; set it to one, or give the folder with \
+                     --cache",
+                    root.display()
+                )));
+            }
             return Ok(Cache::new(root));
         }
+        let absolute = |name: &str| get(name).filter(|folder| folder.is_absolute());
         let base = if cfg!(windows) {
-            get("LOCALAPPDATA")
+            absolute("LOCALAPPDATA")
         } else {
-            get("XDG_CACHE_HOME").or_else(|| get("HOME").map(|home| home.join(".cache")))
+            absolute("XDG_CACHE_HOME").or_else(|| absolute("HOME").map(|home| home.join(".cache")))
         };
         match base {
             Some(base) => Ok(Cache::new(base.join("constructo"))),
             None => Err(ProjectError::Cannot(
-                "Cannot find a folder for the cache; set CONSTRUCTO_CACHE to one".to_string(),
+                "Cannot find a folder for the cache; give one with --cache, or as `cache` in the [global] table of the \
+                 configuration file, or set CONSTRUCTO_CACHE"
+                    .to_string(),
             )),
         }
     }
@@ -728,11 +753,22 @@ mod tests {
             let pairs: Vec<(String, PathBuf)> = pairs.iter().map(|(k, v)| (k.to_string(), PathBuf::from(v))).collect();
             Cache::from_variables(move |name| pairs.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone()))
         };
+        // An absolute folder on this platform, and the same folder with the parts after it.
+        let root = if cfg!(windows) { "C:\\c" } else { "/c" };
         assert_eq!(
-            from(&[("CONSTRUCTO_CACHE", "/c"), ("XDG_CACHE_HOME", "/x")])
+            from(&[("CONSTRUCTO_CACHE", root), ("XDG_CACHE_HOME", "/x")])
                 .unwrap()
                 .root,
-            Path::new("/c")
+            Path::new(root)
+        );
+        // A relative CONSTRUCTO_CACHE is refused, and says which variable it is.
+        let error = from(&[("CONSTRUCTO_CACHE", "cache"), ("HOME", root)])
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("CONSTRUCTO_CACHE is cache, which is not an absolute path"),
+            "{}",
+            error
         );
         if !cfg!(windows) {
             assert_eq!(
@@ -740,8 +776,23 @@ mod tests {
                 Path::new("/x/constructo")
             );
             assert_eq!(from(&[("HOME", "/h")]).unwrap().root, Path::new("/h/.cache/constructo"));
+            // A relative XDG_CACHE_HOME is ignored, as the XDG specification says, and so is a relative HOME.
+            assert_eq!(
+                from(&[("XDG_CACHE_HOME", "x"), ("HOME", "/h")]).unwrap().root,
+                Path::new("/h/.cache/constructo")
+            );
+            let error = from(&[("HOME", "h")]).unwrap_err().to_string();
+            assert!(error.contains("give one with --cache"), "{}", error);
             assert!(from(&[]).is_err());
         }
+    }
+
+    #[test]
+    fn a_cache_that_is_given_comes_before_the_environment() {
+        assert_eq!(
+            Cache::resolve(Some(Path::new("given"))).unwrap().root,
+            Path::new("given")
+        );
     }
 
     #[test]
