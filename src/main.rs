@@ -571,26 +571,29 @@ fn check(
     let mut hidden = HashSet::new();
     let mut ranges = Vec::new();
     let mut start = 0;
-    for project in &set.projects {
+    for (number, project) in set.projects.iter().enumerate() {
         if project.builtin {
             hidden.extend(start..start + project.files.len());
         } else if !project.name.is_empty() {
-            ranges.push((start, project));
+            ranges.push((start, number, project));
         }
         start += project.files.len();
     }
     let counted = ranges.len();
     if verbose {
-        // Each project is reported just before its files, and it has failed if any one of them has.
-        let mut pending: VecDeque<(usize, &Project)> = ranges.into();
-        let report_projects = |until: usize, pending: &mut VecDeque<(usize, &Project)>| {
-            while let Some(&(start, project)) = pending.front() {
+        // Each project is reported just before its files, and it has failed if any one of them has, or if its
+        // project-file has an error.
+        let mut pending: VecDeque<(usize, usize, &Project)> = ranges.into();
+        let report_projects = |until: usize, pending: &mut VecDeque<(usize, usize, &Project)>| {
+            while let Some(&(start, number, project)) = pending.front() {
                 if start > until {
                     break;
                 }
                 pending.pop_front();
                 let end = (start + project.files.len()).min(report.outcomes.len());
-                let failed = report.outcomes[start.min(end)..end].contains(&Outcome::Failed);
+                // An error in its project-file fails a project that has no failed file, or no files at all.
+                let failed = report.outcomes[start.min(end)..end].contains(&Outcome::Failed)
+                    || report.failed_projects.contains(&number);
                 let label = if failed { "FAILED" } else { "OK" };
                 // The root project is not in the lock. Any other project that is loaded was checked against it, unless
                 // that was switched off.

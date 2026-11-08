@@ -79,6 +79,10 @@ pub struct Report {
     pub type_checked: bool,
     /// The type of each const, when the values were type-checked, with the index of the source it was declared in.
     pub consts: Vec<ConstInfo>,
+    /// The projects, by index in the layout, that have an error in their project-file which is found in the check, such
+    /// as a name that an import hides and the imported project does not declare. These errors are not in a source, so
+    /// a project can fail with every one of its files passing, or with no files.
+    pub failed_projects: Vec<usize>,
 }
 
 /// A const and its type, for the report on what was checked.
@@ -242,6 +246,7 @@ fn check_with_layout(sources: &[Source], layout: Option<&Layout>, options: &Chec
                     kinds,
                     type_checked: false,
                     consts: Vec::new(),
+                    failed_projects: Vec::new(),
                 };
             }
         }
@@ -314,13 +319,20 @@ fn check_with_layout(sources: &[Source], layout: Option<&Layout>, options: &Chec
         diagnostic.note = diagnostic.note.map(|note| show(index, &note));
         diagnostic
     });
-    let diagnostics = resolution.import_errors.iter().cloned().chain(shown).collect();
+    let failed_projects: Vec<usize> = resolution.import_errors.iter().map(|(owner, _)| *owner).collect();
+    let diagnostics = resolution
+        .import_errors
+        .iter()
+        .map(|(_, diagnostic)| diagnostic.clone())
+        .chain(shown)
+        .collect();
     Report {
         diagnostics,
         outcomes,
         kinds,
         type_checked,
         consts,
+        failed_projects,
     }
 }
 

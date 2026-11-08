@@ -137,9 +137,10 @@ enum Ns {
 pub struct Resolution {
     /// The errors in types files, each with the index of its source.
     pub diagnostics: Vec<(usize, Diagnostic)>,
-    /// The errors in the imports, which are in the project-files and not in the sources. They are reported before the
+    /// The errors in the imports, each with the index of the project whose project-file has the import. They are in
+    /// the project-files and not in the sources. They are reported before the
     /// others, and the later checks do not run if there are any.
-    pub import_errors: Vec<Diagnostic>,
+    pub import_errors: Vec<(usize, Diagnostic)>,
     /// The first error in each top-level value that has one, with the index of its source and of the value. These
     /// are kept apart because they are reported in turn with the type errors of the values, not before them.
     pub value_errors: Vec<(usize, usize, Diagnostic)>,
@@ -270,9 +271,9 @@ impl<'a> Resolver<'a> {
 
     /// The mistakes in the hide and rename of the imports: a name that the imported project does not declare, which is
     /// most likely a typo, and a new name that the imported project declares itself.
-    fn import_errors(&self) -> Vec<Diagnostic> {
+    fn import_errors(&self) -> Vec<(usize, Diagnostic)> {
         let mut errors = Vec::new();
-        for project in &self.layout.projects {
+        for (owner, project) in self.layout.projects.iter().enumerate() {
             for import in &project.imports {
                 let target = &self.layout.projects[import.target].name;
                 let declared = |name: &str| {
@@ -281,19 +282,19 @@ impl<'a> Resolver<'a> {
                 for (name, pos) in &import.hide {
                     if !declared(name) {
                         let message = format!("Cannot hide {}: the project {} does not declare it", name, target);
-                        errors.push(Diagnostic::new(&import.file, *pos, message));
+                        errors.push((owner, Diagnostic::new(&import.file, *pos, message)));
                     }
                 }
                 for (new, old, pos) in &import.rename {
                     if !declared(old) {
                         let message = format!("Cannot rename {}: the project {} does not declare it", old, target);
-                        errors.push(Diagnostic::new(&import.file, *pos, message));
+                        errors.push((owner, Diagnostic::new(&import.file, *pos, message)));
                     } else if declared(new) && import.visible_name(new).as_deref() == Some(new.as_str()) {
                         let message = format!(
                             "Cannot rename {} to {}: the project {} declares {} too",
                             old, new, target, new
                         );
-                        errors.push(Diagnostic::new(&import.file, *pos, message));
+                        errors.push((owner, Diagnostic::new(&import.file, *pos, message)));
                     }
                 }
             }
@@ -913,6 +914,8 @@ mod tests {
             vec!["ERROR: Cannot hide Nope: the project example.a does not declare it (constructo.toml, line 3, col 9)"]
         );
         assert!(!report.type_checked);
+        // The project whose project-file has the import has failed, though none of its files has.
+        assert_eq!(report.failed_projects, vec![3]);
     }
 
     #[test]
