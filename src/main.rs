@@ -2,7 +2,7 @@ use clap::{ArgAction, ArgMatches, CommandFactory, FromArgMatches, Parser, Subcom
 use constructo::diagnostics::{Diagnostic, Pos};
 use constructo::fetch::Cache;
 use constructo::lock::Lock;
-use constructo::project::{ProjectError, Remotes};
+use constructo::project::{init_project, Init, ProjectError, Remotes, PROJECT_FILE};
 use constructo::verify::{read_lock, update_lock_with, verify_lock_with};
 use constructo::{
     check_in_projects, source_kind, syntax_error, CheckOptions, Config, Experimental, ImportInfo, InputFile, Layout,
@@ -94,6 +94,11 @@ fn setting(on: bool, off: bool, default: bool) -> bool {
 /// The subcommands of `constructo project`.
 #[derive(Subcommand, Debug)]
 enum ProjectCommand {
+    /// Write a constructo.toml with the defaults, unless the folder has one already
+    Init {
+        /// The folder of the project [default: the current folder]
+        folder: Option<PathBuf>,
+    },
     /// Write constructo.lock, which records the checksums of the projects that the project imports, and say what
     /// changed
     Update {
@@ -308,6 +313,30 @@ fn main() -> ExitCode {
         Err(code) => return code,
     };
     match cli.command {
+        Command::Project(ProjectCommand::Init { folder }) => {
+            let folder = folder.unwrap_or_else(|| PathBuf::from("."));
+            match init_project(&folder) {
+                Ok(Init::Written(name)) => {
+                    println!(
+                        "Wrote {} for the project {}; change the name to the one that the project should have",
+                        folder.join(PROJECT_FILE).display(),
+                        name
+                    );
+                    ExitCode::SUCCESS
+                }
+                Ok(Init::Exists) => {
+                    println!(
+                        "{} exists already, so it was not changed",
+                        folder.join(PROJECT_FILE).display()
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("{}", e);
+                    ExitCode::from(EXIT_USAGE)
+                }
+            }
+        }
         Command::Project(ProjectCommand::Update { folder }) => {
             let folder = folder.unwrap_or_else(|| PathBuf::from("."));
             match update_lock_with(&folder, Remotes::Fetch(cache_for(cache.as_deref()))) {

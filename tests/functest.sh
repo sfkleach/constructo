@@ -1511,6 +1511,32 @@ else
 fi
 echo ""
 
+# `project init` writes a project-file with the defaults, and never changes one that is there.
+init_dir="$(mktemp -d)"
+mkdir "$init_dir/My Shapes"
+out="$("$CONSTRUCTO" project init "$init_dir/My Shapes" 2>&1)" || true
+if [[ "$out" == "Wrote "*"constructo.toml for the project example.my_shapes;"* ]]; then
+    pass "init: a new project-file says what it wrote"
+else
+    fail "init: a new project-file says what it wrote (got '$out')"
+fi
+expect_exit "init: check accepts the project-file that was written" 0 check --project="$init_dir/My Shapes"
+printf '# mine\n' >> "$init_dir/My Shapes/constructo.toml"
+out="$("$CONSTRUCTO" project init "$init_dir/My Shapes" 2>&1)" || true
+if [[ "$out" == *"exists already, so it was not changed" && "$(tail -n 1 "$init_dir/My Shapes/constructo.toml")" == "# mine" ]]; then
+    pass "init: a project-file that exists is left as it is"
+else
+    fail "init: a project-file that exists is left as it is (got '$out')"
+fi
+expect_exit "init: a folder that is not there is exit 2" 2 project init "$init_dir/missing"
+expect_exit "init: project with no subcommand is exit 2" 2 project
+mkdir "$init_dir/here"
+out="$(cd "$init_dir/here" && "$CONSTRUCTO" project init 2>&1)" || true
+if [[ -f "$init_dir/here/constructo.toml" ]]; then pass "init: the folder defaults to the current folder"; else fail "init: default folder (got '$out')"; fi
+rm -f "$init_dir/My Shapes/constructo.toml" "$init_dir/here/constructo.toml"
+rmdir "$init_dir/My Shapes" "$init_dir/here" "$init_dir"
+echo ""
+
 TOTAL=$(( PASS + FAIL ))
 echo "Results: $PASS/$TOTAL passed"
 if [[ $FAIL -gt 0 ]]; then

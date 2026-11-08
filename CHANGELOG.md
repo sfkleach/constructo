@@ -133,6 +133,8 @@ Following the style in https://keepachangelog.com/en/1.0.0/
     reaches its own declarations. A name that the project does not declare is an error at the entry.
   - The prelude is the built-in project `constructo.prelude` (decision 26), imported into `local` by every project
     unless it imports it itself. `builtin = "constructo:/prelude"` imports it by hand.
+  - `constructo project init [FOLDER]` writes a `constructo.toml` with the defaults and a commented example import,
+    unless the folder has one already, in which case it is left as it is.
   - `constructo project update [FOLDER]` writes `constructo.lock` (decision 27, `docs/specs/lock-file-format.md`),
     which holds a SHA-256 digest of each file of each imported project, and says what changed. `constructo check`
     verifies the lock, and a changed, added or removed file, or a project with no entry, is an error with exit code 1.

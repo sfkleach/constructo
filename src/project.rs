@@ -984,6 +984,79 @@ fn absolute(folder: &Path) -> std::io::Result<PathBuf> {
     std::fs::canonicalize(folder)
 }
 
+/// What `init_project` did.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Init {
+    /// The project-file was written, with this project name.
+    Written(String),
+    /// There was a project-file already, and it was left as it is.
+    Exists,
+}
+
+/// A name for a new project in a folder: `example.` and the name of the folder, with anything that a name cannot have
+/// turned into `_`, in lower case, and a leading `p` where the folder name does not start with a letter. The user is
+/// expected to change it, since only they know the name that the project should have.
+fn default_project_name(folder: &Path) -> String {
+    let base = std::fs::canonicalize(folder)
+        .ok()
+        .and_then(|path| path.file_name().map(|name| name.to_string_lossy().into_owned()))
+        .unwrap_or_default();
+    let mut part: String = base
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if !part.starts_with(|c: char| c.is_ascii_alphabetic()) {
+        part.insert(0, 'p');
+    }
+    format!("example.{}", part)
+}
+
+/// The text of a project-file that has the given name and the defaults of everything else.
+fn default_project_file(name: &str) -> String {
+    format!(
+        "[project]\n\
+         # The full name of the project: two or more parts, separated by dots.\n\
+         name = \"{}\"\n\
+         # The files that belong to the project, as glob patterns in the folder of the project.\n\
+         include = [\"{}\"]\n\
+         exclude = []\n\
+         \n\
+         # Another project is imported with a table like this, with exactly one of path, builtin and repo.\n\
+         # [[import]]\n\
+         # project-name = \"com.example.base\"\n\
+         # group = \"base\"\n\
+         # path = \"../base\"\n\
+         # hide = [\"Debug\"]\n\
+         #\n\
+         # [import.rename]\n\
+         # The name used here = the name in the imported project.\n\
+         # Point = \"BasePoint\"\n",
+        name, DEFAULT_INCLUDE
+    )
+}
+
+/// Writes a `constructo.toml` with the defaults in the folder, unless there is one already. A file that is there is
+/// never changed, and the folder is not created.
+pub fn init_project(folder: &Path) -> Result<Init, ProjectError> {
+    use std::io::Write;
+    let path = folder.join(PROJECT_FILE);
+    let name = default_project_name(folder);
+    let mut file = match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Ok(Init::Exists),
+        Err(e) => return Err(ProjectError::Cannot(format!("Cannot write {}: {}", path.display(), e))),
+    };
+    file.write_all(default_project_file(&name).as_bytes())
+        .map_err(|e| ProjectError::Cannot(format!("Cannot write {}: {}", path.display(), e)))?;
+    Ok(Init::Written(name))
+}
+
 /// True for a name that starts with a capital letter, as a type or a constructor does.
 fn is_upper(name: &str) -> bool {
     name.starts_with(|c: char| c.is_ascii_uppercase())
@@ -1141,6 +1214,40 @@ mod tests {
         assert_eq!(imports[1].folder, Path::new("/abs/x"));
         assert_eq!(imports[0].target, None);
         assert_eq!((imports[0].name_pos.line, imports[0].source_pos.line), (5, 7));
+    }
+
+    #[test]
+    fn init_writes_a_project_file_that_loads_and_leaves_an_existing_one() {
+        let base = std::env::temp_dir().join(format!("constructo-init-{}", std::process::id()));
+        let folder = base.join("My Shapes-2");
+        std::fs::create_dir_all(&folder).unwrap();
+        let init = init_project(&folder).unwrap();
+        assert_eq!(init, Init::Written("example.my_shapes_2".to_string()));
+        // What was written is a valid project-file, with the name.
+        assert_eq!(Project::load(&folder).unwrap().name, "example.my_shapes_2");
+        // A second run changes nothing.
+        let before = std::fs::read_to_string(folder.join(PROJECT_FILE)).unwrap();
+        std::fs::write(folder.join(PROJECT_FILE), format!("{}# mine\n", before)).unwrap();
+        assert_eq!(init_project(&folder).unwrap(), Init::Exists);
+        assert!(std::fs::read_to_string(folder.join(PROJECT_FILE))
+            .unwrap()
+            .ends_with("# mine\n"));
+        // A folder that is not there is an error and is not made.
+        assert!(init_project(&base.join("missing")).is_err());
+        assert!(!base.join("missing").exists());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn the_default_name_is_valid_whatever_the_folder_is_called() {
+        let base = std::env::temp_dir().join(format!("constructo-name-{}", std::process::id()));
+        for folder in ["123", "_x", "Ünï code"] {
+            let path = base.join(folder);
+            std::fs::create_dir_all(&path).unwrap();
+            let name = default_project_name(&path);
+            assert!(check_name(&name).is_ok(), "{}: {}", folder, name);
+        }
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

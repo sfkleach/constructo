@@ -37,7 +37,8 @@ standard prelude declaring `Bool` and `Option<T>`.
 
 Types can be organised into *projects*: a folder with a `constructo.toml` that
 names the project and lists the projects it imports, whether from a folder, from
-a git repository at a pinned revision, or built in. `constructo project update`
+a git repository at a pinned revision, or built in. `constructo project init`
+writes a starting `constructo.toml`, `constructo project update`
 records a checksum of every imported project in `constructo.lock`, and
 `constructo check --project=FOLDER` verifies it. See the
 [formats](docs/specs/project-file-format.md) for the details.

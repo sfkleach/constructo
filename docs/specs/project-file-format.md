@@ -26,6 +26,20 @@ group = "local"
 builtin = "constructo:/prelude"
 ```
 
+## Making a project-file
+
+`constructo project init [FOLDER]` writes a `constructo.toml` in the folder, which defaults to the current folder.
+
+- The file has the `[project]` table with a `name`, the default `include` and an empty `exclude`, and a commented
+  example of an `[[import]]`. Comments explain each part. It is a valid project-file as it stands.
+- The name is `example.` and the name of the folder, in lower case, with each character that a name cannot have turned
+  into `_`, and with a `p` in front if the folder name does not start with a letter: `My Shapes` gives
+  `example.my_shapes`. The command says the name that it used, and it is meant to be changed.
+- If the folder already has a `constructo.toml`, it is left as it is, a message says so and the exit code is 0. The
+  file is created and never overwritten, even if another process makes it in the meantime.
+- The folder is not created: one that is not there is an error with exit code 2. The command writes nothing else, and
+  does not write a lock file.
+
 ## Format
 
 The file is in [TOML](https://toml.io), in UTF-8. A byte order mark at the start is removed. It is strict: an unknown
