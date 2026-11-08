@@ -38,6 +38,7 @@ The keys are spelt as the long form of the option, without the leading `--` and 
 A file serves every subcommand. A subcommand reads the shared tables and its own, and ignores the table of another
 subcommand. `constructo check` reads `[global]`, `[experimental]` and `[check]`. `constructo project update` takes only
 `--config` and `--cache`, so the one setting that it uses is `cache` in `[global]`, and it ignores the rest.
+`constructo project init` uses no setting, though the file named by `--config` is still read and has to be valid.
 
 ### `[global]`
 
