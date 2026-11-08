@@ -60,7 +60,8 @@ The run is in stages. A stage that finds an error stops the later ones, as set o
    - There is no recovery from a syntax error, so a run shows one at a time.
 2. **The order of the files.** A types file after a values file is reported, as above.
 3. **Names.** The names in the types files are resolved to declarations. Those that cannot be are all reported, and
-   then the stages below do not run. See [resolving identifiers](resolving-identifiers.md).
+   so are the names that an import hides or renames but the project does not declare, and then the stages below do not
+   run. See [resolving identifiers](resolving-identifiers.md).
 4. **Validity.** The types files are checked together, as one namespace. Every error is reported. See
    [validity checks](validity-checks.md).
 5. **Type checking.** If there has been no error so far, and `--no-type-check` is not given, the consts are checked

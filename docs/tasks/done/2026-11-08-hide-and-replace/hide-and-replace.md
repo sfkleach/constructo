@@ -49,5 +49,5 @@ any other variable in the group.
 
 ## Step 3: Update docs
 
-- [ ] /review-specs
-- [ ] Update the CHANGELOG.md
+- [x] /review-specs
+- [x] Update the CHANGELOG.md

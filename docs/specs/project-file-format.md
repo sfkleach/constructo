@@ -96,7 +96,7 @@ hide = ["Debug", "LegacyPoint"]
   same. It can still be written with the full name of its project, `com.example.base::Debug`, which is always the
   declaration of that project and so is never ambiguous.
 - Hiding belongs to the import. The same project imported into two groups, with two entries, can hide differently, and
-  another project that imports it sees what it does not hide.
+  a project that imports it later has to hide for itself.
 - The project itself cannot hide its own names, and the prelude can be hidden from like any other project.
 
 ### Renaming names
