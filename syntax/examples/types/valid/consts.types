@@ -1,13 +1,13 @@
-// Consts may be interleaved with enums, in any order, and may have a mixed-case name.
+// Consts may be interleaved with enums, in any order. A const name starts with a lower-case letter.
 const origin: Position = Position { x: 0, y: 0 };
 enum Position = Position { x: Int, y: Int };
-const Name: String = "constructo";
-const Primes: [Nat] = [2, 3, 5, 7];
-const Fallback: Option<Nat> = Some(8080);
+const name: String = "constructo";
+const primes: [Nat] = [2, 3, 5, 7];
+const fallback: Option<Nat> = Some(8080);
 
 enum Mode = Fast, Slow;
-const DefaultMode: Mode = Fast;
+const default_mode: Mode = Fast;
 
-// A const may share its name with an enum type, but not with a constructor.
+// A const may be spelt like an enum type, apart from its first letter.
 enum Colour = Rgb(Nat, Nat, Nat);
-const Colour: Colour = Rgb(255, 0, 0);
+const colour: Colour = Rgb(255, 0, 0);

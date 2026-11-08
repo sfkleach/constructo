@@ -267,7 +267,7 @@ Diagram(
 Diagram(
     Comment('ConstName'),
     Sequence(
-        NonTerminal('[A-Za-z_]'),
+        NonTerminal('[a-z_]'),
         ZeroOrMore(NonTerminal('[A-Za-z0-9_]')),
         Comment('not enum or const')
     )

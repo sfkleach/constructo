@@ -44,8 +44,9 @@ Following the style in https://keepachangelog.com/en/1.0.0/
   in any order. See decisions 12 to 16.
   - A const gives a name to a value. Its value is checked against its declared type with the checker used for values
     files, and a values file can refer to a const by name, and so can the definition of another const.
-  - A const shares the constructor namespace, may have a name of either case, and cannot be named after a basic type
-    or be a duplicate of a constructor or another const. It may share its name with an enum type.
+  - A const name starts with a lower-case letter or `_` (decision 35), so a bare name in a values file is a constructor
+    if it starts with a capital letter and a const if it does not, with no lookup. A const cannot be a duplicate of
+    another const. It may be spelt like an enum type, apart from its first letter.
   - A const may refer to another only with `constructo check --allow-refs`. Without the option such a reference is an
     error, and with it a circular definition is. References to the consts of the prelude are always allowed.
   - A const may have type parameters, as in `const none<T>: Option<T> = None;`. Each use gets its own type arguments,

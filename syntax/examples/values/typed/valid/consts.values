@@ -1,4 +1,4 @@
 // Values may refer to the consts that are declared in the types file.
 Box { width: max_width, height: 2.0 };
-[Unit, Dot, Unit];
-Cons { head: Unit, tail: Nil };
+[unit, Dot, unit];
+Cons { head: unit, tail: Nil };

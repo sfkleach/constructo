@@ -143,13 +143,13 @@ expect_exit "a const may refer to another with --allow-refs" 0 check --allow-ref
 expect_exit "a const may not refer to another without --allow-refs" 1 check "$REFS/chain.types"
 expect_exit "a circular definition is an error with --allow-refs" 1 check --allow-refs "$REFS/cycle.types"
 err="$("$CONSTRUCTO" check --allow-refs "$REFS/cycle.types" 2>&1 >/dev/null || true)"
-if [[ "$err" == "ERROR: Circular const definition A -> B -> A ("*"cycle.types, line 3, col 16)" ]]; then
+if [[ "$err" == "ERROR: Circular const definition a -> b -> a ("*"cycle.types, line 3, col 16)" ]]; then
     pass "a circular definition names the consts on the circle"
 else
     fail "a circular definition names the consts on the circle (got '$err')"
 fi
 err="$("$CONSTRUCTO" check "$EXAMPLES/parses-but-invalid/const-reference-needs-flag.types" 2>&1 >/dev/null || true)"
-if [[ "$err" == "ERROR: Reference to const Base in const Total requires --allow-refs ("*"line 3, col 20)" ]]; then
+if [[ "$err" == "ERROR: Reference to const base in const total requires --allow-refs ("*"line 3, col 20)" ]]; then
     pass "the error for a const reference names the flag"
 else
     fail "the error for a const reference names the flag (got '$err')"
@@ -207,7 +207,7 @@ else
     fail "-v lists the consts with their inferred types (got '$loud')"
 fi
 loud="$("$CONSTRUCTO" check -v "$EXAMPLES/valid/consts.types" 2>&1)"
-if [[ "$loud" == *"  const Name: String"$'\n'* && "$loud" != *"Name: String (inferred)"* ]]; then
+if [[ "$loud" == *"  const name: String"$'\n'* && "$loud" != *"name: String (inferred)"* ]]; then
     pass "-v lists a declared type without marking it"
 else
     fail "-v lists a declared type without marking it (got '$loud')"

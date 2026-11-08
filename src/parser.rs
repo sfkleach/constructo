@@ -294,12 +294,15 @@ impl Parser {
         })
     }
 
-    /// `const name<Params>: Type = value;` The name may be an identifier of either case.
+    /// `const name<Params>: Type = value;` The name starts with a lower-case letter or `_`.
     fn const_decl(&mut self) -> Result<ConstDecl> {
         self.expect(Tok::Const, "'const'")?;
         let pos = self.pos();
+        // A const name starts with a lower-case letter or `_`, so that in a value it cannot be taken for a constructor,
+        // whose name starts with a capital letter (decision 35).
         let name = match self.peek() {
-            Tok::TypeName(name) | Tok::Name(name) => name.clone(),
+            Tok::Name(name) => name.clone(),
+            Tok::TypeName(_) => return self.error("const name that starts with a lower-case letter"),
             _ => return self.error("const name"),
         };
         self.bump();
@@ -1002,10 +1005,10 @@ mod tests {
         assert_eq!(context_of("enum a = X;"), None);
         assert_eq!(context_of("enum A = X; B"), None);
         assert_eq!(context_of("enum A = X; enum B = ;"), Some("enum B".to_string()));
-        assert_eq!(context_of("const N: Nat = ;"), Some("const N".to_string()));
-        assert_eq!(context_of("const N Nat = 1;"), Some("const N".to_string()));
+        assert_eq!(context_of("const n: Nat = ;"), Some("const n".to_string()));
+        assert_eq!(context_of("const n Nat = 1;"), Some("const n".to_string()));
         assert_eq!(context_of("const : Nat = 1;"), None);
-        assert_eq!(context_of("const A: Nat = 1; enum"), None);
+        assert_eq!(context_of("const a: Nat = 1; enum"), None);
     }
 
     #[test]
@@ -1087,7 +1090,7 @@ mod tests {
         assert_eq!(parse_file("A { x: 1 }", Experimental::default()).0, SourceKind::Values);
         assert_eq!(parse_file("42", Experimental::default()).0, SourceKind::Values);
         assert_eq!(
-            parse_file("const N: Nat = 1;", Experimental::default()).0,
+            parse_file("const n: Nat = 1;", Experimental::default()).0,
             SourceKind::Types
         );
         assert_eq!(parse_file("n", Experimental::default()).0, SourceKind::Values);
@@ -1105,11 +1108,11 @@ mod tests {
     #[test]
     fn parses_const_definitions_interleaved_with_enums() {
         let file =
-            parse("const A: Nat = 1;\nenum E = X;\nconst b: [E] = [X, X];\nconst C: { a: Nat } = { a: 2 };").unwrap();
+            parse("const a: Nat = 1;\nenum E = X;\nconst b: [E] = [X, X];\nconst c: { a: Nat } = { a: 2 };").unwrap();
         assert_eq!(file.enums.len(), 1);
         assert_eq!(
             file.consts.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
-            ["A", "b", "C"]
+            ["a", "b", "c"]
         );
         assert!(matches!(&file.consts[1].ty, Some(Type::Array(_))));
         assert!(matches!(&file.consts[2].value.kind, ValueKind::Record(m) if m.len() == 1));
@@ -1117,10 +1120,10 @@ mod tests {
 
     #[test]
     fn reports_const_syntax_errors() {
-        assert_eq!(err("const N Nat = 1;"), (1, 9, "Expected ':' or '='".to_string()));
-        assert_eq!(err("const N: Nat 1;").2, "Expected '='");
-        assert_eq!(err("const N: Nat = 1").2, "Expected semi-colon");
-        assert_eq!(err("const N: Nat = ;").2, "Expected value");
+        assert_eq!(err("const n Nat = 1;"), (1, 9, "Expected ':' or '='".to_string()));
+        assert_eq!(err("const n: Nat 1;").2, "Expected '='");
+        assert_eq!(err("const n: Nat = 1").2, "Expected semi-colon");
+        assert_eq!(err("const n: Nat = ;").2, "Expected value");
         assert_eq!(err("const 1: Nat = 1;").2, "Expected const name");
         assert_eq!(err("const enum: Nat = 1;").2, "Expected const name");
     }
@@ -1137,14 +1140,27 @@ mod tests {
     }
 
     #[test]
+    fn a_const_name_cannot_start_with_a_capital_letter() {
+        assert_eq!(
+            err("const N: Nat = 1;"),
+            (
+                1,
+                7,
+                "Expected const name that starts with a lower-case letter".to_string()
+            )
+        );
+        assert!(parse("const _n: Nat = 1;\nconst nN: Nat = 1;").is_ok());
+    }
+
+    #[test]
     fn the_type_of_a_const_is_optional() {
-        let file = parse("const N = 1;\nconst e = [];\nconst T: Nat = 2;").unwrap();
+        let file = parse("const n = 1;\nconst e = [];\nconst t: Nat = 2;").unwrap();
         assert!(file.consts[0].ty.is_none() && file.consts[1].ty.is_none());
         assert!(file.consts[2].ty.is_some());
-        assert_eq!(err("const N = ;").2, "Expected value");
-        assert_eq!(err("const N: = 1;").2, "Expected type");
+        assert_eq!(err("const n = ;").2, "Expected value");
+        assert_eq!(err("const n: = 1;").2, "Expected type");
         // The parameters are read before the type is known to be missing, which is reported after the parse.
-        assert_eq!(parse("const N<T> = 1;").unwrap().consts[0].params.len(), 1);
+        assert_eq!(parse("const n<T> = 1;").unwrap().consts[0].params.len(), 1);
     }
 
     #[test]

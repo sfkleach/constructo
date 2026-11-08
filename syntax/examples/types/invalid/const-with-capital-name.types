@@ -1,0 +1,2 @@
+// A const name starts with a lower-case letter or an underscore, so it cannot be taken for a constructor.
+const Limit: Nat = 1;

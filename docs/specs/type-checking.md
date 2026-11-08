@@ -136,7 +136,8 @@ Under `--no-prelude` there is no `Option` unless the user declares one, and `T?`
 
 ## Consts
 
-A const is a name for a value. It lives in the same namespace as the constructors, and does not take fields.
+A const is a name for a value, and does not take fields. Its name starts with a lowercase letter or an underscore, which
+is what tells it from a constructor wherever it is written.
 
 ```
 const limit: Nat = 5;
@@ -178,9 +179,10 @@ The type of a reference is the type of the const, and it is accepted wherever a 
 same widening. So `const x: Nat = 0;` can be used where an `Int` is expected, but not under `--no-widening`, and a
 `Nat` const is not accepted for an `Option<Nat>`. The mismatch says `Expected Int but found const x of type Nat`.
 
-A bare name in a value is a constructor if it is the name of one, and otherwise a const. `Unknown constructor X` is
-reported for a name that starts with a capital letter and `Unknown const x` for one that starts with a lowercase
-letter or an underscore. A const that is followed by fields is `Const x is a value and takes no fields`.
+A bare name in a value is a constructor if it starts with a capital letter, and a const if it starts with a lowercase
+letter or an underscore. The form of the name says which, without a lookup, so a values file can be read without the
+types. `Unknown constructor X` is reported for a capital name that is not a constructor, and `Unknown const x` for the
+other. A const takes no fields, so `x { a: 1 }` is a syntax error and not a type error.
 
 ### Record types
 
