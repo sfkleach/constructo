@@ -115,8 +115,13 @@ Where two numbers meet in an unknown type the result is the wider type, so `[1, 
 `[1, +2]` has type `[Int]`. This is the join, and it needs widening: under `--no-widening` these are errors. A type
 that was fixed by a declaration is not joined. An element of an `[Nat]` cannot be `2.5`.
 
-An untagged value at the top level, such as `{ x: 1 }` or `[1, 2]`, names no type, so it is only checked for being
-consistent in itself. An untagged record, in particular, never fails at the top level.
+An untagged value at the top level, such as `{ x: 1 }` or `[1, 2]`, names no type, so nothing says what it should be.
+It is only checked for being consistent in itself, and what is inside it is checked as it would be anywhere else. So
+`{ x: 1 }` and `[1, 2]` pass, and these fail:
+
+- `{ a: 1, a: 2 }`, with `Duplicate field a`;
+- `[1, "x"]` and `{ a: [1, "x"] }`, with `Expected Nat but found String`;
+- `{ a: Missing }`, with `Unknown constructor Missing`.
 
 ## Optional values
 
