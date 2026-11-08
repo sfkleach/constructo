@@ -36,7 +36,8 @@ The keys are spelt as the long form of the option, without the leading `--` and 
 `--no-FEATURE` the key is `FEATURE`, with the opposite sense: `--no-type-check` is `type-check = false`.
 
 A file serves every subcommand. A subcommand reads the shared tables and its own, and ignores the table of another
-subcommand. Today there is one subcommand, `check`.
+subcommand. `constructo check` reads `[global]`, `[experimental]` and `[check]`. `constructo project update` takes only
+`--config` and `--cache`, so the one setting that it uses is `cache` in `[global]`, and it ignores the rest.
 
 ### `[global]`
 
@@ -79,8 +80,9 @@ This file is not the project-file. A project is described by `constructo.toml` i
 reads (see decision 24), and it holds no settings. The settings file is only ever read when `--config` names it, and
 `--print-config` writes one, conventionally named `constructo-settings.toml`.
 
-The inputs (the files to check and `--stdin`) are never taken from the file, and nor are `--config`, `--print-config`,
-`--help` and `--version`. `--config` can be given once in all, whether it is before or after the subcommand.
+The inputs (the files to check, `--stdin` and `--project`) are never taken from the file, and nor are `--config`,
+`--print-config`, `--help` and `--version`. `--config` can be given once in all, whether it is before or after the
+subcommand.
 
 ## Errors
 

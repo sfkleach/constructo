@@ -41,7 +41,7 @@ something else.
 - **Every command** that takes the URL has `--` before it, so that it is an argument and never an option, whatever
   is in it.
 
-A problem with the URL or the revision is an error at the import, with exit code 2, and git is not run.
+A problem with the URL or the revision is an error at the `repo` of the import, with exit code 2, and git is not run.
 
 ## The commands
 
@@ -206,7 +206,7 @@ It cannot:
 
 ## Errors
 
-Every failure of git is an error at the `[[import]]`, with exit code 2, and nothing is written to the lock.
+Every failure of git is an error at the `repo` of the import, with exit code 2, and nothing is written to the lock.
 
 - A git that is not installed: `Cannot run git: it is not installed, and projects from a repository need it`.
 - A command that fails: `Git failed for URL: …`, with what git printed on its standard error, on one line, up to and
