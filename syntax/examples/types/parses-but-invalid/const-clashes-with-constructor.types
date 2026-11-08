@@ -1,2 +1,0 @@
-enum Mode = Fast, Slow;
-const Fast: Mode = Slow;

@@ -23,18 +23,23 @@ not type-checked.
 There are three kinds of name, and a name can only be declared once in its own kind:
 
 - **Types.** The names of the enums. A type parameter is a type name in the declaration that has it, and nowhere else.
-- **Values.** The names of the constructors and of the consts, which share one namespace. A const may therefore not have
-  the name of a constructor, nor of another const.
+- **Values.** The names of the constructors and of the consts. A constructor starts with a capital letter and a const
+  with a lower-case letter or `_`, so a const cannot have the name of a constructor, and the only clash is between two
+  consts.
 - **Members.** The names of the fields of a record and of the named parameters of a tuple constructor, which belong to
   the one record or constructor, and so cannot clash with anything outside it.
 
-A type and a value may have the same name. `enum Config = Config { port: Nat };` is valid, and so is `enum Colour =
-Rgb(Nat, Nat, Nat); const Colour: Colour = Rgb(255, 0, 0);`. They are told apart by where they are written.
+A type and a constructor may have the same name. `enum Config = Config { port: Nat };` is valid. A const may be spelt
+like a type, but its first letter is lower case, as in
+`enum Colour = Rgb(Nat, Nat, Nat); const colour: Colour = Rgb(255, 0, 0);`. They are told apart by where they are
+written, and by the first letter.
 
-The names of the basic types, `Nat`, `Int`, `Float` and `String`, cannot be given to a type, a constructor, a const or a
-type parameter. They are always the basic types.
+The names of the basic types, `Nat`, `Int`, `Float` and `String`, cannot be given to a type, a constructor or a type
+parameter. They start with a capital letter, so they cannot be the name of a const either. They are always the basic
+types.
 
-`const` is a reserved word, so it cannot be the name of a field. That is a syntax error.
+`const` is a reserved word, so it cannot be the name of a field. That is a syntax error, and so is a const whose name
+starts with a capital letter: `Expected const name that starts with a lower-case letter`.
 
 ## The errors
 
@@ -48,10 +53,9 @@ and then of the text.
 |--------------------------------------------------|-------------------------------------------------------------|
 | `Type name X clashes with a basic type`          | `enum Int = A;`                                             |
 | `Constructor name X clashes with a basic type`   | `enum E = Nat;`                                             |
-| `Const name X clashes with a basic type`         | `const Int: Nat = 0;`                                       |
 | `Duplicate type X`                               | Two enums have one name.                                    |
 | `Duplicate constructor X`                        | Two constructors have one name, in the same enum or not.    |
-| `Duplicate const X`                              | A const has the name of a constructor or of another const.  |
+| `Duplicate const X`                              | Two consts have one name.                                   |
 | `Duplicate field X`                              | A record has a field twice, in a variant or in a record type. |
 | `Duplicate parameter X`                          | A tuple constructor has two parameters with one name.       |
 

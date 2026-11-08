@@ -326,19 +326,19 @@ svg.railroad-diagram g.diagram-text:hover path.diagram-text {
 <path d="M228.5 40h0.0" /><path d="M370.5 40h0.0" /><path d="M228.5 40h10" /><g class="non-terminal ">
 <path d="M238.5 40h0.0" /><path d="M360.5 40h0.0" /><rect height="22" width="122" x="238.5" y="29"></rect><text x="299.5" y="44">[A-Za-z0-9_]</text></g><path d="M360.5 40h10" /><path d="M238.5 40a10 10 0 0 0 -10 10v0a10 10 0 0 0 10 10" /><g>
 <path d="M238.5 60h122.0" /></g><path d="M360.5 60a10 10 0 0 0 10 -10v0a10 10 0 0 0 -10 -10" /></g><path d="M370.5 40h20" /></g></g><path d="M390.5 40h10" /><path d="M 400.5 40 h 20 m -10 -10 v 20 m 10 -20 v 20"></path></g></svg>
-<svg x="8" y="1905.0" class="railroad-diagram" height="80" viewBox="0 0 620.5 80" width="620.5">
+<svg x="8" y="1905.0" class="railroad-diagram" height="80" viewBox="0 0 595.0 80" width="595.0">
 <g transform="translate(.5 .5)">
 <g>
 <path d="M20 30v20m10 -20v20m-10 -10h20" /></g><path d="M40 40h10" /><g class="non-terminal ">
 <path d="M50 40h0.0" /><path d="M123.0 40h0.0" /><text class="comment" x="86.5" y="45">ConstName</text></g><path d="M123 40h10" /><path d="M133 40h10" /><g>
-<path d="M143 40h0.0" /><path d="M570.5 40h0.0" /><g class="non-terminal ">
-<path d="M143.0 40h0.0" /><path d="M239.5 40h0.0" /><rect height="22" width="96.5" x="143" y="29"></rect><text x="191.25" y="44">[A-Za-z_]</text></g><path d="M239.5 40h10" /><g>
-<path d="M249.5 40h0.0" /><path d="M431.5 40h0.0" /><path d="M249.5 40a10 10 0 0 0 10 -10v0a10 10 0 0 1 10 -10" /><g>
-<path d="M269.5 20h142.0" /></g><path d="M411.5 20a10 10 0 0 1 10 10v0a10 10 0 0 0 10 10" /><path d="M249.5 40h20" /><g>
-<path d="M269.5 40h0.0" /><path d="M411.5 40h0.0" /><path d="M269.5 40h10" /><g class="non-terminal ">
-<path d="M279.5 40h0.0" /><path d="M401.5 40h0.0" /><rect height="22" width="122" x="279.5" y="29"></rect><text x="340.5" y="44">[A-Za-z0-9_]</text></g><path d="M401.5 40h10" /><path d="M279.5 40a10 10 0 0 0 -10 10v0a10 10 0 0 0 10 10" /><g>
-<path d="M279.5 60h122.0" /></g><path d="M401.5 60a10 10 0 0 0 10 -10v0a10 10 0 0 0 -10 -10" /></g><path d="M411.5 40h20" /></g><path d="M431.5 40h10" /><g class="non-terminal ">
-<path d="M441.5 40h0.0" /><path d="M570.5 40h0.0" /><text class="comment" x="506" y="45">not enum or const</text></g></g><path d="M570.5 40h10" /><path d="M 580.5 40 h 20 m -10 -10 v 20 m 10 -20 v 20"></path></g></svg>
+<path d="M143 40h0.0" /><path d="M545.0 40h0.0" /><g class="non-terminal ">
+<path d="M143.0 40h0.0" /><path d="M214.0 40h0.0" /><rect height="22" width="71" x="143" y="29"></rect><text x="178.5" y="44">[a-z_]</text></g><path d="M214.0 40h10" /><g>
+<path d="M224.0 40h0.0" /><path d="M406.0 40h0.0" /><path d="M224.0 40a10 10 0 0 0 10 -10v0a10 10 0 0 1 10 -10" /><g>
+<path d="M244.0 20h142.0" /></g><path d="M386.0 20a10 10 0 0 1 10 10v0a10 10 0 0 0 10 10" /><path d="M224.0 40h20" /><g>
+<path d="M244.0 40h0.0" /><path d="M386.0 40h0.0" /><path d="M244.0 40h10" /><g class="non-terminal ">
+<path d="M254.0 40h0.0" /><path d="M376.0 40h0.0" /><rect height="22" width="122" x="254" y="29"></rect><text x="315" y="44">[A-Za-z0-9_]</text></g><path d="M376.0 40h10" /><path d="M254.0 40a10 10 0 0 0 -10 10v0a10 10 0 0 0 10 10" /><g>
+<path d="M254.0 60h122.0" /></g><path d="M376.0 60a10 10 0 0 0 10 -10v0a10 10 0 0 0 -10 -10" /></g><path d="M386.0 40h20" /></g><path d="M406.0 40h10" /><g class="non-terminal ">
+<path d="M416.0 40h0.0" /><path d="M545.0 40h0.0" /><text class="comment" x="480.5" y="45">not enum or const</text></g></g><path d="M545.0 40h10" /><path d="M 555.0 40 h 20 m -10 -10 v 20 m 10 -20 v 20"></path></g></svg>
 <svg x="8" y="2009.0" class="railroad-diagram" height="80" viewBox="0 0 602.0 80" width="602.0">
 <g transform="translate(.5 .5)">
 <g>

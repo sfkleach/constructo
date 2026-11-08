@@ -833,7 +833,7 @@ mod tests {
 
     #[test]
     fn consts_may_be_declared_in_any_order_among_the_enums() {
-        let text = "const Origin: Shape = Dot;\nenum Shape = Circle { r: Float }, Dot;\nconst unit: Shape = Circle { r: 1.0 };";
+        let text = "const origin: Shape = Dot;\nenum Shape = Circle { r: Float }, Dot;\nconst unit: Shape = Circle { r: 1.0 };";
         let report = check_sources(&sources(&[text]));
         assert_eq!(messages(&report), Vec::<String>::new());
         assert_eq!(report.kinds, vec![Some(SourceKind::Types)]);
@@ -841,48 +841,60 @@ mod tests {
 
     #[test]
     fn a_file_may_start_with_a_const() {
-        assert!(check_sources(&sources(&["const N: Nat = 1;"])).is_ok());
+        assert!(check_sources(&sources(&["const n: Nat = 1;"])).is_ok());
     }
 
     #[test]
-    fn consts_share_the_constructor_namespace() {
-        let report = check_sources(&sources(&[
-            "enum E = Red;\nconst Red: E = Red;\nconst X: Nat = 1;\nconst X: Nat = 2;",
-        ]));
+    fn a_const_name_is_a_name_of_its_own_among_the_values() {
+        let report = check_sources(&sources(&["const x: Nat = 1;\nconst x: Nat = 2;"]));
         assert_eq!(
             messages(&report),
-            vec![
-                "ERROR: Duplicate const Red (f0, line 2, col 7); first declared at line 1, col 10",
-                "ERROR: Duplicate const X (f0, line 4, col 7); first declared at line 3, col 7",
-            ]
+            vec!["ERROR: Duplicate const x (f0, line 2, col 7); first declared at line 1, col 7"]
         );
-        let report = check_sources(&sources(&["const Dev: Nat = 1;", "enum E = Dev, Other;"]));
+        // A const starts with a lower-case letter and a constructor with a capital, so they cannot clash.
+        let report = check_sources(&sources(&["const dev: Nat = 1;", "enum E = Dev, Other;"]));
+        assert_eq!(messages(&report), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_const_name_starts_with_a_lower_case_letter_or_an_underscore() {
+        for name in ["limit", "_limit", "l", "limit2", "limit_two", "limitTwo"] {
+            let text = format!("const {}: Nat = 1;", name);
+            assert_eq!(
+                messages(&check_sources(&sources(&[&text]))),
+                Vec::<String>::new(),
+                "{}",
+                name
+            );
+        }
+        let report = check_sources(&sources(&["const Limit: Nat = 1;"]));
         assert_eq!(
             messages(&report),
-            vec!["ERROR: Duplicate constructor Dev (f1, line 1, col 10); first declared at f0, line 1, col 7"]
+            vec!["ERROR: Expected const name that starts with a lower-case letter (f0, line 1, col 7)"]
         );
     }
 
     #[test]
-    fn a_const_may_share_a_name_with_an_enum_type() {
-        let text = "enum Config = Settings { port: Nat };\nconst Config: Config = Settings { port: 80 };";
+    fn a_const_may_share_its_spelling_with_an_enum_type_apart_from_the_first_letter() {
+        let text = "enum Config = Settings { port: Nat };\nconst config: Config = Settings { port: 80 };";
         assert_eq!(messages(&check_sources(&sources(&[text]))), Vec::<String>::new());
     }
 
     #[test]
     fn a_const_cannot_be_named_after_a_basic_type() {
+        // The basic types start with a capital, which a const name cannot.
         let report = check_sources(&sources(&["const Nat: Nat = 1;"]));
         assert_eq!(
             messages(&report),
-            vec!["ERROR: Const name Nat clashes with a basic type (f0, line 1, col 7)"]
+            vec!["ERROR: Expected const name that starts with a lower-case letter (f0, line 1, col 7)"]
         );
     }
 
     #[test]
     fn the_type_of_a_const_must_be_known() {
         let report = check_sources(&sources(&[
-            "const N: Missing = 1;",
-            "enum L<T> = Nil, C(T);\nconst M: L = Nil;",
+            "const n: Missing = 1;",
+            "enum L<T> = Nil, C(T);\nconst m: L = Nil;",
         ]));
         assert_eq!(
             messages(&report),
@@ -892,13 +904,13 @@ mod tests {
             ]
         );
         // A type parameter is not in scope in a const.
-        assert_eq!(check_sources(&sources(&["const N: T = 1;"])).diagnostics.len(), 1);
+        assert_eq!(check_sources(&sources(&["const n: T = 1;"])).diagnostics.len(), 1);
     }
 
     #[test]
     fn the_value_of_a_const_is_checked_against_its_type() {
         let text = format!(
-            "{}const A: Shape = Circle {{ r: 1 }};\nconst B: Nat = \"s\";\nconst C: Shape = Square;",
+            "{}const a: Shape = Circle {{ r: 1 }};\nconst b: Nat = \"s\";\nconst c: Shape = Square;",
             SHAPES
         );
         let report = check_sources_with(
@@ -926,26 +938,34 @@ mod tests {
             type_check: false,
             ..CheckOptions::default()
         };
-        assert!(check_sources_with(&sources(&["const N: Nat = \"s\";"]), &options).is_ok());
+        assert!(check_sources_with(&sources(&["const n: Nat = \"s\";"]), &options).is_ok());
     }
 
     #[test]
     fn a_values_file_may_refer_to_consts() {
         let types = format!(
-            "{}const Origin: Shape = Dot;\nconst limit: Nat = 10;\nconst Names: [String] = [\"a\"];",
+            "{}const origin: Shape = Dot;\nconst limit: Nat = 10;\nconst names: [String] = [\"a\"];",
             SHAPES
         );
-        let ok = "Circle { r: limit }; Origin; [Origin, Dot]";
+        let ok = "Circle { r: limit }; origin; [origin, Dot]";
         assert_eq!(messages(&check_sources(&sources(&[&types, ok]))), Vec::<String>::new());
-        let report = check_sources(&sources(&[&types, "Circle { r: Origin }"]));
+        let report = check_sources(&sources(&[&types, "Circle { r: origin }"]));
         assert_eq!(
             messages(&report),
-            vec!["ERROR: Expected Float but found const Origin of type Shape (f1, line 1, col 13)"]
+            vec!["ERROR: Expected Float but found const origin of type Shape (f1, line 1, col 13)"]
         );
-        let report = check_sources(&sources(&[&types, "Origin { r: 1.0 }"]));
+        // A const takes no body, and a name that starts with a lower-case letter is always a const, so this is a
+        // syntax error and not a type error.
+        let report = check_sources(&sources(&[&types, "origin { r: 1.0 }"]));
         assert_eq!(
             messages(&report),
-            vec!["ERROR: Const Origin is a value and takes no fields (f1, line 1, col 1)"]
+            vec!["ERROR: Expected semi-colon (f1, line 1, col 8)"]
+        );
+        // And a name that starts with a capital is a constructor, whatever consts there are.
+        let report = check_sources(&sources(&[&types, "Origin"]));
+        assert_eq!(
+            messages(&report),
+            vec!["ERROR: Unknown constructor Origin (f1, line 1, col 1)"]
         );
         let report = check_sources(&sources(&[&types, "missing"]));
         assert_eq!(
@@ -974,37 +994,37 @@ mod tests {
 
     #[test]
     fn a_const_may_not_refer_to_a_const_without_allow_refs() {
-        let text = "const A: Nat = 1;\nconst B: [Nat] = [0, A];";
+        let text = "const a: Nat = 1;\nconst b: [Nat] = [0, a];";
         assert_eq!(
             messages(&check_sources(&sources(&[text]))),
-            vec!["ERROR: Reference to const A in const B requires --allow-refs (f0, line 2, col 22)"]
+            vec!["ERROR: Reference to const a in const b requires --allow-refs (f0, line 2, col 22)"]
         );
         assert_eq!(messages(&with_refs(&[text])), Vec::<String>::new());
     }
 
     #[test]
     fn consts_may_refer_to_consts_in_any_order_across_files() {
-        let report = with_refs(&["const B: Nat = A;\nconst C: Nat = B;", "const A: Nat = 3;"]);
+        let report = with_refs(&["const b: Nat = a;\nconst c: Nat = b;", "const a: Nat = 3;"]);
         assert_eq!(messages(&report), Vec::<String>::new());
     }
 
     #[test]
     fn a_reference_is_type_checked_against_the_declared_type() {
-        let report = with_refs(&["const A: String = \"s\";\nconst B: Nat = A;"]);
+        let report = with_refs(&["const a: String = \"s\";\nconst b: Nat = a;"]);
         assert_eq!(
             messages(&report),
-            vec!["ERROR: Expected Nat but found const A of type String (f0, line 2, col 16)"]
+            vec!["ERROR: Expected Nat but found const a of type String (f0, line 2, col 16)"]
         );
     }
 
     #[test]
     fn circular_consts_are_reported_once_each() {
-        let report = with_refs(&["const A: Nat = B;\nconst B: Nat = C;\nconst C: Nat = A;\nconst D: Nat = D;"]);
+        let report = with_refs(&["const a: Nat = b;\nconst b: Nat = c;\nconst c: Nat = a;\nconst d: Nat = d;"]);
         assert_eq!(
             messages(&report),
             vec![
-                "ERROR: Circular const definition A -> B -> C -> A (f0, line 3, col 16)",
-                "ERROR: Circular const definition D -> D (f0, line 4, col 16)",
+                "ERROR: Circular const definition a -> b -> c -> a (f0, line 3, col 16)",
+                "ERROR: Circular const definition d -> d (f0, line 4, col 16)",
             ]
         );
         // The cycle is reported without any type-check, so it is found under --no-type-check as well.
@@ -1014,7 +1034,7 @@ mod tests {
             ..CheckOptions::default()
         };
         assert_eq!(
-            check_sources_with(&sources(&["const A: Nat = A;"]), &options)
+            check_sources_with(&sources(&["const a: Nat = a;"]), &options)
                 .diagnostics
                 .len(),
             1
@@ -1032,22 +1052,22 @@ mod tests {
 
     #[test]
     fn a_const_value_is_attributed_to_its_own_file() {
-        let report = check_sources(&sources(&["enum A = X;", "const N: Nat = \"s\";"]));
+        let report = check_sources(&sources(&["enum A = X;", "const n: Nat = \"s\";"]));
         assert_eq!(report.outcomes, vec![Outcome::Ok, Outcome::Failed]);
     }
 
     #[test]
     fn a_failed_const_stops_the_values_that_follow() {
-        let report = check_sources(&sources(&["const N: Nat = \"s\";", "1"]));
+        let report = check_sources(&sources(&["const n: Nat = \"s\";", "1"]));
         assert_eq!(report.outcomes, vec![Outcome::Failed, Outcome::NotChecked]);
     }
 
     #[test]
     fn a_syntax_error_in_a_const_names_it() {
-        let report = check_sources(&sources(&["const N: Nat = 1;\nconst M: Nat = 1 2;"]));
+        let report = check_sources(&sources(&["const n: Nat = 1;\nconst m: Nat = 1 2;"]));
         assert_eq!(
             messages(&report),
-            vec!["ERROR: Expected semi-colon (f0, line 2, col 18); in const M"]
+            vec!["ERROR: Expected semi-colon (f0, line 2, col 18); in const m"]
         );
     }
 
@@ -1088,16 +1108,16 @@ mod tests {
 
     #[test]
     fn a_const_may_refer_to_a_prelude_const_without_allow_refs() {
-        let text = "const Flag: Bool = true;\nconst Missing: Option<String> = null;\nconst Some2: [Option<Nat>] = [null, Some(1)];";
+        let text = "const flag: Bool = true;\nconst missing: Option<String> = null;\nconst some2: [Option<Nat>] = [null, Some(1)];";
         assert_eq!(messages(&with_prelude(&[text])), Vec::<String>::new());
         // Other consts still need the option, even when a prelude const is referred to as well.
-        let report = with_prelude(&["const A: Nat = 1;\nconst B: [Nat] = [A];\nconst C: Option<Nat> = null;"]);
+        let report = with_prelude(&["const a: Nat = 1;\nconst b: [Nat] = [a];\nconst c: Option<Nat> = null;"]);
         assert_eq!(
             messages(&report),
-            vec!["ERROR: Reference to const A in const B requires --allow-refs (f0, line 2, col 19)"]
+            vec!["ERROR: Reference to const a in const b requires --allow-refs (f0, line 2, col 19)"]
         );
         // And the reference is checked against the type of the prelude const.
-        let report = with_prelude(&["const N: Nat = null;"]);
+        let report = with_prelude(&["const n: Nat = null;"]);
         assert_eq!(
             messages(&report),
             vec!["ERROR: Expected Nat but found const null of type Option<_> (f0, line 1, col 16)"]

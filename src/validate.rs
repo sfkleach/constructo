@@ -123,8 +123,9 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Registers the constructors and the consts, which share a namespace. Within a file the names are taken in the
-    /// order they were written, so that the one reported as a duplicate is the later one.
+    /// Registers the constructors and the consts. A const starts with a lower-case letter and a constructor with a
+    /// capital, so they cannot clash, but they are kept in one map. Within a file the names are taken in the order they
+    /// were written, so that the one reported as a duplicate is the later one.
     fn collect_value_names(&mut self) {
         let files = self.files;
         for (file, parsed) in files.iter().enumerate() {

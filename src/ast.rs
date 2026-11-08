@@ -96,7 +96,8 @@ pub enum ValueKind {
     Record(Vec<Member>),
     /// A constructor, optionally followed by a record, a tuple or an array, as in `Quit`, `Move { x: 1 }`,
     /// `Write("hi")` or `Users[u1, u2]`.
-    /// A bare name with no body may instead be a reference to a const, and a lowercase name always is.
+    /// A name that starts with a lower-case letter or `_` is a reference to a const, which takes no body, and any other
+    /// name is a constructor.
     Tagged {
         name: String,
         body: Option<TaggedBody>,

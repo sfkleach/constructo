@@ -585,21 +585,21 @@ impl Checker<'_, '_> {
                 };
                 self.check_members(pos, "record", members, &fields)
             }
-            ValueKind::Tagged { name, body } => match self.env.constructors.get(name.as_str()) {
-                Some(&(decl, variant)) => {
-                    let found = format!("{} of type {}", name, decl.name);
-                    self.check_variant(pos, decl, variant, body.as_ref(), &expected, &found)
-                }
-                None => match self.env.consts.get(name.as_str()) {
-                    Some(constant) if body.is_some() => {
-                        error(pos, format!("Const {} is a value and takes no fields", constant.name))
-                    }
-                    Some(constant) => self.check_const_ref(pos, constant, original),
-                    None if name.starts_with(|c: char| c.is_ascii_lowercase() || c == '_') => {
-                        error(pos, format!("Unknown const {}", name))
+            // A name that starts with a capital letter is a constructor, and any other name is a const, so the form
+            // of a name says which it is without a lookup (decision 35). A const takes no body, and the parser has
+            // not given it one.
+            ValueKind::Tagged { name, body } if name.starts_with(|c: char| c.is_ascii_uppercase()) => {
+                match self.env.constructors.get(name.as_str()) {
+                    Some(&(decl, variant)) => {
+                        let found = format!("{} of type {}", name, decl.name);
+                        self.check_variant(pos, decl, variant, body.as_ref(), &expected, &found)
                     }
                     None => error(pos, format!("Unknown constructor {}", name)),
-                },
+                }
+            }
+            ValueKind::Tagged { name, .. } => match self.env.consts.get(name.as_str()) {
+                Some(constant) => self.check_const_ref(pos, constant, original),
+                None => error(pos, format!("Unknown const {}", name)),
             },
         }
     }

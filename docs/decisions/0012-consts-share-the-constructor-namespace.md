@@ -1,5 +1,7 @@
 # 0012 - Consts share the constructor namespace, 2026-10-20
 
+> Amended by [decision 35](0035-a-const-name-starts-with-a-lower-case-letter.md): a const name starts with a lower-case letter or `_`, so a const and a constructor can no longer share a name.
+
 ## Issue
 
 **Fork.** A `const` is a new kind of top-level definition, and a bare name in a value, such as `Red`, may now be a

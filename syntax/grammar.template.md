@@ -58,8 +58,9 @@ full name of a project, as in `bundle::Shape` or `com.example.shapes::Shape`. A 
 parts of a qualifier are identifiers of either case separated by dots, and what the qualifier refers to is decided when
 the names are resolved, which is described with the projects.
 
-The `Value` of a const is the one defined in the [data-values grammar](#data-values-grammar). A const name may have
-either case. The names `enum` and `const` are reserved, and cannot be used as the name of a const or a field, but they can be
+The `Value` of a const is the one defined in the [data-values grammar](#data-values-grammar). A const name starts with a
+lower-case letter or `_`, like a field name, so that it cannot be taken for a constructor, whose name starts with a capital
+letter. The names `enum` and `const` are reserved, and cannot be used as the name of a const or a field, but they can be
 parts of a qualifier, as in `const::Shape`.
 
 The rules are:
@@ -79,8 +80,8 @@ A `Tagged` value or a `ConstRef` may have a `Qualifier` in front, as in `bundle:
 `com.example.shapes::origin`, which is described with the types grammar above.
 
 A bare name is a `Tagged` value if it starts with an uppercase letter and a `ConstRef` if it starts with a lowercase
-letter or underscore. A `Tagged` value with no body is a constructor, or a const of that name, and the checker decides
-which. A `ConstRef` is always a const and takes no body. The standard prelude declares the consts `null`, `true` and
+letter or underscore. A `Tagged` value with no body is a constructor, and a `ConstRef` is always a
+const and takes no body, so the form of a name says which it is without looking at any declaration. The standard prelude declares the consts `null`, `true` and
 `false`, so these are ordinary names and not special literals.
 
 A `Value` can be followed by any number of `?`, each of which wraps it in `Some`: `0?` is `Some(0)`. This is
