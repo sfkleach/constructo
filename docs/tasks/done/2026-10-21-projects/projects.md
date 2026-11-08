@@ -175,7 +175,7 @@ The names are as in the structured-names note above, with these rules.
   letters, digits and `_`, of either case. There is no `-`, because a name has to
   be written in source text, where `-` begins a number. This also changes
   Step 1. A later task revises the case rules (see
-  `docs/tasks/todo/2026-10-25-case-convention-selection`).
+  `docs/tasks/done/2026-10-25-case-convention-selection`, which was abandoned).
 - A qualified name is written `group::Name` or `full.name::Name`, in a types
   file or a values file, wherever a type, constructor or const is used. A
   declaration is never qualified. The lexer gains `.` and `::`.
