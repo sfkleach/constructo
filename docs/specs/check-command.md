@@ -151,7 +151,8 @@ Exit code 2 is for:
   [the lock file](lock-file-format.md). So is a name in `hide` or `rename` that the imported project does not
   declare, which is found when the names are resolved.
 
-This lets a script tell a bad schema or a bad value from a bad command.
+This lets a script tell a bad schema or a bad value from a bad command. [The exit codes](exit-codes.md) lists every
+problem and its code, for this command and for the others.
 
 ## Options
 
@@ -176,5 +177,6 @@ which [the configuration file](config-file.md) lists, with their defaults. In sh
 - [The configuration file](config-file.md), for the settings and how they layer.
 - [Validity checks](validity-checks.md) and [type checking](type-checking.md), for the errors of stages 4 and 5.
 - [Resolving identifiers](resolving-identifiers.md), for stage 3.
+- [The exit codes](exit-codes.md), for the codes of every command.
 - [The project-file](project-file-format.md) and [the lock file](lock-file-format.md), for `--project` and `--dev`.
 - Decisions 1, 2, 6, 8, 9, 11, 12, 20 and 23, in `docs/decisions/`.
