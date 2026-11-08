@@ -186,17 +186,15 @@ JSON, compared as text:
 4. The CHANGELOG, and the README line about the subcommands.
 5. `/review-specs`, and the task document: tick Step 1.
 
-## Questions for the owner
+## Decisions of the owner
 
-1. **The pretty layout.** The plan writes a container that holds no container on one line, so that `{"nat": "5"}` is one
-   line, at the cost of a rule. The plain alternative is to write every container one entry to a line, as `jq` does,
-   which makes the output about three times as long. Is the one-line rule what you want?
-2. **More than one error.** `convert` stops at the first error, as it does for a syntax error. Two duplicate fields in
-   two values give one error and not two. Is that acceptable, or should the duplicates all be reported?
-3. **The first value.** The plan takes the first value that exists, across the inputs in order, so an empty first file
-   is skipped. The task says "the first value of the first input". Is skipping an empty file right?
-4. **Settings.** `convert` has no table in the settings file at this step, so `compact` and `to-array` cannot be set
-   there. They look like per-run choices to me, and not settings. Is that right?
+1. **The pretty layout.** A container that holds no container is written on one line, so `{"nat": "5"}` is one line.
+2. **More than one error.** `convert` stops at the first error.
+3. **The first value.** The first value that exists, across the inputs in order, is converted, so an empty file is
+   skipped. If no input has a value it is an error, `No value to convert`, unless `--to-array` is given, and then the
+   output is `[]`.
+4. **Settings.** `--to-array` and `--compact` are choices for a run and not settings, so the settings file has no table
+   for `convert` at this step.
 
 ## Verification
 

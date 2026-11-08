@@ -25,9 +25,30 @@ impl fmt::Display for Pos {
     }
 }
 
-/// An error found while checking a source, with the name of the file it was found in.
+/// How serious a diagnostic is. An error means that the inputs are wrong, and a warning that they were used but
+/// something was left out or may not be what was meant. Only the `convert` subcommand reports warnings at present.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Severity {
+    #[default]
+    Error,
+    Warning,
+}
+
+impl Severity {
+    /// The word that starts a line of this severity.
+    pub fn label(self) -> &'static str {
+        match self {
+            Severity::Error => "ERROR",
+            Severity::Warning => "WARNING",
+        }
+    }
+}
+
+/// A problem found in a source, with the name of the file it was found in. It is an error unless it is made as a
+/// warning.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
+    pub severity: Severity,
     pub file: String,
     pub pos: Pos,
     pub message: String,
@@ -38,10 +59,19 @@ pub struct Diagnostic {
 impl Diagnostic {
     pub fn new(file: &str, pos: Pos, message: impl Into<String>) -> Self {
         Diagnostic {
+            severity: Severity::Error,
             file: file.to_string(),
             pos,
             message: message.into(),
             note: None,
+        }
+    }
+
+    /// A diagnostic that is a warning, which does not make a run fail.
+    pub fn warning(file: &str, pos: Pos, message: impl Into<String>) -> Self {
+        Diagnostic {
+            severity: Severity::Warning,
+            ..Diagnostic::new(file, pos, message)
         }
     }
 
@@ -53,10 +83,59 @@ impl Diagnostic {
 
 impl fmt::Display for Diagnostic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "ERROR: {} ({}, {})", self.message, self.file, self.pos)?;
+        write!(
+            f,
+            "{}: {} ({}, {})",
+            self.severity.label(),
+            self.message,
+            self.file,
+            self.pos
+        )?;
         if let Some(note) = &self.note {
             write!(f, "; {}", note)?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const AT: Pos = Pos { line: 3, col: 9 };
+
+    #[test]
+    fn a_diagnostic_is_an_error_unless_it_is_made_as_a_warning() {
+        assert_eq!(Diagnostic::new("f", AT, "m").severity, Severity::Error);
+        assert_eq!(Diagnostic::warning("f", AT, "m").severity, Severity::Warning);
+    }
+
+    #[test]
+    fn an_error_starts_with_error() {
+        assert_eq!(
+            Diagnostic::new("a.values", AT, "Bad value").to_string(),
+            "ERROR: Bad value (a.values, line 3, col 9)"
+        );
+    }
+
+    #[test]
+    fn a_warning_has_the_same_form_and_starts_with_warning() {
+        assert_eq!(
+            Diagnostic::warning("a.values", AT, "More values follow").to_string(),
+            "WARNING: More values follow (a.values, line 3, col 9)"
+        );
+        assert_eq!(
+            Diagnostic::warning("a.values", AT, "More values follow")
+                .with_note("see --to-array")
+                .to_string(),
+            "WARNING: More values follow (a.values, line 3, col 9); see --to-array"
+        );
+    }
+
+    #[test]
+    fn the_labels_are_the_words_that_start_a_line() {
+        assert_eq!(Severity::Error.label(), "ERROR");
+        assert_eq!(Severity::Warning.label(), "WARNING");
+        assert_eq!(Severity::default(), Severity::Error);
     }
 }
