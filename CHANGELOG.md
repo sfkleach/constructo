@@ -127,6 +127,10 @@ Following the style in https://keepachangelog.com/en/1.0.0/
     names. Two projects of one group, the project itself and the prelude included, may not declare one name: the later
     declaration is a duplicate, found when the projects are loaded and not at a use (decisions 31 and 32). A message
     shows a name in full when a bare one would be unclear.
+  - An `[[import]]` can `hide` names of the project it brings in and `rename` them (decisions 33 and 34). A hidden name
+    is not visible through the import and takes no part in the check for clashes, and `[import.rename]` has entries
+    `NAME_HERE = "NAME_THERE"`, so the declared name is replaced by the new one. The full name of a project always
+    reaches its own declarations. A name that the project does not declare is an error at the entry.
   - The prelude is the built-in project `constructo.prelude` (decision 26), imported into `local` by every project
     unless it imports it itself. `builtin = "constructo:/prelude"` imports it by hand.
   - `constructo project update [FOLDER]` writes `constructo.lock` (decision 27, `docs/specs/lock-file-format.md`),
