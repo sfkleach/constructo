@@ -138,9 +138,9 @@ neither name can be hidden.
   renamed to itself.
 - Like `hide`, a rename is for every namespace that has the name: a type and a constructor of one spelling are renamed
   together.
-- The declared name must be declared by the imported project, or else it is an error at the entry: `Cannot rename Typo:
-  the project example.a does not declare it`. A name cannot be both hidden and renamed, and is renamed once. A key is
-  unique in the table, so two names cannot be renamed to one.
+- The declared name must be declared by the imported project, or else it is an error at the entry, with exit code 1:
+  `Cannot rename Typo: the project example.a does not declare it`. A name cannot be both hidden and renamed, and is
+  renamed once. A key is unique in the table, so two names cannot be renamed to one.
 - The new name may not be a name the project declares, unless that name is itself hidden or renamed, so two names can be
   swapped: `Cannot rename Left to Taken: the project example.a declares Taken too`.
 - Through the import the declared name is no longer visible: it is an unknown name, bare or with the group. The new
@@ -261,7 +261,10 @@ A problem with an import is reported at the value that is wrong: the `repo`, the
 the group. A problem with the import as a whole, such as having none of `path`, `repo` and `builtin`, is reported at its
 `project-name`, and having more than one of them at the second. A folder that does not exist, a missing or unreadable
 `constructo.toml` and an unreadable types file are errors too. The exit code is 2 for all of these, as it is for a
-configuration file, and 1 for the errors that are found in the types files and values files themselves.
+configuration file, and 1 for the errors that are found in the types files and values files themselves. The exception
+is a name in `hide` or `rename` that the imported project does not declare. It is written in `constructo.toml`, but it
+can only be found once the types files are parsed, so it is reported with the errors of the types files, with exit
+code 1, and the checks that follow do not run.
 
 ## Related
 
