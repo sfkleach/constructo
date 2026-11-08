@@ -148,7 +148,8 @@ Exit code 2 is for:
 - an input that cannot be read, or a standard input that cannot be read;
 - a problem with the project-file, the imports, the lock file or the cache, other than a project that does not match
   the lock. A project that does not match the lock is exit code 1, as it is an error in what is checked. See
-  [the lock file](lock-file-format.md).
+  [the lock file](lock-file-format.md). So is a name in `hide` or `rename` that the imported project does not
+  declare, which is found when the names are resolved.
 
 This lets a script tell a bad schema or a bad value from a bad command.
 
