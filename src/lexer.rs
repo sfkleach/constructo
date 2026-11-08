@@ -2,6 +2,9 @@
 
 use crate::diagnostics::Pos;
 
+/// The words that the lexer gives their own tokens, so that they cannot be the name of anything.
+pub const KEYWORDS: [&str; 2] = ["enum", "const"];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Tok {
     Enum,
@@ -113,9 +116,9 @@ pub fn lex(text: &str) -> Vec<Token> {
                 col += 1;
             }
             let word: String = chars[start..i].iter().collect();
-            let tok = if word == "enum" {
+            let tok = if word == KEYWORDS[0] {
                 Tok::Enum
-            } else if word == "const" {
+            } else if word == KEYWORDS[1] {
                 Tok::Const
             } else if c.is_ascii_uppercase() {
                 Tok::TypeName(word)

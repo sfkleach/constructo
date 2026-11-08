@@ -99,7 +99,8 @@ hide = ["Debug", "LegacyPoint"]
 ```
 
 - A name is one identifier, with no qualifier. It is hidden in every namespace that has it: a type `Debug` and a
-  constructor `Debug` are both hidden. A name is hidden once, and the name of a basic type cannot be hidden.
+  constructor `Debug` are both hidden. A name is hidden once, and neither the name of a
+  basic type nor a keyword (`enum`, `const`) can be hidden.
 - The name must be declared by the imported project, as a type, a constructor or a const. A name that is not is an
   error at the name in the project-file: `Cannot hide Typo: the project example.a does not declare it`. It is reported
   with the other errors of the run, so it has exit code 1, and the checks that follow it do not run.
@@ -133,9 +134,9 @@ Point = "BasePoint"
 This makes the `BasePoint` of `com.example.base` be written `Point`. It is how a clash in a group is avoided when
 neither name can be hidden.
 
-- Both names are one identifier, with no qualifier, and neither is the name of a basic type. A type or a constructor
-  starts with a capital letter and a const does not, and the new name starts as the declared one does. A name cannot be
-  renamed to itself.
+- Both names are one identifier, with no qualifier, and neither is the name of a basic type or a keyword, since a
+  keyword cannot be written as a name, bare or after `::`. A type or a constructor starts with a capital letter and a
+  const does not, and the new name starts as the declared one does. A name cannot be renamed to itself.
 - Like `hide`, a rename is for every namespace that has the name: a type and a constructor of one spelling are renamed
   together.
 - The declared name must be declared by the imported project, or else it is an error at the entry, with exit code 1:
