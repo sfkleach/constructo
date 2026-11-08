@@ -84,9 +84,10 @@ group = "shapes"
 ```
 
 - `repo` is `https://HOST/PATH`, `ssh://[USER@]HOST/PATH` or the short form `[USER@]HOST:PATH`, `file://PATH`, or a path
-  to a folder. A URL with a password, or a token in place of a user name, is an error, since it would be written in the
-  lock file and in messages: use a credential helper or an ssh key. `ext::` and the other remote helpers, `git://`,
-  `http://` and `ftp://` are errors, and so is a URL that starts with `-`. The error is at the `repo`.
+  to a folder. A URL with a password is an error, and so is an `https` URL with a user name, which is usually a token,
+  since it would be written in the lock file and in messages: use a credential helper or an ssh key. A user name alone
+  is fine for ssh. `ext::` and the other remote helpers, `git://`, `http://` and `ftp://` are errors, and so is a URL
+  that starts with `-`. The error is at the `repo`.
 - `rev` is a tag, a branch or a commit, and may not be empty. `subdir` is a path inside the repository, written with
   `/`, with no empty part, `.` or `..`.
 - `constructo check` does not fetch. The commit comes from the [lock file](lock-file-format.md) and the files from the
@@ -162,9 +163,10 @@ group = "local"
 builtin = "constructo:/prelude"
 ```
 
-To override the prelude a project imports it into another group. Then bare `Bool` is the project's own, and `std::Bool`
-is the prelude's. `--no-prelude`, or `prelude = false` in a settings file, stops the implicit import in every project
-and nothing else. An explicit import stays.
+To override the prelude a project imports it into another group. Then bare `Bool` is the project's own, and
+`std::Bool` is the prelude's. Without that, declaring a name that the prelude has is a duplicate. `--no-prelude`, or
+`prelude = false` in a settings file, stops the implicit import in every project and nothing else. An explicit import
+stays.
 
 ## Errors
 
@@ -172,10 +174,12 @@ Every problem with the project-file is an error in the usual form, with the posi
 `constructo.toml`:
 
 ```text
-ERROR: An import needs one of `path`, `repo` and `builtin` to say where the project is (constructo.toml, line 5, col 1)
+ERROR: An import needs one of `path`, `repo` and `builtin` to say where the project is (constructo.toml, line 5, col 14)
 ```
 
-A problem with an import is reported at the `[[import]]`. A folder that does not exist, a missing or unreadable
+A problem with an import is reported at the value that is wrong: the `repo`, the `rev`, the `subdir`, the `path` or
+the group. A problem with the import as a whole, such as having none of `path`, `repo` and `builtin`, is reported at its
+`project-name`, and having more than one of them at the second. A folder that does not exist, a missing or unreadable
 `constructo.toml` and an unreadable types file are errors too. The exit code is 2 for all of these, as it is for a
 configuration file, and 1 for the errors that are found in the types files and values files themselves.
 

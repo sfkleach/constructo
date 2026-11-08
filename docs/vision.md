@@ -64,10 +64,9 @@ WARNING: Literal Int (non-negative) supplied where Nat expected (prod.values, li
 ```
 
 The tool warns him that he has used a signed integer literal where a natural
-number was expected. A non-negative signed literal such as `+8080` is accepted
-for a `Nat` with a warning; a negative one such as `-1` is an error. Once he
-removes the sign, `constructo
-check` reports that the syntax is fine and the value is type-correct. 
+number was expected. A signed literal such as `+8080` is not accepted for a
+`Nat`. Once he removes the sign, `constructo check` reports that the syntax is
+fine and the value is type-correct. 
 
 ## Day three: CI
 

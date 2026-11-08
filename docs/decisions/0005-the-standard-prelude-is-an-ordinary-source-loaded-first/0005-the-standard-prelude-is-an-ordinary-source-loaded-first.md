@@ -1,5 +1,7 @@
 # 0005 - The standard prelude is an ordinary source loaded first, 2026-10-19
 
+> Decision 26 made redeclaring a prelude name an ambiguity; [decision 31](../0031-a-declaration-that-clashes-with-its-own-scope-is-a-duplicate.md) restored the duplicate error.
+
 ## Issue
 
 **Leap.** `check` needs a standard prelude declaring `Bool` and `Option<T>`, loaded by default and disabled with
