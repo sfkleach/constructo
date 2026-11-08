@@ -57,6 +57,7 @@ in which nothing matches is not an error, since a project may consist only of im
 | `rev`          | string | no       | With `repo` only: a tag, branch or commit. Without one, the default branch. |
 | `subdir`       | string | no       | With `repo` only: the folder inside the repository that holds the project. |
 | `group`        | string | no       | The group that the project is put into. Without one, only by its full name. |
+| `hide`         | array of strings | no | Names of the project that are not visible through this import.      |
 
 Exactly one of `path`, `builtin` and `repo` says where the project is. Two of them, or none, is an error at the
 import, and so is a `rev` or a `subdir` without a `repo`.
@@ -69,6 +70,33 @@ import, and so is a `rev` or a `subdir` without a `repo`.
 - One `[[import]]` puts a project in one group. To put a project in two groups, write two entries with the same
   `path`. The project is still loaded once. The same project in the same group twice, or with no group twice, is an
   error.
+
+### Hiding names
+
+`hide` lists names of the imported project that the importing project does not see through this import.
+
+```toml
+[[import]]
+project-name = "com.example.base"
+group = "local"
+path = "../base"
+hide = ["Debug", "LegacyPoint"]
+```
+
+- A name is one identifier, with no qualifier. It is hidden in every namespace that has it: a type `Debug` and a
+  constructor `Debug` are both hidden. A name is hidden once, and the name of a basic type cannot be hidden.
+- The name must be declared by the imported project, as a type, a constructor or a const. A name that is not is an
+  error at the name in the project-file: `Cannot hide Typo: the project example.a does not declare it`. It is reported
+  with the other errors of the run, so it has exit code 1, and the checks that follow it do not run.
+- A hidden name is not visible, bare or through the group. It is as if the project did not declare it, so it cannot
+  clash with a name of another project in the group (decision 32), and it is no use to hide a name where it does not
+  clash and is not wanted. A bare use of it is an unknown name, and `group::Name` is an unknown name in the group.
+- The project does not change. Its own files see its own names, and the canonical name of a hidden declaration is the
+  same. It can still be written with the full name of its project, `com.example.base::Debug`, which is always the
+  declaration of that project and so is never ambiguous.
+- Hiding belongs to the import. The same project imported into two groups, with two entries, can hide differently, and
+  another project that imports it sees what it does not hide.
+- The project itself cannot hide its own names, and the prelude can be hidden from like any other project.
 
 ### Projects from a repository
 

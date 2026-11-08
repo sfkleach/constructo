@@ -1,0 +1,13 @@
+[project]
+name = "example.app"
+
+[[import]]
+project-name = "example.a"
+group = "local"
+path = "../a"
+hide = ["Secret"]
+
+[[import]]
+project-name = "example.b"
+group = "local"
+path = "../b"

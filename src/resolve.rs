@@ -24,10 +24,53 @@ use std::collections::{HashMap, HashSet};
 pub struct ProjectInfo {
     /// The full name, which is empty for the files that were given without a project.
     pub name: String,
-    /// Each import as the group it is put into, if any, and the index of the project that it brings in.
-    pub imports: Vec<(Option<String>, usize)>,
+    /// The imports, in the order of the project-file.
+    pub imports: Vec<ImportInfo>,
     /// True for a project that is built in.
     pub builtin: bool,
+}
+
+/// An import as the resolution sees it: the group that the project is put into, if any, and the project that it brings
+/// in, with the names of that project which the import hides.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportInfo {
+    pub group: Option<String>,
+    /// The index of the project that is brought in.
+    pub target: usize,
+    /// The names that are hidden, each with its place in the project-file. A hidden name is not visible through this
+    /// import, though the project still has it, and it can be written with the full name of the project.
+    pub hide: Vec<(String, Pos)>,
+    /// The project-file that has the import, as it is shown in a message.
+    pub file: String,
+}
+
+impl ImportInfo {
+    /// An import that hides nothing.
+    pub fn new(group: Option<&str>, target: usize) -> ImportInfo {
+        ImportInfo {
+            group: group.map(String::from),
+            target,
+            hide: Vec::new(),
+            file: String::new(),
+        }
+    }
+
+    fn hides(&self, name: &str) -> bool {
+        self.hide.iter().any(|(hidden, _)| hidden == name)
+    }
+}
+
+/// A project of a group together with what is hidden from it: the project itself, which hides nothing, or an import.
+#[derive(Clone, Copy)]
+struct Member<'a> {
+    home: Home,
+    import: Option<&'a ImportInfo>,
+}
+
+impl Member<'_> {
+    fn hides(&self, name: &str) -> bool {
+        self.import.is_some_and(|import| import.hides(name))
+    }
 }
 
 /// How the sources are divided into projects.
@@ -55,6 +98,9 @@ enum Ns {
 pub struct Resolution {
     /// The errors in types files, each with the index of its source.
     pub diagnostics: Vec<(usize, Diagnostic)>,
+    /// The errors in the imports, which are in the project-files and not in the sources. They are reported before the
+    /// others, and the later checks do not run if there are any.
+    pub import_errors: Vec<Diagnostic>,
     /// The first error in each top-level value that has one, with the index of its source and of the value. These
     /// are kept apart because they are reported in turn with the type errors of the values, not before them.
     pub value_errors: Vec<(usize, usize, Diagnostic)>,
@@ -98,6 +144,7 @@ pub fn resolve(sources: &[Source], parsed: &mut [Parsed], layout: &Layout) -> Re
         sites: HashMap::new(),
     };
     resolver.collect(parsed);
+    let import_errors = resolver.import_errors();
     let mut diagnostics = Vec::new();
     // This is done before the names are rewritten, as the declarations are compared by the names written.
     for (index, pos, message, (other, at)) in resolver.clashes(parsed) {
@@ -143,6 +190,7 @@ pub fn resolve(sources: &[Source], parsed: &mut [Parsed], layout: &Layout) -> Re
     };
     Resolution {
         diagnostics,
+        import_errors,
         value_errors,
         visible_types,
         names,
@@ -181,6 +229,25 @@ impl<'a> Resolver<'a> {
         }
     }
 
+    /// The names that an import hides but that the imported project does not declare, which is most likely a mistake.
+    fn import_errors(&self) -> Vec<Diagnostic> {
+        let mut errors = Vec::new();
+        for project in &self.layout.projects {
+            for import in &project.imports {
+                for (name, pos) in &import.hide {
+                    if !self.declares(import.target, Ns::Type, name) && !self.declares(import.target, Ns::Value, name) {
+                        let message = format!(
+                            "Cannot hide {}: the project {} does not declare it",
+                            name, self.layout.projects[import.target].name
+                        );
+                        errors.push(Diagnostic::new(&import.file, *pos, message));
+                    }
+                }
+            }
+        }
+        errors
+    }
+
     fn add(&mut self, home: Home, ns: Ns, name: &str, site: (usize, Pos)) {
         self.declared.entry((home, ns)).or_default().insert(name.to_string());
         self.sites.entry((home, ns, name.to_string())).or_insert(site);
@@ -190,38 +257,42 @@ impl<'a> Resolver<'a> {
     /// the order of the import with the project itself first for `local`, share one scope, so a name may be declared
     /// by only one of them. The later declaration is the error, given with its message and the place of the first.
     /// This is found for every group of every project, and each declaration is reported once, so that a clash is
-    /// found when the projects are loaded and never at a use.
+    /// found when the projects are loaded and never at a use. A name that an import hides is not in the scope.
     fn clashes(&self, parsed: &[Parsed]) -> Vec<(usize, Pos, String, (usize, Pos))> {
         let mut found: Vec<(usize, Pos, String, (usize, Pos))> = Vec::new();
         let mut seen = HashSet::new();
         for home in 0..self.layout.projects.len() {
             let mut groups: Vec<&str> = vec!["local"];
-            for (group, _) in &self.layout.projects[home].imports {
-                if let Some(group) = group.as_deref() {
+            for import in &self.layout.projects[home].imports {
+                if let Some(group) = import.group.as_deref() {
                     if !groups.contains(&group) {
                         groups.push(group);
                     }
                 }
             }
             for group in groups {
-                let mut homes = self.group_homes(home, group).unwrap_or_default();
+                let mut members = self.group_members(home, group).unwrap_or_default();
                 // The project itself comes last, so that a clash with an import is reported in the project, whose
                 // files the user can change, and not in the import.
-                if let Some(at) = homes.iter().position(|h| *h == home) {
-                    homes.remove(at);
-                    homes.push(home);
+                if let Some(at) = members.iter().position(|m| m.home == home) {
+                    let own = members.remove(at);
+                    members.push(own);
                 }
-                for (at, later) in homes.iter().enumerate().skip(1) {
-                    let earlier = &homes[..at];
+                for (at, later) in members.iter().enumerate().skip(1) {
+                    let earlier = &members[..at];
                     for (index, file) in parsed.iter().enumerate() {
                         let Parsed::Types(file) = file else { continue };
-                        if self.homes[index] != *later {
+                        if self.homes[index] != later.home {
                             continue;
                         }
                         let mut check = |ns: Ns, kind: &str, name: &str, pos: Pos| {
+                            if later.hides(name) {
+                                return;
+                            }
                             let first = earlier
                                 .iter()
-                                .find_map(|other| self.sites.get(&(*other, ns, name.to_string())).copied());
+                                .filter(|other| !other.hides(name))
+                                .find_map(|other| self.sites.get(&(other.home, ns, name.to_string())).copied());
                             let message = format!("Duplicate {} {}", kind, name);
                             if let Some(site) = first {
                                 if seen.insert((index, pos.line, pos.col, message.clone())) {
@@ -246,29 +317,35 @@ impl<'a> Resolver<'a> {
         found
     }
 
-    /// The homes in the group `local` of a home: the project itself, then the projects imported into `local`.
-    fn local_homes(&self, home: Home) -> Vec<Home> {
-        let mut homes = vec![home];
-        for (group, target) in &self.layout.projects[home].imports {
-            if group.as_deref() == Some("local") && !homes.contains(target) {
-                homes.push(*target);
+    /// The members of the group `local` of a home: the project itself, then the projects imported into `local`.
+    fn local_members(&self, home: Home) -> Vec<Member<'a>> {
+        let mut members = vec![Member { home, import: None }];
+        for import in &self.layout.projects[home].imports {
+            if import.group.as_deref() == Some("local") && !members.iter().any(|m| m.home == import.target) {
+                members.push(Member {
+                    home: import.target,
+                    import: Some(import),
+                });
             }
         }
-        homes
+        members
     }
 
-    /// The projects in a group of a home, or `None` if the project has no such group.
-    fn group_homes(&self, home: Home, group: &str) -> Option<Vec<Home>> {
+    /// The members of a group of a home, or `None` if the project has no such group.
+    fn group_members(&self, home: Home, group: &str) -> Option<Vec<Member<'a>>> {
         if group == "local" {
-            return Some(self.local_homes(home));
+            return Some(self.local_members(home));
         }
-        let mut homes = Vec::new();
-        for (name, target) in &self.layout.projects[home].imports {
-            if name.as_deref() == Some(group) && !homes.contains(target) {
-                homes.push(*target);
+        let mut members: Vec<Member<'a>> = Vec::new();
+        for import in &self.layout.projects[home].imports {
+            if import.group.as_deref() == Some(group) && !members.iter().any(|m| m.home == import.target) {
+                members.push(Member {
+                    home: import.target,
+                    import: Some(import),
+                });
             }
         }
-        (!homes.is_empty()).then_some(homes)
+        (!members.is_empty()).then_some(members)
     }
 
     /// The project that a full name refers to: the project itself, or one that it imports.
@@ -279,8 +356,8 @@ impl<'a> Resolver<'a> {
         self.layout.projects[home]
             .imports
             .iter()
-            .find(|(_, target)| self.layout.projects[*target].name == full)
-            .map(|(_, target)| *target)
+            .find(|import| self.layout.projects[import.target].name == full)
+            .map(|import| import.target)
     }
 
     fn declares(&self, home: Home, ns: Ns, name: &str) -> bool {
@@ -288,13 +365,14 @@ impl<'a> Resolver<'a> {
     }
 
     fn visible_types(&self, home: Home) -> HashSet<String> {
-        self.local_homes(home)
+        self.local_members(home)
             .into_iter()
-            .flat_map(|h| {
+            .flat_map(|member| {
                 self.declared
-                    .get(&(h, Ns::Type))
+                    .get(&(member.home, Ns::Type))
                     .into_iter()
                     .flat_map(|names| names.iter().cloned())
+                    .filter(move |name| !member.hides(name))
             })
             .collect()
     }
@@ -309,10 +387,14 @@ impl<'a> Resolver<'a> {
         if qualifier.is_none() && ns == Ns::Type && (params.iter().any(|p| p == name) || BASIC_TYPES.contains(&name)) {
             return (written.to_string(), None);
         }
-        let homes = match qualifier {
-            None => self.local_homes(home),
+        // A name written with the full name of a project is the project's own, so nothing is hidden from it.
+        let members = match qualifier {
+            None => self.local_members(home),
             Some(qualifier) if qualifier.contains('.') => match self.full_home(home, qualifier) {
-                Some(found) => vec![found],
+                Some(found) => vec![Member {
+                    home: found,
+                    import: None,
+                }],
                 None => {
                     let message = format!(
                         "Unknown project {}: a project can name itself and the projects it imports",
@@ -321,12 +403,16 @@ impl<'a> Resolver<'a> {
                     return (written.to_string(), Some(message));
                 }
             },
-            Some(qualifier) => match self.group_homes(home, qualifier) {
-                Some(homes) => homes,
+            Some(qualifier) => match self.group_members(home, qualifier) {
+                Some(members) => members,
                 None => return (written.to_string(), Some(format!("Unknown group {}", qualifier))),
             },
         };
-        let found: Vec<Home> = homes.into_iter().filter(|h| self.declares(*h, ns, name)).collect();
+        let found: Vec<Home> = members
+            .into_iter()
+            .filter(|m| !m.hides(name) && self.declares(m.home, ns, name))
+            .map(|m| m.home)
+            .collect();
         match found.as_slice() {
             [] => match qualifier {
                 None => (written.to_string(), None),
@@ -515,9 +601,10 @@ impl Names {
                 continue;
             }
             let found: Vec<Home> = resolver
-                .local_homes(*home)
+                .local_members(*home)
                 .into_iter()
-                .filter(|h| declares(*h))
+                .filter(|m| declares(m.home) && !m.hides(local))
+                .map(|m| m.home)
                 .collect();
             if found == [target] {
                 return local.to_string();
@@ -546,20 +633,40 @@ mod tests {
         app: &str,
         values: Option<&str>,
     ) -> Report {
-        let info = |name: &str, imports: Vec<(Option<String>, usize)>, builtin: bool| ProjectInfo {
+        with_hidden(prelude, groups, (&[], &[]), a, b, app, values)
+    }
+
+    /// As `with_prelude`, with the names that `app` hides from the imports of `a` and of `b`.
+    fn with_hidden(
+        prelude: Option<&str>,
+        groups: (Option<&str>, Option<&str>),
+        hide: (&[&str], &[&str]),
+        a: &str,
+        b: &str,
+        app: &str,
+        values: Option<&str>,
+    ) -> Report {
+        let info = |name: &str, imports: Vec<ImportInfo>, builtin: bool| ProjectInfo {
             name: name.to_string(),
             imports,
             builtin,
         };
-        let mut imports = vec![(groups.0.map(String::from), 1), (groups.1.map(String::from), 2)];
+        let mut imports = vec![ImportInfo::new(groups.0, 1), ImportInfo::new(groups.1, 2)];
+        for (import, names) in imports.iter_mut().zip([hide.0, hide.1]) {
+            import.hide = names
+                .iter()
+                .map(|name| (name.to_string(), Pos { line: 3, col: 9 }))
+                .collect();
+            import.file = "constructo.toml".to_string();
+        }
         if prelude.is_some() {
-            imports.insert(0, (prelude.map(String::from), 0));
+            imports.insert(0, ImportInfo::new(prelude, 0));
         }
         let layout_of = Layout {
             projects: vec![
                 info("constructo.prelude", vec![], true),
-                info("example.a", vec![(Some("local".to_string()), 0)], false),
-                info("example.b", vec![(Some("local".to_string()), 0)], false),
+                info("example.a", vec![ImportInfo::new(Some("local"), 0)], false),
+                info("example.b", vec![ImportInfo::new(Some("local"), 0)], false),
                 info("example.app", imports, false),
             ],
             owners: [0, 1, 2, 3].into_iter().chain(values.map(|_| 3)).collect(),
@@ -644,6 +751,81 @@ mod tests {
             None,
         );
         assert!(report.is_ok());
+    }
+
+    #[test]
+    fn a_hidden_name_is_not_visible_and_causes_no_clash() {
+        let a = "enum A = Middle, Left;";
+        let b = "enum B = Middle, Right;";
+        let local = (Some("local"), Some("local"));
+        // Without the hide the name is a clash.
+        assert_eq!(messages(&run(local, a, b, "const x: A = Left;", None)).len(), 1);
+        // Hiding it in either import removes the clash.
+        for hide in [(&["Middle"][..], &[][..]), (&[][..], &["Middle"][..])] {
+            let report = with_hidden(LOCAL, local, hide, a, b, "const x: A = Left;", None);
+            assert!(report.is_ok(), "{:?}", messages(&report));
+        }
+    }
+
+    #[test]
+    fn a_hidden_name_is_unknown_bare_and_in_its_group() {
+        let a = "enum A = Left, Hidden;";
+        let b = "enum B = Right;";
+        let local = (Some("local"), Some("other"));
+        let report = with_hidden(LOCAL, local, (&["Hidden"], &[]), a, b, "const x: A = Hidden;", None);
+        assert_eq!(
+            messages(&report),
+            vec!["ERROR: Unknown constructor Hidden (app.types, line 1, col 14)"]
+        );
+        let report = with_hidden(
+            LOCAL,
+            local,
+            (&["Hidden"], &[]),
+            a,
+            b,
+            "const x: A = local::Hidden;",
+            None,
+        );
+        assert_eq!(
+            messages(&report),
+            vec!["ERROR: Unknown constructor Hidden in local (app.types, line 1, col 14)"]
+        );
+        // Other names of the project are still there.
+        let report = with_hidden(LOCAL, local, (&["Hidden"], &[]), a, b, "const x: A = Left;", None);
+        assert!(report.is_ok(), "{:?}", messages(&report));
+    }
+
+    #[test]
+    fn a_hidden_name_can_be_written_with_the_full_name_of_the_project() {
+        let a = "enum A = Left, Hidden;";
+        let report = with_hidden(
+            LOCAL,
+            (Some("local"), Some("other")),
+            (&["Hidden"], &[]),
+            a,
+            "enum B = Right;",
+            "const x: A = example.a::Hidden;",
+            None,
+        );
+        assert!(report.is_ok(), "{:?}", messages(&report));
+    }
+
+    #[test]
+    fn a_hide_that_names_nothing_of_the_project_is_an_error_in_the_project_file() {
+        let report = with_hidden(
+            LOCAL,
+            (Some("local"), Some("other")),
+            (&["Nope"], &[]),
+            "enum A = Left;",
+            "enum B = Right;",
+            "const x: A = Left;",
+            None,
+        );
+        assert_eq!(
+            messages(&report),
+            vec!["ERROR: Cannot hide Nope: the project example.a does not declare it (constructo.toml, line 3, col 9)"]
+        );
+        assert!(!report.type_checked);
     }
 
     #[test]

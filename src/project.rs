@@ -89,6 +89,8 @@ struct ImportTable {
     subdir: Option<Spanned<String>>,
     builtin: Option<Spanned<String>>,
     group: Option<Spanned<String>>,
+    /// The names of the project that are not visible through this import.
+    hide: Option<Vec<Spanned<String>>>,
 }
 
 /// An `[[import]]` of a project-file: a project that is brought in, and the group that it is put into.
@@ -98,6 +100,8 @@ pub struct Import {
     pub project_name: String,
     /// The group the project is put into. Without one the project can only be named by its full name.
     pub group: Option<String>,
+    /// The names of the imported project that are hidden, each with the place where it is written.
+    pub hide: Vec<(String, Pos)>,
     /// The folder of the imported project, as the importing folder joined to the `path`. For a `repo` it is empty
     /// until the repository has been fetched, and then it is the folder in the cache.
     pub folder: PathBuf,
@@ -489,9 +493,23 @@ impl Project {
                 );
                 return Err(invalid(found.span().start, message));
             }
+            let mut hide: Vec<(String, Pos)> = Vec::new();
+            for hidden in entry.hide.iter().flatten() {
+                let word = hidden.get_ref();
+                if let Err(reason) = check_hidden(word) {
+                    let message = format!("Cannot hide \"{}\": {}", word, reason);
+                    return Err(invalid(hidden.span().start, message));
+                }
+                if hide.iter().any(|(earlier, _)| earlier == word) {
+                    let message = format!("The name {} is hidden more than once", word);
+                    return Err(invalid(hidden.span().start, message));
+                }
+                hide.push((word.clone(), at(hidden.span().start)));
+            }
             imports.push(Import {
                 project_name: name.clone(),
                 group: entry.group.map(Spanned::into_inner),
+                hide,
                 folder: if source_builtin {
                     PathBuf::from(source)
                 } else if repo.is_some() {
@@ -619,6 +637,7 @@ impl Loader {
                 Import {
                     project_name: PRELUDE_PROJECT.to_string(),
                     group: Some("local".to_string()),
+                    hide: Vec::new(),
                     folder: PathBuf::from(prelude.uri),
                     repo: None,
                     target: None,
@@ -928,6 +947,29 @@ fn absolute(folder: &Path) -> std::io::Result<PathBuf> {
     std::fs::canonicalize(folder)
 }
 
+/// Checks that a name to be hidden is a single identifier, which starts with a letter or `_` and has letters, digits
+/// and `_`, and that it is not the name of a basic type, which cannot be declared. The reason is returned if not.
+fn check_hidden(name: &str) -> Result<(), String> {
+    let mut chars = name.chars();
+    match chars.next() {
+        None => return Err("a name cannot be empty".to_string()),
+        Some(first) if !(first.is_ascii_alphabetic() || first == '_') => {
+            return Err("a name starts with a letter or '_'".to_string());
+        }
+        Some(_) => {}
+    }
+    if let Some(bad) = chars.find(|c| !(c.is_ascii_alphanumeric() || *c == '_')) {
+        return Err(format!(
+            "it has '{}', but a name has only letters, digits and '_', and no qualifier",
+            bad
+        ));
+    }
+    if crate::validate::BASIC_TYPES.contains(&name) {
+        return Err("it is a basic type, which no project declares".to_string());
+    }
+    Ok(())
+}
+
 /// Checks that the group name is a single part, which starts with a letter and has letters, digits and `_`. The
 /// reason is returned if it is not valid.
 fn check_group(group: &str) -> Result<(), String> {
@@ -1057,6 +1099,43 @@ mod tests {
         assert_eq!(imports[1].folder, Path::new("/abs/x"));
         assert_eq!(imports[0].target, None);
         assert_eq!((imports[0].name_pos.line, imports[0].source_pos.line), (5, 7));
+    }
+
+    #[test]
+    fn an_import_can_hide_names() {
+        let text = [
+            ONE,
+            "\n[[import]]\nproject-name = \"x.y\"\npath = \"s\"\nhide = [\"Debug\", \"legacy_point\"]\n",
+            "\n[[import]]\nproject-name = \"x.z\"\npath = \"t\"\n",
+        ]
+        .concat();
+        let imports = imports(&text);
+        let hidden: Vec<&str> = imports[0].hide.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(hidden, ["Debug", "legacy_point"]);
+        assert_eq!(imports[0].hide[0].1.line, 7);
+        assert!(imports[1].hide.is_empty());
+    }
+
+    #[test]
+    fn a_hidden_name_is_one_identifier_and_is_hidden_once() {
+        let bad = |hide: &str| {
+            error(&format!(
+                "{}\n[[import]]\nproject-name = \"x.y\"\npath = \"s\"\nhide = {}\n",
+                ONE, hide
+            ))
+        };
+        for (hide, reason) in [
+            ("[\"\"]", "a name cannot be empty"),
+            ("[\"1a\"]", "starts with a letter"),
+            ("[\"a::B\"]", "no qualifier"),
+            ("[\"a.b\"]", "no qualifier"),
+            ("[\"Nat\"]", "basic type"),
+            ("[\"A\", \"A\"]", "hidden more than once"),
+        ] {
+            let (_, _, message) = bad(hide);
+            assert!(message.contains(reason), "{}: {}", hide, message);
+        }
+        assert!(bad("\"A\"").2.contains("invalid type"));
     }
 
     #[test]
