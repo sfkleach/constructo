@@ -58,6 +58,7 @@ in which nothing matches is not an error, since a project may consist only of im
 | `subdir`       | string | no       | With `repo` only: the folder inside the repository that holds the project. |
 | `group`        | string | no       | The group that the project is put into. Without one, only by its full name. |
 | `hide`         | array of strings | no | Names of the project that are not visible through this import.      |
+| `rename`       | table  | no       | Names of the project that are written differently through this import. |
 
 Exactly one of `path`, `builtin` and `repo` says where the project is. Two of them, or none, is an error at the
 import, and so is a `rev` or a `subdir` without a `repo`.
@@ -97,6 +98,43 @@ hide = ["Debug", "LegacyPoint"]
 - Hiding belongs to the import. The same project imported into two groups, with two entries, can hide differently, and
   another project that imports it sees what it does not hide.
 - The project itself cannot hide its own names, and the prelude can be hidden from like any other project.
+
+### Renaming names
+
+`rename` is a table, `[import.rename]`, that gives a name of the imported project another name in the importing
+project. Each entry is `NAME_HERE = "NAME_THERE"`: the key is the name that is written in the importing project, and
+the value is the name that the imported project declares.
+
+```toml
+[[import]]
+project-name = "com.example.base"
+group = "local"
+path = "../base"
+
+[import.rename]
+# The name used here = the name in the imported project.
+Point = "BasePoint"
+```
+
+This makes the `BasePoint` of `com.example.base` be written `Point`. It is how a clash in a group is avoided when
+neither name can be hidden.
+
+- Both names are one identifier, with no qualifier, and neither is the name of a basic type. A type or a constructor
+  starts with a capital letter and a const does not, and the new name starts as the declared one does. A name cannot be
+  renamed to itself.
+- Like `hide`, a rename is for every namespace that has the name: a type and a constructor of one spelling are renamed
+  together.
+- The declared name must be declared by the imported project, or else it is an error at the entry: `Cannot rename Typo:
+  the project example.a does not declare it`. A name cannot be both hidden and renamed, and is renamed once. A key is
+  unique in the table, so two names cannot be renamed to one.
+- The new name may not be a name the project declares, unless that name is itself hidden or renamed, so two names can be
+  swapped: `Cannot rename Left to Taken: the project example.a declares Taken too`.
+- Through the import the declared name is no longer visible: it is an unknown name, bare or with the group. The new
+  name takes its place, bare and with the group, and is checked for clashes in the group (decision 32) as a name that
+  the project declares would be.
+- As for `hide`, the project does not change and the full name of the project is not renamed:
+  `com.example.base::BasePoint` is the declaration and `com.example.base::Point` is an unknown name. A message shows a
+  name as the importing file writes it, which is the new name.
 
 ### Projects from a repository
 

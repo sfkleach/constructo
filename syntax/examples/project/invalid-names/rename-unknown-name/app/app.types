@@ -1,0 +1,2 @@
+// expect: Cannot rename Typo: the project example.a does not declare it
+const x: A = Left;

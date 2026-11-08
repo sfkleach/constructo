@@ -1,0 +1,4 @@
+// Both projects declare Middle and limit, so the import of b writes them as OtherMiddle and other_limit. The consts
+// are not used here, since the value of a const may not name another without --allow-refs.
+enum Holder = Holder { first: A, second: B };
+const both: Holder = Holder { first: Middle, second: OtherMiddle };

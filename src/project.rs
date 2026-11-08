@@ -9,7 +9,7 @@ use crate::fetch::{redact, validate_url, Cache, Fetched};
 use crate::lock::{check_path, Lock, LockedProject, LockedRemote, LOCK_FILE};
 use glob::{MatchOptions, Pattern};
 use serde::Deserialize;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use toml::Spanned;
@@ -91,6 +91,8 @@ struct ImportTable {
     group: Option<Spanned<String>>,
     /// The names of the project that are not visible through this import.
     hide: Option<Vec<Spanned<String>>>,
+    /// The names of the project that are written differently: the new name is the key, and the declared name the value.
+    rename: Option<BTreeMap<Spanned<String>, Spanned<String>>>,
 }
 
 /// An `[[import]]` of a project-file: a project that is brought in, and the group that it is put into.
@@ -102,6 +104,9 @@ pub struct Import {
     pub group: Option<String>,
     /// The names of the imported project that are hidden, each with the place where it is written.
     pub hide: Vec<(String, Pos)>,
+    /// The names that are renamed, each as the new name, the name that the imported project declares, and the place
+    /// of the declared name.
+    pub rename: Vec<(String, String, Pos)>,
     /// The folder of the imported project, as the importing folder joined to the `path`. For a `repo` it is empty
     /// until the repository has been fetched, and then it is the folder in the cache.
     pub folder: PathBuf,
@@ -506,10 +511,41 @@ impl Project {
                 }
                 hide.push((word.clone(), at(hidden.span().start)));
             }
+            let mut rename: Vec<(String, String, Pos)> = Vec::new();
+            for (new, old) in entry.rename.iter().flatten() {
+                let (new_word, old_word) = (new.get_ref(), old.get_ref());
+                for (word, place) in [(new_word, new), (old_word, old)] {
+                    if let Err(reason) = check_hidden(word) {
+                        let message = format!("Cannot rename \"{}\": {}", word, reason);
+                        return Err(invalid(place.span().start, message));
+                    }
+                }
+                if new_word == old_word {
+                    let message = format!("{} is renamed to itself", new_word);
+                    return Err(invalid(new.span().start, message));
+                }
+                if is_upper(new_word) != is_upper(old_word) {
+                    let message = format!(
+                        "Cannot rename {} to {}: a type or constructor starts with a capital letter, a const does not",
+                        old_word, new_word
+                    );
+                    return Err(invalid(new.span().start, message));
+                }
+                if hide.iter().any(|(hidden, _)| hidden == old_word) {
+                    let message = format!("{} is both hidden and renamed", old_word);
+                    return Err(invalid(old.span().start, message));
+                }
+                if rename.iter().any(|(_, earlier, _)| earlier == old_word) {
+                    let message = format!("{} is renamed more than once", old_word);
+                    return Err(invalid(old.span().start, message));
+                }
+                rename.push((new_word.clone(), old_word.clone(), at(old.span().start)));
+            }
             imports.push(Import {
                 project_name: name.clone(),
                 group: entry.group.map(Spanned::into_inner),
                 hide,
+                rename,
                 folder: if source_builtin {
                     PathBuf::from(source)
                 } else if repo.is_some() {
@@ -638,6 +674,7 @@ impl Loader {
                     project_name: PRELUDE_PROJECT.to_string(),
                     group: Some("local".to_string()),
                     hide: Vec::new(),
+                    rename: Vec::new(),
                     folder: PathBuf::from(prelude.uri),
                     repo: None,
                     target: None,
@@ -947,6 +984,11 @@ fn absolute(folder: &Path) -> std::io::Result<PathBuf> {
     std::fs::canonicalize(folder)
 }
 
+/// True for a name that starts with a capital letter, as a type or a constructor does.
+fn is_upper(name: &str) -> bool {
+    name.starts_with(|c: char| c.is_ascii_uppercase())
+}
+
 /// Checks that a name to be hidden is a single identifier, which starts with a letter or `_` and has letters, digits
 /// and `_`, and that it is not the name of a basic type, which cannot be declared. The reason is returned if not.
 fn check_hidden(name: &str) -> Result<(), String> {
@@ -1136,6 +1178,50 @@ mod tests {
             assert!(message.contains(reason), "{}: {}", hide, message);
         }
         assert!(bad("\"A\"").2.contains("invalid type"));
+    }
+
+    #[test]
+    fn an_import_can_rename_names() {
+        let text = [
+            ONE,
+            concat!(
+                "\n[[import]]\nproject-name = \"x.y\"\npath = \"s\"\n[import.rename]\n",
+                "Point = \"BasePoint\"\nlimit = \"base_limit\"\n"
+            ),
+        ]
+        .concat();
+        let imports = imports(&text);
+        let renamed: Vec<(&str, &str)> = imports[0]
+            .rename
+            .iter()
+            .map(|(n, o, _)| (n.as_str(), o.as_str()))
+            .collect();
+        assert_eq!(renamed, [("Point", "BasePoint"), ("limit", "base_limit")]);
+        assert_eq!(imports[0].rename[0].2.line, 8);
+    }
+
+    #[test]
+    fn a_rename_is_checked_when_the_project_file_is_read() {
+        let bad = |hide: &str, rename: &str| {
+            let text = format!(
+                "{}\n[[import]]\nproject-name = \"x.y\"\npath = \"s\"\n{}\n[import.rename]\n{}\n",
+                ONE, hide, rename
+            );
+            error(&text).2
+        };
+        for (hide, rename, reason) in [
+            ("", "A = \"A\"", "renamed to itself"),
+            ("", "a = \"B\"", "starts with a capital letter"),
+            ("", "A = \"b\"", "starts with a capital letter"),
+            ("", "A = \"B\"\nC = \"B\"", "renamed more than once"),
+            ("hide = [\"B\"]", "A = \"B\"", "both hidden and renamed"),
+            ("", "A = \"\"", "cannot be empty"),
+            ("", "Nat = \"B\"", "basic type"),
+            ("", "A = \"x::B\"", "no qualifier"),
+        ] {
+            let message = bad(hide, rename);
+            assert!(message.contains(reason), "{}: {}", rename, message);
+        }
     }
 
     #[test]

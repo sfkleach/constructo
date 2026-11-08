@@ -1,0 +1,2 @@
+// expect: Unknown constructor Old
+const x: A = Old;
