@@ -1,0 +1,5 @@
+// Both projects declare Middle, so the import of b hides it and a bare Middle is the one of a. The hidden one can still
+// be written with the full name of its project.
+const bare: A = Middle;
+const full: B = example.b::Middle;
+const other: B = Right;

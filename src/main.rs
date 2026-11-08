@@ -5,8 +5,8 @@ use constructo::lock::Lock;
 use constructo::project::{ProjectError, Remotes};
 use constructo::verify::{read_lock, update_lock_with, verify_lock_with};
 use constructo::{
-    check_in_projects, source_kind, syntax_error, CheckOptions, Config, Experimental, InputFile, Layout, Outcome,
-    Project, ProjectInfo, ProjectSet, Source, SourceKind,
+    check_in_projects, source_kind, syntax_error, CheckOptions, Config, Experimental, ImportInfo, InputFile, Layout,
+    Outcome, Project, ProjectInfo, ProjectSet, Source, SourceKind,
 };
 use std::collections::{HashSet, VecDeque};
 use std::ffi::OsString;
@@ -447,7 +447,12 @@ fn layout(set: &ProjectSet, sources: usize) -> Layout {
             imports: project
                 .imports
                 .iter()
-                .map(|import| (import.group.clone(), import.target.expect("the set has been loaded")))
+                .map(|import| ImportInfo {
+                    group: import.group.clone(),
+                    target: import.target.expect("the set has been loaded"),
+                    hide: import.hide.clone(),
+                    file: project.project_file(),
+                })
                 .collect(),
             builtin: project.builtin,
         })

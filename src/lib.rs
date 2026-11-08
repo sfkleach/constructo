@@ -27,7 +27,7 @@ use validate::{validate, ParsedFile};
 pub use config::Config;
 pub use parser::{Experimental, SourceKind};
 pub use project::{InputFile, Project, ProjectSet, PRELUDE_PROJECT};
-pub use resolve::{Layout, ProjectInfo};
+pub use resolve::{ImportInfo, Layout, ProjectInfo};
 pub use typecheck::{DEFAULT_INFER_LIMIT, DEFAULT_VALUE_LIMIT};
 
 /// The standard prelude: declarations that are available to every types file unless the prelude is disabled.
@@ -208,7 +208,7 @@ fn plain_layout(sources: &[Source]) -> Layout {
         builtin: true,
     };
     let plain = ProjectInfo {
-        imports: vec![(Some("local".to_string()), 0)],
+        imports: vec![ImportInfo::new(Some("local"), 0)],
         ..plain
     };
     Layout {
@@ -264,7 +264,7 @@ fn check_with_layout(sources: &[Source], layout: Option<&Layout>, options: &Chec
     let resolution = resolve::resolve(sources, &mut parsed_sources, layout);
     // The names in a types file are unreliable if some could not be resolved, so the validity checks are skipped, as
     // they are for a syntax error. The names in the values are only looked at when the values are type-checked.
-    let mut unresolved = false;
+    let mut unresolved = !resolution.import_errors.is_empty();
     for (index, diagnostic) in &resolution.diagnostics {
         unresolved = true;
         outcomes[*index] = Outcome::Failed;
@@ -291,7 +291,7 @@ fn check_with_layout(sources: &[Source], layout: Option<&Layout>, options: &Chec
             found.push((indexes[file], diagnostic));
         }
     }
-    let type_checked = found.is_empty() && options.type_check;
+    let type_checked = found.is_empty() && !unresolved && options.type_check;
     let mut consts = Vec::new();
     if type_checked {
         consts = type_check_values(
@@ -309,14 +309,12 @@ fn check_with_layout(sources: &[Source], layout: Option<&Layout>, options: &Chec
         info.name = show(info.source, &info.name);
         info.ty = show(info.source, &info.ty);
     }
-    let diagnostics = found
-        .into_iter()
-        .map(|(index, mut diagnostic)| {
-            diagnostic.message = show(index, &diagnostic.message);
-            diagnostic.note = diagnostic.note.map(|note| show(index, &note));
-            diagnostic
-        })
-        .collect();
+    let shown = found.into_iter().map(|(index, mut diagnostic)| {
+        diagnostic.message = show(index, &diagnostic.message);
+        diagnostic.note = diagnostic.note.map(|note| show(index, &note));
+        diagnostic
+    });
+    let diagnostics = resolution.import_errors.iter().cloned().chain(shown).collect();
     Report {
         diagnostics,
         outcomes,
