@@ -4,6 +4,7 @@
 
 pub mod ast;
 pub mod config;
+pub mod convert;
 pub mod diagnostics;
 pub mod digest;
 pub mod fetch;
