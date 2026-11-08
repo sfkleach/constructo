@@ -1,2 +1,0 @@
-// expect: The name Middle is ambiguous: it could be example.a::Middle or example.b::Middle
-const x: A = Middle;

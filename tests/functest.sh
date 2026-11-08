@@ -156,7 +156,7 @@ else
 fi
 expect_exit "generic consts are valid, and may use the prelude consts without --allow-refs" 0 \
     check "$EXAMPLES/valid/generic-consts.types"
-expect_exit "a prelude const that is redefined is ambiguous where it is used" 1 check "$EXAMPLES/parses-but-invalid/redefines-null.types"
+expect_exit "a prelude const that is redefined is a duplicate" 1 check "$EXAMPLES/parses-but-invalid/redefines-null.types"
 expect_exit "--no-prelude allows redefining a prelude const" 0 \
     check --no-prelude --allow-refs "$EXAMPLES/parses-but-invalid/redefines-null.types"
 expect_exit "values may use null, true and false" 0 \
@@ -341,7 +341,7 @@ echo "--- prelude ---"
 expect_exit "prelude supplies Option" 0 check "$EXAMPLES/valid/mutual.types"
 expect_exit "--no-prelude hides Option" 1 check --no-prelude "$EXAMPLES/valid/mutual.types"
 expect_exit "prelude supplies Bool" 0 check "$EXAMPLES/valid/uses-bool.types"
-expect_exit "a prelude name that is redeclared is ambiguous where it is used" 1 check "$EXAMPLES/parses-but-invalid/redeclares-bool.types"
+expect_exit "a prelude name that is redeclared is a duplicate" 1 check "$EXAMPLES/parses-but-invalid/redeclares-bool.types"
 expect_exit "--no-prelude allows redeclaring Bool" 0 \
     check --no-prelude "$EXAMPLES/parses-but-invalid/redeclares-bool.types"
 expect_exit "--no-prelude with a self-contained file" 0 check --no-prelude "$EXAMPLES/valid/shapes.types"
@@ -914,13 +914,13 @@ else
 fi
 expect_exit "prelude: the reserved prefix is refused in a project-file" 2 check --dev --project="$PROJECTS/invalid/reserved-name"
 echo "enum Bool = No, Yes;" > "$forward_types"
-expect_exit "prelude: files without a project may declare a name that the prelude has" 0 check "$forward_types"
+expect_exit "prelude: files without a project may not declare a name that the prelude has" 1 check "$forward_types"
 echo "enum Bool = No, Yes; const b: Bool = Yes;" > "$forward_types"
 err="$("$CONSTRUCTO" check "$forward_types" 2>&1 >/dev/null || true)"
-if [[ "$err" == *"The name Bool is ambiguous: it could be the Bool declared in the files given or constructo.prelude::Bool"* ]]; then
-    pass "prelude: files without a project are a project like any other"
+if [[ "$err" == "ERROR: Duplicate type Bool ("*"); first declared at constructo:/prelude/prelude.types, line 1, col 6" ]]; then
+    pass "prelude: the prelude is in the scope of files without a project"
 else
-    fail "prelude: files without a project are a project like any other (got '$err')"
+    fail "prelude: the prelude is in the scope of files without a project (got '$err')"
 fi
 expect_exit "prelude: --no-prelude is the way out for files without a project" 0 check --no-prelude "$forward_types"
 # The values to check come after the project, and a failed project is reported as such.
@@ -940,16 +940,16 @@ if [[ "$verbose" == "OK: $SHAPES (project com.example.shapes)" ]]; then
 else
     fail "project: verbose mode reports the project (got '$verbose')"
 fi
-# The prelude is added ahead of the project as for plain files, so a project that declares Bool needs --no-prelude.
+# The prelude is in the scope of the project, so a project that declares Bool needs --no-prelude or an override.
 bool_project="$(mktemp -d)"
 printf '[project]\nname = "example.ownbool"\n' > "$bool_project/constructo.toml"
 printf 'enum Bool = No, Yes;\nconst flag: Bool = Yes;\n' > "$bool_project/bool.types"
-expect_exit "project: its own Bool is ambiguous with the prelude where it is used" 1 check --dev --project="$bool_project"
+expect_exit "project: its own Bool is a duplicate of the prelude's" 1 check --dev --project="$bool_project"
 err="$("$CONSTRUCTO" check --dev --project="$bool_project" 2>&1 >/dev/null || true)"
-if [[ "$err" == "ERROR: The name Bool is ambiguous: it could be example.ownbool::Bool or constructo.prelude::Bool"* ]]; then
-    pass "project: the ambiguity names both candidates"
+if [[ "$err" == "ERROR: Duplicate type Bool ("*"); first declared at constructo:/prelude/prelude.types, line 1, col 6" ]]; then
+    pass "project: the duplicate is reported at the declaration"
 else
-    fail "project: the ambiguity names both candidates (got '$err')"
+    fail "project: the duplicate is reported at the declaration (got '$err')"
 fi
 expect_exit "project: its own Bool is fine with --no-prelude" 0 check --no-prelude --dev --project="$bool_project"
 # Settings come from --config and the arguments only, never from the project-file.

@@ -49,17 +49,16 @@ To resolve a name `N` written in a file of project P:
 2. Choose the **namespace** from the use. There are two: types, and constructors and consts together (decision 4). A
    name where a type is expected is looked up among the types, and any other name among the constructors and consts.
 3. Keep the candidates that declare `N` in that namespace.
-4. If exactly one remains, that is the declaration. If more than one remains, the name is **ambiguous**. If none
-   remains, the name is unknown.
+4. If one remains, that is the declaration. If none remains, the name is unknown. More than one cannot remain: no two
+   projects of a group declare one name, as below.
 
 The use decides the namespace, so `Shape` can be both a type and a constructor and there is no clash.
 
 ### Errors
 
-All errors are at the use of the name, not at the declaration.
+A name that two projects of a group declare is an error where it is declared (see below). The others are at the use of
+the name.
 
-- A name that more than one candidate declares is ambiguous, and the message lists them:
-  `The name Middle is ambiguous: it could be example.a::Middle or example.b::Middle`.
 - A group that the project does not have: `Unknown group g`.
 - A full name that is neither the project nor a project that it imports:
   `Unknown project a.b.c: a project can name itself and the projects it imports`.
@@ -67,23 +66,30 @@ All errors are at the use of the name, not at the declaration.
   `Unknown const` for the other namespaces.
 - A bare name that nothing declares is not a resolution error. The checks that follow report it as unknown.
 
-A candidate that is declared in the files given with no project is shown as `the Middle declared in the files given`.
+### No clashes in a group
 
-Declaring a name that another project in `local` has is not an error, so a bundle can gain a name without breaking
-every project that imports it. The clash is found only where the name is used bare.
+The projects of a group, and for `local` the project itself, share one scope, so none of them may declare a name that
+another of them declares, in the same namespace. A clash is a duplicate, and is reported where it is declared, like any
+other, with a note that names the first declaration: `Duplicate constructor Middle (b.types, line 1, col 10); first
+declared at a.types, line 1, col 10`. This is found for every group of every project in the run when the projects are
+loaded, whether or not the name is used, and nothing is reported again at a use. The projects of a group are taken in
+the order of the imports, and the project itself last, so that a clash with an import is reported in the project. The
+prelude is in `local`, so a project cannot declare `Bool` unless it puts the prelude in another group. The names of
+projects in different groups do not clash, and a project and a group other than `local` do not either. Decision 32
+records this.
 
 ### Example
 
 Suppose project `P.Q.R` declares the constructors `Left`, `Middle` and `Right`, and project `X.Y.Z` declares `Down`,
-`Middle` and `Up`, and a project imports both into the group `pqrxyz`.
+`Centre` and `Up`, and a project imports both into the group `pqrxyz`.
 
 | Written           | Resolves to                                                                |
 |-------------------|----------------------------------------------------------------------------|
 | `pqrxyz::Left`    | `P.Q.R::Left`                                                              |
 | `pqrxyz::Up`      | `X.Y.Z::Up`                                                                |
-| `pqrxyz::Middle`  | an error: it could be `P.Q.R::Middle` or `X.Y.Z::Middle`                   |
+| `pqrxyz::Centre`  | `X.Y.Z::Centre`                                                            |
 | `P.Q.R::Middle`   | `P.Q.R::Middle`                                                            |
-| `Left`            | an error unless `Left` is declared by exactly one project in `local`       |
+| `Left`            | `P.Q.R::Left` if `P.Q.R` is in `local`, otherwise unknown                  |
 
 ## The prelude
 
@@ -96,10 +102,11 @@ group = "local"
 builtin = "constructo:/prelude"
 ```
 
-unless it has an `[[import]]` of `constructo.prelude` of its own. So `Bool`, `Option`, `null`, `true` and `false` can be
-written bare, and `constructo.prelude::Bool` always works as well. A project that declares its own `Bool` makes each
-bare `Bool` ambiguous, and the way out is to import the prelude into another group, such as `std`, so that `Bool` is the
-project's and `std::Bool` is the prelude's. `--no-prelude` stops the implicit import in every project.
+unless it has an `[[import]]` of `constructo.prelude` of its own. So `Bool`, `Option`, `null`, `true` and `false` can
+be written bare, and `constructo.prelude::Bool` always works as well. A project that declares its own `Bool`, `True`
+or any other name of the prelude has a duplicate at the declaration, and the way out is to import the prelude into
+another group, such as `std`, so that `Bool` is the project's and `std::Bool` is the prelude's. `--no-prelude` stops
+the implicit import in every project.
 
 ## Files without a project
 
@@ -127,4 +134,4 @@ quoted in a message is left as it is, even if it contains an `@`.
 ## Related
 
 - [The project-file](project-file-format.md), where groups and imports are defined.
-- Decisions 4, 25 and 26, in `docs/decisions/`.
+- Decisions 4, 25, 26, 31 and 32, in `docs/decisions/`.

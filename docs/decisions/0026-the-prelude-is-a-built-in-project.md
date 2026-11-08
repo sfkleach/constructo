@@ -1,4 +1,7 @@
 # 0026 - The prelude is a built-in project, 2026-11-01
+> Amended by [decision 32](0032-the-projects-of-a-group-share-no-names.md): two imports in one group that declare a name are a duplicate where it is declared, and a name is never ambiguous at its use.
+
+> Amended by [decision 31](0031-a-declaration-that-clashes-with-its-own-scope-is-a-duplicate.md): a project that declares a name of the prelude gets a duplicate error at the declaration.
 
 ## Issue
 

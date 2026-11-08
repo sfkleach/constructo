@@ -1,2 +1,0 @@
-// expect: The name both::Middle is ambiguous: it could be example.a::Middle or example.b::Middle
-const x: both::A = both::Middle;
