@@ -837,6 +837,12 @@ for case in bundle same-names group hide rename; do
     expect_exit "project/valid-names/$case" 0 check --dev --project="$NAMES/$case/app"
 done
 # A const of another project is a reference to a const, which needs the option as any other does.
+listing="$("$CONSTRUCTO" check -v --dev --project="$PROJECTS/invalid-names/hide-unknown-name/app" 2>/dev/null || true)"
+if [[ "$listing" == *"FAILED: "*"/app (project example.app)"* && "$listing" == *"OK: "*"/app/app.types (data-types)"* ]]; then
+    pass "names: a bad hide fails its project in the verbose output, though its files pass"
+else
+    fail "names: a bad hide fails its project in the verbose output (got '$listing')"
+fi
 expect_exit "project/valid-names/not-transitive" 0 check --allow-refs --dev --project="$NAMES/not-transitive/app"
 expect_exit "a const of another project is a reference" 1 check --dev --project="$NAMES/not-transitive/app"
 # Each invalid case names its expected error, which starts the message, and the exit code is 1.

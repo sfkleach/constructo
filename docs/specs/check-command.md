@@ -109,6 +109,8 @@ to the standard output, one for each input that the user gave, in order:
 | `OK: NAME (data-values, type-checked)`| A values file that parses and fits the types.                     |
 | `FAILED: NAME (KIND)`                 | A file that has an error, with its kind as above.                 |
 
+A project line is `FAILED` if one of its files is, and also if its project-file has an error that is found when the
+names are resolved, such as a name in `hide` that the imported project does not declare, even if all of its files pass.
 A file that was not reached because the run stopped is not listed. The files of the prelude and of the other built-in
 projects are never listed.
 
