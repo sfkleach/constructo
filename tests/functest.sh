@@ -1517,6 +1517,17 @@ else
 fi
 echo ""
 
+# The version is printed by `constructo --version` and `constructo version`, and by nothing else.
+version_flag="$("$CONSTRUCTO" --version 2>&1)" || true
+version_command="$("$CONSTRUCTO" version 2>&1)" || true
+if [[ "$version_flag" == "constructo "[0-9]* && "$version_command" == "$version_flag" ]]; then
+    pass "version: the subcommand and the top-level option say the same"
+else
+    fail "version: the subcommand and the top-level option say the same (got '$version_flag' and '$version_command')"
+fi
+expect_exit "version: the subcommand is exit 0 even with a bad --config" 0 --config /nonexistent/settings.toml version
+expect_exit "version: check has no --version" 2 check --version
+expect_exit "version: project has no --version" 2 project --version
 # `project init` writes a project-file with the defaults, and never changes one that is there.
 init_dir="$(mktemp -d)"
 mkdir "$init_dir/My Shapes"

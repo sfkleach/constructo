@@ -159,8 +159,8 @@ problem and its code, for this command and for the others.
 ## Options
 
 The options that are not settings are `--config`, `--cache`, `--stdin`, `--print-config`, `--project` and `--help`.
-`--version` belongs to `constructo`, and not to `check`. The others are settings, which `--print-config` writes and
-which [the configuration file](config-file.md) lists, with their defaults. In short:
+`--version` belongs to `constructo`, and not to `check`, which has no version of its own. The others are settings,
+which `--print-config` writes and which [the configuration file](config-file.md) lists, with their defaults. In short:
 
 | Option                               | Effect                                                                      |
 |--------------------------------------|-----------------------------------------------------------------------------|

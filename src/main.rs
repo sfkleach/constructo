@@ -113,6 +113,9 @@ enum Command {
     #[command(subcommand)]
     Project(ProjectCommand),
 
+    /// Print the version of constructo, as `constructo --version` does
+    Version,
+
     /// Check the syntax and type-correctness of Constructo files
     #[command(after_help = "\
 Settings can also be put in a TOML file that is named with --config=PATH. An option on the command line overrides the \
@@ -302,6 +305,10 @@ fn main() -> ExitCode {
         eprintln!("ERROR: --config can only be given once");
         return ExitCode::from(EXIT_USAGE);
     }
+    if matches!(cli.command, Command::Version) {
+        println!("constructo {}", env!("CARGO_PKG_VERSION"));
+        return ExitCode::SUCCESS;
+    }
     // The settings come from the built-in defaults, which the configuration file overrides, and the arguments that were
     // given on the command line override both.
     let config = match load_config(cli.config.as_ref()) {
@@ -313,6 +320,8 @@ fn main() -> ExitCode {
         Err(code) => return code,
     };
     match cli.command {
+        // The version is printed before any setting is read, so it is told even where `--config` is wrong.
+        Command::Version => unreachable!("the version subcommand is handled before the settings are read"),
         Command::Project(ProjectCommand::Init { folder }) => {
             let folder = folder.unwrap_or_else(|| PathBuf::from("."));
             match init_project(&folder) {

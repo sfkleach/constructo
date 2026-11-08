@@ -78,7 +78,9 @@ are found.
 
 ## `constructo` itself
 
-`--help` and `--version` give 0, and so do the same options on a subcommand. Running `constructo` with no subcommand, or
+`constructo --version` and `constructo version` print the version, and give 0. The version is only at the top: it is not
+an option of a subcommand, and `constructo check --version` is an argument that is not understood, so it gives 2.
+`--help` is an option of the command and of every subcommand, and gives 0. Running `constructo` with no subcommand, or
 with one that does not exist, is 2.
 
 ## Choosing between 1 and 2
