@@ -1062,8 +1062,9 @@ fn is_upper(name: &str) -> bool {
     name.starts_with(|c: char| c.is_ascii_uppercase())
 }
 
-/// Checks that a name to be hidden is a single identifier, which starts with a letter or `_` and has letters, digits
-/// and `_`, and that it is not the name of a basic type, which cannot be declared. The reason is returned if not.
+/// Checks that a name to be hidden or renamed is a single identifier, which starts with a letter or `_` and has
+/// letters, digits and `_`, and that it is neither the name of a basic type, which cannot be declared, nor a keyword.
+/// The reason is returned if not.
 fn check_hidden(name: &str) -> Result<(), String> {
     let mut chars = name.chars();
     match chars.next() {
@@ -1081,6 +1082,11 @@ fn check_hidden(name: &str) -> Result<(), String> {
     }
     if crate::validate::BASIC_TYPES.contains(&name) {
         return Err("it is a basic type, which no project declares".to_string());
+    }
+    // The parser takes these as keywords, so a name that is one could not be written bare or after `::`, and a
+    // rename to it could never be used.
+    if crate::lexer::KEYWORDS.contains(&name) {
+        return Err("it is a keyword, which cannot be written as a name".to_string());
     }
     Ok(())
 }
@@ -1279,6 +1285,7 @@ mod tests {
             ("[\"a::B\"]", "no qualifier"),
             ("[\"a.b\"]", "no qualifier"),
             ("[\"Nat\"]", "basic type"),
+            ("[\"const\"]", "keyword"),
             ("[\"A\", \"A\"]", "hidden more than once"),
         ] {
             let (_, _, message) = bad(hide);
@@ -1324,6 +1331,9 @@ mod tests {
             ("hide = [\"B\"]", "A = \"B\"", "both hidden and renamed"),
             ("", "A = \"\"", "cannot be empty"),
             ("", "Nat = \"B\"", "basic type"),
+            ("", "const = \"limit\"", "keyword"),
+            ("", "enum = \"limit\"", "keyword"),
+            ("", "Limit = \"enum\"", "keyword"),
             ("", "A = \"x::B\"", "no qualifier"),
         ] {
             let message = bad(hide, rename);
