@@ -41,12 +41,13 @@
   code 2. A cycle, a project name that does not match, two projects with one name, a duplicate import and every kind of
   bad key are there. `rev-without-repo` and `subdir-without-repo` are the keys of a repository without one. Projects
   from a repository need a git repository to be made, so the functional test builds them ("Projects in a repository").
-- `project/valid-names` and `project/invalid-names`: projects whose names refer to other projects. `valid-names`
-  shows a group, a full name, an import into `local`, two projects with the same names, a group of two projects, and a
-  project that is not imported by the one that passes on its const. Each `invalid-names/CASE/app/app.types` has a first
-  line `// expect: <message>`, and the functional test requires that the error starts with it, with exit code 1. The
-  cases are an ambiguous name, a name in a group, a project or group that is not known, a project that is not imported,
-  the prelude, and a message that shows a name in full.
+- `project/valid-names` and `project/invalid-names`: projects whose names refer to other projects. `valid-names` shows
+  a group, a full name, an import into `local`, two projects with the same names, a group of two projects, and a
+  project that is not imported by the one that passes on its const. Each `invalid-names/CASE/app/app.types` has a
+  first line `// expect: <message>`, and the functional test requires that the error starts with it, with exit code 1.
+  The cases are a name that two imports of one group both declare, a name that the project and an import into `local`
+  both declare, a name in a group, a project or group that is not known, a project that is not imported, the prelude,
+  and a message that shows a name in full.
 - `project/valid-prelude`: projects that override the prelude, which is the built-in project `constructo.prelude` that
   every project imports into `local` unless it imports it itself. `override` imports it into the group `std`,
   `explicit-local` into `local`, `no-group` with no group, and `full-name` uses the default import.

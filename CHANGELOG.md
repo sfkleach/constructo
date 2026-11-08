@@ -124,8 +124,9 @@ Following the style in https://keepachangelog.com/en/1.0.0/
     projects with one name are errors.
   - Names are resolved in the project that writes them (decision 25, `docs/specs/resolving-identifiers.md`). A name
     may be bare, `group::Name` or `com.example.project::Name`, in types and in values. Imports are not transitive for
-    names. An ambiguous name is an error at its use, and a message shows a name in full when a bare one would be
-    unclear.
+    names. Two projects of one group, the project itself and the prelude included, may not declare one name: the later
+    declaration is a duplicate, found when the projects are loaded and not at a use (decisions 31 and 32). A message
+    shows a name in full when a bare one would be unclear.
   - The prelude is the built-in project `constructo.prelude` (decision 26), imported into `local` by every project
     unless it imports it itself. `builtin = "constructo:/prelude"` imports it by hand.
   - `constructo project update [FOLDER]` writes `constructo.lock` (decision 27, `docs/specs/lock-file-format.md`),

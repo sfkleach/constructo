@@ -67,6 +67,8 @@ struct Resolver<'a> {
     layout: &'a Layout,
     homes: Vec<Home>,
     declared: HashMap<(Home, Ns), HashSet<String>>,
+    /// Where each name was first declared in a home: the index of the source and the position in it.
+    sites: HashMap<(Home, Ns, String), (usize, Pos)>,
 }
 
 /// What is needed to show a canonical name as it would be written in a file.
@@ -93,9 +95,18 @@ pub fn resolve(sources: &[Source], parsed: &mut [Parsed], layout: &Layout) -> Re
         layout,
         homes,
         declared: HashMap::new(),
+        sites: HashMap::new(),
     };
     resolver.collect(parsed);
     let mut diagnostics = Vec::new();
+    // This is done before the names are rewritten, as the declarations are compared by the names written.
+    for (index, pos, message, (other, at)) in resolver.clashes(parsed) {
+        let note = format!("first declared at {}, {}", sources[other].name, at);
+        diagnostics.push((
+            index,
+            Diagnostic::new(&sources[index].name, pos, message).with_note(note),
+        ));
+    }
     let mut value_errors = Vec::new();
     let mut visible_types = vec![HashSet::new(); sources.len()];
     for (index, file) in parsed.iter_mut().enumerate() {
@@ -159,19 +170,80 @@ impl<'a> Resolver<'a> {
             let Parsed::Types(file) = file else { continue };
             let home = self.homes[index];
             for decl in &file.enums {
-                self.add(home, Ns::Type, &decl.name);
+                self.add(home, Ns::Type, &decl.name, (index, decl.pos));
                 for variant in &decl.variants {
-                    self.add(home, Ns::Value, &variant.name);
+                    self.add(home, Ns::Value, &variant.name, (index, variant.pos));
                 }
             }
             for constant in &file.consts {
-                self.add(home, Ns::Value, &constant.name);
+                self.add(home, Ns::Value, &constant.name, (index, constant.pos));
             }
         }
     }
 
-    fn add(&mut self, home: Home, ns: Ns, name: &str) {
+    fn add(&mut self, home: Home, ns: Ns, name: &str, site: (usize, Pos)) {
         self.declared.entry((home, ns)).or_default().insert(name.to_string());
+        self.sites.entry((home, ns, name.to_string())).or_insert(site);
+    }
+
+    /// The declarations that clash with a declaration of an earlier project in one group. The projects of a group, in
+    /// the order of the import with the project itself first for `local`, share one scope, so a name may be declared
+    /// by only one of them. The later declaration is the error, given with its message and the place of the first.
+    /// This is found for every group of every project, and each declaration is reported once, so that a clash is
+    /// found when the projects are loaded and never at a use.
+    fn clashes(&self, parsed: &[Parsed]) -> Vec<(usize, Pos, String, (usize, Pos))> {
+        let mut found: Vec<(usize, Pos, String, (usize, Pos))> = Vec::new();
+        let mut seen = HashSet::new();
+        for home in 0..self.layout.projects.len() {
+            let mut groups: Vec<&str> = vec!["local"];
+            for (group, _) in &self.layout.projects[home].imports {
+                if let Some(group) = group.as_deref() {
+                    if !groups.contains(&group) {
+                        groups.push(group);
+                    }
+                }
+            }
+            for group in groups {
+                let mut homes = self.group_homes(home, group).unwrap_or_default();
+                // The project itself comes last, so that a clash with an import is reported in the project, whose
+                // files the user can change, and not in the import.
+                if let Some(at) = homes.iter().position(|h| *h == home) {
+                    homes.remove(at);
+                    homes.push(home);
+                }
+                for (at, later) in homes.iter().enumerate().skip(1) {
+                    let earlier = &homes[..at];
+                    for (index, file) in parsed.iter().enumerate() {
+                        let Parsed::Types(file) = file else { continue };
+                        if self.homes[index] != *later {
+                            continue;
+                        }
+                        let mut check = |ns: Ns, kind: &str, name: &str, pos: Pos| {
+                            let first = earlier
+                                .iter()
+                                .find_map(|other| self.sites.get(&(*other, ns, name.to_string())).copied());
+                            let message = format!("Duplicate {} {}", kind, name);
+                            if let Some(site) = first {
+                                if seen.insert((index, pos.line, pos.col, message.clone())) {
+                                    found.push((index, pos, message, site));
+                                }
+                            }
+                        };
+                        for decl in &file.enums {
+                            check(Ns::Type, "type", &decl.name, decl.pos);
+                            for variant in &decl.variants {
+                                check(Ns::Value, "constructor", &variant.name, variant.pos);
+                            }
+                        }
+                        for constant in &file.consts {
+                            check(Ns::Value, "const", &constant.name, constant.pos);
+                        }
+                    }
+                }
+            }
+        }
+        found.sort_by_key(|(index, pos, _, _)| (*index, *pos));
+        found
     }
 
     /// The homes in the group `local` of a home: the project itself, then the projects imported into `local`.
@@ -227,13 +299,6 @@ impl<'a> Resolver<'a> {
             .collect()
     }
 
-    fn candidate(&self, home: Home, name: &str) -> String {
-        match self.layout.projects[home].name.as_str() {
-            "" => format!("the {} declared in the files given", name),
-            project => format!("{}::{}", project, name),
-        }
-    }
-
     /// Resolves a name written in the scope of `home`. Returns the canonical name, and an error if there is one. A bare
     /// name that nothing declares is left for the later checks to report as unknown.
     fn name(&self, home: Home, ns: Ns, written: &str, params: &[String]) -> (String, Option<String>) {
@@ -278,15 +343,9 @@ impl<'a> Resolver<'a> {
                 }
             },
             [one] => (key(self.layout, *one, name), None),
-            many => {
-                let candidates: Vec<String> = many.iter().map(|h| self.candidate(*h, name)).collect();
-                let message = format!(
-                    "The name {} is ambiguous: it could be {}",
-                    written,
-                    candidates.join(" or ")
-                );
-                (key(self.layout, many[0], name), Some(message))
-            }
+            // A name that two projects of a group declare is reported as a duplicate when the projects are loaded,
+            // so the first is taken here and the clash is not reported again at each use.
+            [first, ..] => (key(self.layout, *first, name), None),
         }
     }
 
@@ -447,6 +506,7 @@ impl Names {
             layout: &self.layout,
             homes: Vec::new(),
             declared: HashMap::new(),
+            sites: HashMap::new(),
         };
         // The name is bare if, in the namespace that declares it, nothing but the target has the name in `local`.
         for ns in [Ns::Type, Ns::Value] {
@@ -561,30 +621,21 @@ mod tests {
     }
 
     #[test]
-    fn a_name_in_two_projects_of_local_is_ambiguous_where_it_is_used() {
-        let report = run(
-            (Some("local"), Some("local")),
-            "enum A = Middle;",
-            "enum B = Middle;",
-            "const x: A = Middle;",
-            None,
-        );
-        assert_eq!(
-            messages(&report),
-            vec![concat!(
-                "ERROR: The name Middle is ambiguous: it could be example.a::Middle or example.b::Middle ",
-                "(app.types, line 1, col 14)"
-            )]
-        );
-        // Declaring the name is not an error, and neither is using a qualified name.
-        let report = run(
-            (Some("local"), Some("local")),
-            "enum A = Middle;",
-            "enum B = Middle;",
-            "const x: A = local::Middle;",
-            None,
-        );
-        assert_eq!(report.diagnostics.len(), 1);
+    fn a_name_in_two_projects_of_one_group_is_a_duplicate_where_it_is_declared() {
+        let expected = vec![
+            "ERROR: Duplicate constructor Middle (b.types, line 1, col 10); first declared at a.types, line 1, col 10"
+                .to_string(),
+        ];
+        // The clash is found though nothing uses the name, and a use of it is not reported again.
+        for (groups, app) in [
+            ((Some("local"), Some("local")), "const x: A = Middle;"),
+            ((Some("local"), Some("local")), "const x: A = local::Middle;"),
+            ((Some("both"), Some("both")), "enum C = Own;"),
+        ] {
+            let report = run(groups, "enum A = Middle;", "enum B = Middle;", app, None);
+            assert_eq!(messages(&report), expected);
+        }
+        // Different groups are different scopes.
         let report = run(
             (Some("a"), Some("b")),
             "enum A = Middle;",
@@ -596,7 +647,7 @@ mod tests {
     }
 
     #[test]
-    fn a_group_with_two_projects_is_ambiguous_only_for_the_names_they_share() {
+    fn a_group_with_two_projects_may_share_no_names() {
         let report = run(
             (Some("both"), Some("both")),
             "enum A = Left, Middle;",
@@ -604,44 +655,15 @@ mod tests {
             "const x: both::A = both::Left; const y: both::B = both::Right;",
             None,
         );
+        assert_eq!(messages(&report).len(), 1);
+        let report = run(
+            (Some("both"), Some("both")),
+            "enum A = Left;",
+            "enum B = Right;",
+            "const x: both::A = both::Left; const y: both::B = both::Right;",
+            None,
+        );
         assert!(report.is_ok(), "{:?}", messages(&report));
-    }
-
-    #[test]
-    fn a_name_that_is_not_in_the_project_is_unknown() {
-        let report = run(
-            (Some("a"), None),
-            "enum A = X;",
-            "enum B = Y;",
-            "const x: A = a::Y;",
-            None,
-        );
-        assert_eq!(
-            messages(&report),
-            vec!["ERROR: Unknown constructor Y in a (app.types, line 1, col 14)"]
-        );
-        let report = run(
-            (Some("a"), None),
-            "enum A = X;",
-            "enum B = Y;",
-            "const x: z::A = a::X;",
-            None,
-        );
-        assert_eq!(
-            messages(&report),
-            vec!["ERROR: Unknown group z (app.types, line 1, col 10)"]
-        );
-        let report = run(
-            (Some("a"), None),
-            "enum A = X;",
-            "enum B = Y;",
-            "const x: a::Nat = a::X;",
-            None,
-        );
-        assert_eq!(
-            messages(&report),
-            vec!["ERROR: Unknown type Nat in a (app.types, line 1, col 10)"]
-        );
     }
 
     #[test]
@@ -684,24 +706,52 @@ mod tests {
     }
 
     #[test]
-    fn a_project_that_declares_a_name_of_the_prelude_makes_it_ambiguous_where_used() {
-        // Declaring the name is fine, and a use of it is ambiguous.
-        let report = run((None, None), "enum A = X;", "enum B = Y;", "enum Bool = No, Yes;", None);
-        assert!(report.is_ok(), "{:?}", messages(&report));
+    fn a_project_that_declares_a_name_of_the_prelude_has_a_duplicate_where_it_is_declared() {
+        // The prelude is in the scope of the project, so the declaration clashes, and the uses are not reported again.
         let report = run(
             (None, None),
             "enum A = X;",
             "enum B = Y;",
-            "enum Bool = No, Yes;\nconst b: Bool = Yes;",
+            "enum Bool = No, True;\nconst b: Bool = No;",
             None,
         );
         assert_eq!(
             messages(&report),
-            vec![concat!(
-                "ERROR: The name Bool is ambiguous: it could be example.app::Bool or constructo.prelude::Bool ",
-                "(app.types, line 2, col 10)"
-            )]
+            vec![
+                concat!(
+                    "ERROR: Duplicate type Bool (app.types, line 1, col 6); ",
+                    "first declared at constructo:/prelude/prelude.types, line 1, col 6"
+                ),
+                concat!(
+                    "ERROR: Duplicate constructor True (app.types, line 1, col 17); ",
+                    "first declared at constructo:/prelude/prelude.types, line 1, col 20"
+                ),
+            ]
         );
+    }
+
+    #[test]
+    fn a_project_that_declares_a_name_of_a_project_in_its_local_has_a_duplicate() {
+        let report = run(
+            (Some("local"), None),
+            "enum A = Middle;",
+            "enum B = Y;",
+            "enum C = Middle;",
+            None,
+        );
+        assert_eq!(
+            messages(&report),
+            vec!["ERROR: Duplicate constructor Middle (app.types, line 1, col 10); first declared at a.types, line 1, col 10"]
+        );
+        // A project in another group is not in the scope.
+        let report = run(
+            (Some("a"), None),
+            "enum A = Middle;",
+            "enum B = Y;",
+            "enum C = Middle;",
+            None,
+        );
+        assert!(report.is_ok(), "{:?}", messages(&report));
     }
 
     #[test]

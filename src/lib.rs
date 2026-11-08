@@ -483,7 +483,7 @@ mod tests {
     }
 
     #[test]
-    fn a_prelude_name_that_is_redeclared_is_ambiguous_where_it_is_used() {
+    fn a_prelude_name_that_is_redeclared_is_a_duplicate() {
         let errors = |text: &str| -> Vec<String> {
             let user = Source {
                 name: "user".to_string(),
@@ -495,14 +495,19 @@ mod tests {
                 .map(|d| d.to_string())
                 .collect()
         };
-        // The declaration alone is fine, because the prelude is a project like any other in local.
-        assert_eq!(errors("enum Bool = Yes, True;"), Vec::<String>::new());
+        // The prelude is in the scope of the files given, so a declaration of its names clashes.
         assert_eq!(
             errors("enum Bool = Yes, True;\nconst a: Bool = Yes;"),
-            vec![concat!(
-                "ERROR: The name Bool is ambiguous: it could be the Bool declared in the files given or ",
-                "constructo.prelude::Bool (user, line 2, col 10)"
-            )]
+            vec![
+                concat!(
+                    "ERROR: Duplicate type Bool (user, line 1, col 6); ",
+                    "first declared at constructo:/prelude/prelude.types, line 1, col 6"
+                ),
+                concat!(
+                    "ERROR: Duplicate constructor True (user, line 1, col 18); ",
+                    "first declared at constructo:/prelude/prelude.types, line 1, col 20"
+                ),
+            ]
         );
     }
 
@@ -1060,15 +1065,13 @@ mod tests {
     }
 
     #[test]
-    fn a_prelude_const_that_is_redefined_is_ambiguous_where_it_is_used() {
-        let report = with_prelude(&["const null: Nat = 1;\nconst true: Nat = 1;"]);
-        assert_eq!(messages(&report), Vec::<String>::new());
+    fn a_prelude_const_that_is_redefined_is_a_duplicate() {
         let report = with_prelude(&["const null: Nat = 1;\nconst x: Nat = null;"]);
         assert_eq!(
             messages(&report),
             vec![concat!(
-                "ERROR: The name null is ambiguous: it could be the null declared in the files given or ",
-                "constructo.prelude::null (f0, line 2, col 16)"
+                "ERROR: Duplicate const null (f0, line 1, col 7); ",
+                "first declared at constructo:/prelude/prelude.types, line 3, col 7"
             )]
         );
     }
