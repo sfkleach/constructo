@@ -833,7 +833,7 @@ done
 NAMES="$PROJECTS/valid-names"
 expect_exit "project/valid-names/qualified" 0 check --dev --project="$NAMES/qualified/app" "$NAMES/qualified/app/values.values"
 expect_exit "project/valid-names/keyword-parts" 0 check --dev --project="$NAMES/keyword-parts/app" "$NAMES/keyword-parts/app/values.values"
-for case in bundle same-names group hide; do
+for case in bundle same-names group hide rename; do
     expect_exit "project/valid-names/$case" 0 check --dev --project="$NAMES/$case/app"
 done
 # A const of another project is a reference to a const, which needs the option as any other does.

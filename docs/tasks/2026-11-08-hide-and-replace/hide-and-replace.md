@@ -44,8 +44,8 @@ Renamed variables are a way of avoiding a name clash in a group by renaming the
 clashing variables of an import. The rename must not generate a conflict with 
 any other variable in the group.
 
-- [ ] Implement the `rename` field as part of an import.
-- [ ] Update the project file specification (docs/specs/project-file-format.md).
+- [x] Implement the `rename` field as part of an import.
+- [x] Update the project file specification (docs/specs/project-file-format.md).
 
 ## Step 3: Update docs
 

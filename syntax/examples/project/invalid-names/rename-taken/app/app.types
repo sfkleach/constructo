@@ -1,0 +1,2 @@
+// expect: Cannot rename Left to Taken: the project example.a declares Taken too
+const x: A = Taken;

@@ -40,6 +40,9 @@ pub struct ImportInfo {
     /// The names that are hidden, each with its place in the project-file. A hidden name is not visible through this
     /// import, though the project still has it, and it can be written with the full name of the project.
     pub hide: Vec<(String, Pos)>,
+    /// The names that are renamed, each as the name that is written, the name that the project declares, and the place
+    /// in the project-file. The declared name is not visible through this import, and the new one stands for it.
+    pub rename: Vec<(String, String, Pos)>,
     /// The project-file that has the import, as it is shown in a message.
     pub file: String,
 }
@@ -51,12 +54,36 @@ impl ImportInfo {
             group: group.map(String::from),
             target,
             hide: Vec::new(),
+            rename: Vec::new(),
             file: String::new(),
         }
     }
 
     fn hides(&self, name: &str) -> bool {
         self.hide.iter().any(|(hidden, _)| hidden == name)
+    }
+
+    /// The name that a declared name is written as through this import, or `None` if it is hidden.
+    fn visible_name(&self, declared: &str) -> Option<String> {
+        if self.hides(declared) {
+            return None;
+        }
+        match self.rename.iter().find(|(_, old, _)| old == declared) {
+            Some((new, _, _)) => Some(new.clone()),
+            None => Some(declared.to_string()),
+        }
+    }
+
+    /// The name that the project declares for a name written through this import, or `None` if the name is not
+    /// visible: it is hidden, or it has been renamed and so is written differently.
+    fn declared_name(&self, written: &str) -> Option<String> {
+        if let Some((_, old, _)) = self.rename.iter().find(|(new, _, _)| new == written) {
+            return Some(old.clone());
+        }
+        if self.hides(written) || self.rename.iter().any(|(_, old, _)| old == written) {
+            return None;
+        }
+        Some(written.to_string())
     }
 }
 
@@ -68,8 +95,20 @@ struct Member<'a> {
 }
 
 impl Member<'_> {
-    fn hides(&self, name: &str) -> bool {
-        self.import.is_some_and(|import| import.hides(name))
+    /// The name that a declared name is written as in the scope, or `None` if it is hidden.
+    fn visible_name(&self, declared: &str) -> Option<String> {
+        match self.import {
+            Some(import) => import.visible_name(declared),
+            None => Some(declared.to_string()),
+        }
+    }
+
+    /// The declared name for a name written in the scope, or `None` if no declaration is written that way.
+    fn declared_name(&self, written: &str) -> Option<String> {
+        match self.import {
+            Some(import) => import.declared_name(written),
+            None => Some(written.to_string()),
+        }
     }
 }
 
@@ -229,16 +268,30 @@ impl<'a> Resolver<'a> {
         }
     }
 
-    /// The names that an import hides but that the imported project does not declare, which is most likely a mistake.
+    /// The mistakes in the hide and rename of the imports: a name that the imported project does not declare, which is
+    /// most likely a typo, and a new name that the imported project declares itself.
     fn import_errors(&self) -> Vec<Diagnostic> {
         let mut errors = Vec::new();
         for project in &self.layout.projects {
             for import in &project.imports {
+                let target = &self.layout.projects[import.target].name;
+                let declared = |name: &str| {
+                    self.declares(import.target, Ns::Type, name) || self.declares(import.target, Ns::Value, name)
+                };
                 for (name, pos) in &import.hide {
-                    if !self.declares(import.target, Ns::Type, name) && !self.declares(import.target, Ns::Value, name) {
+                    if !declared(name) {
+                        let message = format!("Cannot hide {}: the project {} does not declare it", name, target);
+                        errors.push(Diagnostic::new(&import.file, *pos, message));
+                    }
+                }
+                for (new, old, pos) in &import.rename {
+                    if !declared(old) {
+                        let message = format!("Cannot rename {}: the project {} does not declare it", old, target);
+                        errors.push(Diagnostic::new(&import.file, *pos, message));
+                    } else if declared(new) && import.visible_name(new).as_deref() == Some(new.as_str()) {
                         let message = format!(
-                            "Cannot hide {}: the project {} does not declare it",
-                            name, self.layout.projects[import.target].name
+                            "Cannot rename {} to {}: the project {} declares {} too",
+                            old, new, target, new
                         );
                         errors.push(Diagnostic::new(&import.file, *pos, message));
                     }
@@ -257,7 +310,8 @@ impl<'a> Resolver<'a> {
     /// the order of the import with the project itself first for `local`, share one scope, so a name may be declared
     /// by only one of them. The later declaration is the error, given with its message and the place of the first.
     /// This is found for every group of every project, and each declaration is reported once, so that a clash is
-    /// found when the projects are loaded and never at a use. A name that an import hides is not in the scope.
+    /// found when the projects are loaded and never at a use. A name that an import hides is not in the scope, and one
+    /// that it renames is in it under the new name.
     fn clashes(&self, parsed: &[Parsed]) -> Vec<(usize, Pos, String, (usize, Pos))> {
         let mut found: Vec<(usize, Pos, String, (usize, Pos))> = Vec::new();
         let mut seen = HashSet::new();
@@ -285,14 +339,14 @@ impl<'a> Resolver<'a> {
                         if self.homes[index] != later.home {
                             continue;
                         }
-                        let mut check = |ns: Ns, kind: &str, name: &str, pos: Pos| {
-                            if later.hides(name) {
+                        let mut check = |ns: Ns, kind: &str, declared: &str, pos: Pos| {
+                            let Some(name) = later.visible_name(declared) else {
                                 return;
-                            }
-                            let first = earlier
-                                .iter()
-                                .filter(|other| !other.hides(name))
-                                .find_map(|other| self.sites.get(&(other.home, ns, name.to_string())).copied());
+                            };
+                            let first = earlier.iter().find_map(|other| {
+                                let theirs = other.declared_name(&name)?;
+                                self.sites.get(&(other.home, ns, theirs)).copied()
+                            });
                             let message = format!("Duplicate {} {}", kind, name);
                             if let Some(site) = first {
                                 if seen.insert((index, pos.line, pos.col, message.clone())) {
@@ -371,8 +425,8 @@ impl<'a> Resolver<'a> {
                 self.declared
                     .get(&(member.home, Ns::Type))
                     .into_iter()
-                    .flat_map(|names| names.iter().cloned())
-                    .filter(move |name| !member.hides(name))
+                    .flat_map(|names| names.iter())
+                    .filter_map(move |name| member.visible_name(name))
             })
             .collect()
     }
@@ -408,10 +462,10 @@ impl<'a> Resolver<'a> {
                 None => return (written.to_string(), Some(format!("Unknown group {}", qualifier))),
             },
         };
-        let found: Vec<Home> = members
+        let found: Vec<(Home, String)> = members
             .into_iter()
-            .filter(|m| !m.hides(name) && self.declares(m.home, ns, name))
-            .map(|m| m.home)
+            .filter_map(|m| m.declared_name(name).map(|declared| (m.home, declared)))
+            .filter(|(h, declared)| self.declares(*h, ns, declared))
             .collect();
         match found.as_slice() {
             [] => match qualifier {
@@ -428,10 +482,9 @@ impl<'a> Resolver<'a> {
                     )
                 }
             },
-            [one] => (key(self.layout, *one, name), None),
             // A name that two projects of a group declare is reported as a duplicate when the projects are loaded,
             // so the first is taken here and the clash is not reported again at each use.
-            [first, ..] => (key(self.layout, *first, name), None),
+            [(first, declared), ..] => (key(self.layout, *first, declared), None),
         }
     }
 
@@ -594,20 +647,30 @@ impl Names {
             declared: HashMap::new(),
             sites: HashMap::new(),
         };
-        // The name is bare if, in the namespace that declares it, nothing but the target has the name in `local`.
+        // The name is bare if, in the namespace that declares it, nothing but the target has the name in `local`. It
+        // is shown as the project writes it, which is the new name if the import renames it.
+        let members = resolver.local_members(*home);
+        let Some(own) = members.iter().find(|m| m.home == target) else {
+            return full;
+        };
+        let Some(written) = own.visible_name(local) else {
+            return full;
+        };
         for ns in [Ns::Type, Ns::Value] {
-            let declares = |h: Home| self.declared.get(&(h, ns)).is_some_and(|names| names.contains(local));
-            if !declares(target) {
+            let declares = |h: Home, name: &str| self.declared.get(&(h, ns)).is_some_and(|names| names.contains(name));
+            if !declares(target, local) {
                 continue;
             }
-            let found: Vec<Home> = resolver
-                .local_members(*home)
-                .into_iter()
-                .filter(|m| declares(m.home) && !m.hides(local))
+            let found: Vec<Home> = members
+                .iter()
+                .filter(|m| {
+                    m.declared_name(&written)
+                        .is_some_and(|declared| declares(m.home, &declared))
+                })
                 .map(|m| m.home)
                 .collect();
             if found == [target] {
-                return local.to_string();
+                return written;
             }
         }
         full
@@ -646,12 +709,36 @@ mod tests {
         app: &str,
         values: Option<&str>,
     ) -> Report {
+        with_renamed(prelude, groups, hide, (&[], &[]), a, b, app, values)
+    }
+
+    /// The names that an import renames, each as the new name and the name that the project declares.
+    type Renames<'a> = &'a [(&'a str, &'a str)];
+
+    /// As `with_hidden`, with the names that `app` renames in the imports of `a` and of `b`.
+    #[allow(clippy::too_many_arguments)]
+    fn with_renamed(
+        prelude: Option<&str>,
+        groups: (Option<&str>, Option<&str>),
+        hide: (&[&str], &[&str]),
+        rename: (Renames, Renames),
+        a: &str,
+        b: &str,
+        app: &str,
+        values: Option<&str>,
+    ) -> Report {
         let info = |name: &str, imports: Vec<ImportInfo>, builtin: bool| ProjectInfo {
             name: name.to_string(),
             imports,
             builtin,
         };
         let mut imports = vec![ImportInfo::new(groups.0, 1), ImportInfo::new(groups.1, 2)];
+        for (import, names) in imports.iter_mut().zip([rename.0, rename.1]) {
+            import.rename = names
+                .iter()
+                .map(|(new, old)| (new.to_string(), old.to_string(), Pos { line: 5, col: 7 }))
+                .collect();
+        }
         for (import, names) in imports.iter_mut().zip([hide.0, hide.1]) {
             import.hide = names
                 .iter()
@@ -826,6 +913,124 @@ mod tests {
             vec!["ERROR: Cannot hide Nope: the project example.a does not declare it (constructo.toml, line 3, col 9)"]
         );
         assert!(!report.type_checked);
+    }
+
+    #[test]
+    fn a_renamed_name_is_written_with_the_new_name_only() {
+        let a = "enum A = Left, Old;";
+        let b = "enum B = Right;";
+        let groups = (Some("local"), Some("other"));
+        let renamed: (Renames, Renames) = (&[("New", "Old")], &[]);
+        let run = |app: &str| with_renamed(LOCAL, groups, (&[], &[]), renamed, a, b, app, None);
+        assert!(run("const x: A = New;").is_ok());
+        assert!(run("const x: A = local::New;").is_ok());
+        assert_eq!(
+            messages(&run("const x: A = Old;")),
+            vec!["ERROR: Unknown constructor Old (app.types, line 1, col 14)"]
+        );
+        // The full name of the project is the project's own, so it is not renamed.
+        assert!(run("const x: A = example.a::Old;").is_ok());
+        assert_eq!(
+            messages(&run("const x: A = example.a::New;")),
+            vec!["ERROR: Unknown constructor New in example.a (app.types, line 1, col 14)"]
+        );
+    }
+
+    #[test]
+    fn a_rename_removes_a_clash_and_can_cause_one() {
+        let a = "enum A = Middle, Left;";
+        let b = "enum B = Middle, Right;";
+        let local = (Some("local"), Some("local"));
+        let run =
+            |rename: (Renames, Renames), app: &str| with_renamed(LOCAL, local, (&[], &[]), rename, a, b, app, None);
+        let ok = run(
+            (&[], &[("OtherMiddle", "Middle")]),
+            "const x: B = OtherMiddle; const y: A = Middle;",
+        );
+        assert!(ok.is_ok(), "{:?}", messages(&ok));
+        // Renamed onto the name of another project of the group, the clash is on the new name.
+        let clash = run((&[("Right", "Left")], &[]), "const x: A = Right;");
+        assert!(messages(&clash).contains(
+            &concat!(
+                "ERROR: Duplicate constructor Right (b.types, line 1, col 18); ",
+                "first declared at a.types, line 1, col 18"
+            )
+            .to_string()
+        ));
+    }
+
+    #[test]
+    fn a_renamed_type_and_constructor_are_renamed_together() {
+        let a = "enum Shape = Shape, Left;";
+        let b = "enum B = Right;";
+        let groups = (Some("local"), Some("other"));
+        let renamed: (Renames, Renames) = (&[("Form", "Shape")], &[]);
+        let report = with_renamed(
+            LOCAL,
+            groups,
+            (&[], &[]),
+            renamed,
+            a,
+            b,
+            "const x: Form = Form; const y: Form = Left;",
+            None,
+        );
+        assert!(report.is_ok(), "{:?}", messages(&report));
+    }
+
+    #[test]
+    fn a_message_shows_the_new_name() {
+        let a = "enum A = Left, Old;";
+        let b = "enum B = Right;";
+        let renamed: (Renames, Renames) = (&[("New", "Old")], &[]);
+        let report = with_renamed(
+            LOCAL,
+            (Some("local"), Some("other")),
+            (&[], &[]),
+            renamed,
+            a,
+            b,
+            "const x: other::B = New;",
+            None,
+        );
+        assert_eq!(
+            messages(&report),
+            vec!["ERROR: Expected example.b::B but found New of type A (app.types, line 1, col 21)"]
+        );
+    }
+
+    #[test]
+    fn a_rename_of_nothing_or_onto_a_declared_name_is_an_error_in_the_project_file() {
+        let (a, b) = ("enum A = Left, Taken;", "enum B = Right;");
+        let groups = (Some("local"), Some("other"));
+        let run = |renamed: Renames| {
+            let report = with_renamed(
+                LOCAL,
+                groups,
+                (&[], &[]),
+                (renamed, &[]),
+                a,
+                b,
+                "const x: A = Left;",
+                None,
+            );
+            messages(&report)
+        };
+        assert_eq!(
+            run(&[("New", "Nope")]),
+            vec![
+                "ERROR: Cannot rename Nope: the project example.a does not declare it (constructo.toml, line 5, col 7)"
+            ]
+        );
+        assert_eq!(
+            run(&[("Taken", "Left")]),
+            vec![concat!(
+                "ERROR: Cannot rename Left to Taken: the project example.a declares Taken too ",
+                "(constructo.toml, line 5, col 7)"
+            )]
+        );
+        // Swapping two names is fine, since neither is left in place.
+        assert!(run(&[("Taken", "Left"), ("Left", "Taken")]).is_empty());
     }
 
     #[test]

@@ -48,8 +48,9 @@ To resolve a name `N` written in a file of project P:
      directly. If it is not, it is an error.
 2. Choose the **namespace** from the use. There are two: types, and constructors and consts together (decision 4). A
    name where a type is expected is looked up among the types, and any other name among the constructors and consts.
-3. Keep the candidates that declare `N` in that namespace, leaving out those whose import hides `N`. A candidate that
-   is named by its full name is not filtered, since the full name is the project and not the import.
+3. Keep the candidates that declare `N` in that namespace, leaving out those whose import hides `N` and those whose
+   import renames `N`, and including those whose import renames another name to `N`. A candidate that is named by its
+   full name is not filtered, since the full name is the project and not the import.
 4. If one remains, that is the declaration. If none remains, the name is unknown. More than one cannot remain: no two
    projects of a group declare one name, as below.
 
@@ -76,8 +77,10 @@ declared at a.types, line 1, col 10`. This is found for every group of every pro
 loaded, whether or not the name is used, and nothing is reported again at a use. The projects of a group are taken in
 the order of the imports, and the project itself last, so that a clash with an import is reported in the project. The
 prelude is in `local`, so a project cannot declare `Bool` unless it puts the prelude in another group. A name that the
-import hides is not in the scope, and so does not clash. The names of projects in different groups do not clash, and a
-project and a group other than `local` do not either. Decision 32 records this, and decision 33 hiding.
+import hides is not in the scope, and so does not clash, and a name that it renames is in the scope under its new
+name. The names of projects in different groups do not clash, and a
+project and a group other than `local` do not either. Decision 32 records this, and
+decisions 33 and 34 hiding and renaming.
 
 ### Example
 
@@ -135,4 +138,4 @@ quoted in a message is left as it is, even if it contains an `@`.
 ## Related
 
 - [The project-file](project-file-format.md), where groups and imports are defined.
-- Decisions 4, 25, 26, 31, 32 and 33, in `docs/decisions/`.
+- Decisions 4, 25, 26, 31 to 34, in `docs/decisions/`.

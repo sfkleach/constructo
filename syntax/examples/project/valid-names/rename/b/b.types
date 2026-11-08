@@ -1,0 +1,2 @@
+enum B = Right, Middle;
+const limit: Nat = 2;

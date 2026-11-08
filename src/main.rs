@@ -451,6 +451,7 @@ fn layout(set: &ProjectSet, sources: usize) -> Layout {
                     group: import.group.clone(),
                     target: import.target.expect("the set has been loaded"),
                     hide: import.hide.clone(),
+                    rename: import.rename.clone(),
                     file: project.project_file(),
                 })
                 .collect(),
