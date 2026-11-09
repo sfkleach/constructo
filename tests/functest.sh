@@ -1554,6 +1554,106 @@ rm -f "$init_dir/My Shapes/constructo.toml" "$init_dir/here/constructo.toml"
 rmdir "$init_dir/My Shapes" "$init_dir/here" "$init_dir"
 echo ""
 
+# `convert --to=json-exact` writes the values in an explicit form, and the output is compared with files as text.
+CONVERT="$(dirname "$0")/../syntax/examples/convert"
+conv_dir="$(mktemp -d)"
+
+# Runs convert, and compares the standard output with the expected file and the exit code with 0.
+expect_json() {
+    local name="$1" expected="$2"; shift 2
+    local actual=0
+    "$CONSTRUCTO" convert "$@" >"$conv_dir/out" 2>"$conv_dir/err" || actual=$?
+    if [[ "$actual" -eq 0 ]] && cmp -s "$conv_dir/out" "$expected" && [[ ! -s "$conv_dir/err" ]]; then
+        pass "convert: $name"
+    else
+        fail "convert: $name (exit $actual, output differs: $(cmp "$conv_dir/out" "$expected" 2>&1 | head -n 1))"
+    fi
+}
+
+# Runs convert and requires the exit code, an empty standard output and a first line of the errors that starts as given,
+# where the message is a pattern, so a `*` in it stands for anything.
+expect_convert_error() {
+    local name="$1" code="$2" message="$3"; shift 3
+    local actual=0
+    "$CONSTRUCTO" convert "$@" >"$conv_dir/out" 2>"$conv_dir/err" || actual=$?
+    local first
+    first="$(head -n 1 "$conv_dir/err")"
+    if [[ "$actual" -eq "$code" && ! -s "$conv_dir/out" && "$first" == $message* ]]; then
+        pass "convert: $name"
+    else
+        fail "convert: $name (exit $actual, stdout '$(cat "$conv_dir/out")', first error '$first')"
+    fi
+}
+
+expect_json "every kind of value, pretty" "$CONVERT/kinds.json" --to=json-exact --to-array "$CONVERT/kinds.values"
+expect_json "every kind of value, compact" "$CONVERT/kinds.compact.json" --to=json-exact --to-array --compact \
+    "$CONVERT/kinds.values"
+expect_json "a nested value, pretty" "$CONVERT/nested.json" --to=json-exact "$CONVERT/nested.values"
+expect_json "a nested value, compact" "$CONVERT/nested.compact.json" --to=json-exact --compact "$CONVERT/nested.values"
+expect_json "a number is on one line" "$CONVERT/leaf.json" --to=json-exact "$CONVERT/leaf.values"
+expect_json "the postfix ? is written as Some with -x" "$CONVERT/query.json" --to=json-exact -x "$CONVERT/query.values"
+expect_convert_error "the postfix ? needs -x" 1 "ERROR: Postfix '?' is experimental" --to=json-exact \
+    "$CONVERT/query.values"
+
+# Only the first value is converted, and one warning says so. The standard output is only the JSON.
+actual=0
+"$CONSTRUCTO" convert --to=json-exact "$CONVERT/three.values" >"$conv_dir/out" 2>"$conv_dir/err" || actual=$?
+warning="WARNING: More values follow; only the first was converted, so use --to-array for all ("
+if [[ "$actual" -eq 0 && "$(cat "$conv_dir/out")" == '{"nat": "1"}' && "$(wc -l <"$conv_dir/err")" -eq 1 \
+    && "$(cat "$conv_dir/err")" == "$warning"*"three.values, line 2, col 1)" ]]; then
+    pass "convert: more values give one warning and the first is converted"
+else
+    fail "convert: more values give one warning (exit $actual, err '$(cat "$conv_dir/err")')"
+fi
+expect_json "--to-array takes every value and does not warn" "$CONVERT/three.json" --to=json-exact --to-array \
+    "$CONVERT/three.values"
+expect_json "a file with no values is skipped" "$CONVERT/leaf.json" --to=json-exact "$CONVERT/empty.values" \
+    "$CONVERT/leaf.values"
+expect_json "no values with --to-array is an empty array" "$CONVERT/empty.json" --to=json-exact --to-array \
+    "$CONVERT/empty.values"
+
+# Errors give no output at all, even where there is a value that could be converted.
+expect_convert_error "no value is an error" 1 "ERROR: No value to convert" --to=json-exact "$CONVERT/empty.values"
+expect_convert_error "a types file is an error" 1 "ERROR: *types-file.types is a types file; convert reads values" \
+    --to=json-exact "$CONVERT/leaf.values" "$CONVERT/types-file.types"
+expect_convert_error "a syntax error is an error" 1 "ERROR: " --to=json-exact "$CONVERT/leaf.values" \
+    "$CONVERT/syntax-error.values"
+expect_convert_error "a duplicate field is an error" 1 "ERROR: Duplicate field a" --to=json-exact \
+    "$CONVERT/duplicate-field.values"
+expect_convert_error "a duplicate argument is an error" 1 "ERROR: Argument a is given more than once in Span" \
+    --to=json-exact "$CONVERT/duplicate-argument.values"
+expect_convert_error "an earlier syntax error wins over a later unreadable input" 1 "ERROR: " --to=json-exact \
+    "$CONVERT/syntax-error.values" "$conv_dir/missing.values"
+expect_convert_error "an unreadable input is a usage error" 2 "ERROR: Cannot read " --to=json-exact \
+    "$conv_dir/missing.values" "$CONVERT/syntax-error.values"
+expect_convert_error "no inputs is a usage error" 2 "error: " --to=json-exact
+
+# The format is matched exactly, and there is no bare json.
+expect_convert_error "no --to is a usage error" 2 "error: " "$CONVERT/leaf.values"
+expect_convert_error "json is not a format" 2 "ERROR: json is not a format; choose json-exact" --to=json \
+    "$CONVERT/leaf.values"
+expect_convert_error "the format is case-sensitive" 2 "ERROR: JSON-Exact is not a format" --to=JSON-Exact \
+    "$CONVERT/leaf.values"
+expect_convert_error "json-typed is not there yet" 2 "ERROR: json-typed is not available yet" --to=json-typed \
+    "$CONVERT/leaf.values"
+expect_exit "convert: check's options are not accepted" 2 convert --to=json-exact --no-prelude "$CONVERT/leaf.values"
+expect_exit "convert: --config must be valid" 2 --config "$conv_dir/missing.toml" convert --to=json-exact \
+    "$CONVERT/leaf.values"
+
+# The standard input is read after the files.
+out="$(printf '7;\n' | "$CONSTRUCTO" convert --to=json-exact --compact --stdin 2>&1)" || true
+if [[ "$out" == '{"nat":"7"}' ]]; then pass "convert: --stdin"; else fail "convert: --stdin (got '$out')"; fi
+out="$(printf '7;\n' | "$CONSTRUCTO" convert --to=json-exact --compact --stdin "$CONVERT/leaf.values" \
+    2>/dev/null)" || true
+if [[ "$out" == '{"nat":"5"}' ]]; then
+    pass "convert: the files come before the standard input"
+else
+    fail "convert: the files come before the standard input (got '$out')"
+fi
+rm -f "$conv_dir/out" "$conv_dir/err"
+rmdir "$conv_dir"
+echo ""
+
 TOTAL=$(( PASS + FAIL ))
 echo "Results: $PASS/$TOTAL passed"
 if [[ $FAIL -gt 0 ]]; then

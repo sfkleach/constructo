@@ -153,17 +153,23 @@ impl Json {
         }
     }
 
-    /// Whether the value is a container that holds another container, which is what makes it span several lines.
+    /// Whether the value is a container that holds another container that is not empty, which is what makes it span
+    /// several lines. An empty container is as short as a string, so it does not count, and `{"array": []}` stays on
+    /// one line.
     fn is_nested(&self) -> bool {
         match self {
             Json::Str(_) => false,
-            Json::Array(items) => items.iter().any(Json::is_container),
-            Json::Object(members) => members.iter().any(|(_, value)| value.is_container()),
+            Json::Array(items) => items.iter().any(Json::is_full),
+            Json::Object(members) => members.iter().any(|(_, value)| value.is_full()),
         }
     }
 
-    fn is_container(&self) -> bool {
-        !matches!(self, Json::Str(_))
+    fn is_full(&self) -> bool {
+        match self {
+            Json::Str(_) => false,
+            Json::Array(items) => !items.is_empty(),
+            Json::Object(members) => !members.is_empty(),
+        }
     }
 
     fn write_pretty(&self, out: &mut String, depth: usize) {
@@ -489,10 +495,11 @@ mod tests {
     }
 
     #[test]
-    fn a_leaf_is_on_one_line() {
+    fn a_leaf_or_an_empty_container_is_on_one_line() {
         assert_eq!(pretty("5"), "{\"nat\": \"5\"}\n");
         assert_eq!(pretty("Quit"), "{\"constructor\": \"Quit\"}\n");
-        assert_eq!(pretty("[]"), "{\n  \"array\": []\n}\n");
+        assert_eq!(pretty("[]"), "{\"array\": []}\n");
+        assert_eq!(pretty("Ping()"), "{\"constructor\": \"Ping\", \"tuple\": []}\n");
     }
 
     #[test]

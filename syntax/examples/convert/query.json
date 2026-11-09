@@ -1,0 +1,6 @@
+{
+  "constructor": "Some",
+  "tuple": [
+    {"nat": "5"}
+  ]
+}
