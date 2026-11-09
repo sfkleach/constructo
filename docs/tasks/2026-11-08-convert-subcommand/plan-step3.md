@@ -37,14 +37,15 @@ out, the type of every value, and `check` only ever says whether the values fit.
 
 ## Design
 
-### The pipeline is split
+### The pipeline takes a mode
 
-`check_with_layout` is cut in two inside `src/lib.rs`: the front, which parses, resolves, validates and checks the
-consts,
-and gives the values and an `Env`; and the back, which checks every value. `check_in_projects` is the front and the
-back,
-unchanged in what it does. A new `convert_typed` is the front and the back for the chosen values only, and then the
-encoder. Errors of the front are reported as `check` reports them, and stop the run.
+`check_with_layout` is not cut in two. Its steps are the ones that a conversion needs, in the same order, and cutting
+them would copy their errors and their way of showing names. Instead the loop that checks the values takes a mode.
+`check` checks every value, as it does. A conversion checks and encodes only the values that it converts, and stops
+there: it counts the values, and the first one that is converted is checked and encoded, and the position of the next is
+kept for the warning. The encoder is called inside the loop, where the `Env` is alive, so there is no need to hand the
+types out. The report of the run, its diagnostics with the names shown as they are written, is the report of the
+conversion.
 
 The front is the same code, so the options (`--no-prelude`, `--widening`, `--allow-refs`, the limits, `-x`) mean exactly
 what they mean for `check`, and need no second implementation. The `check` tests are the proof that it was not changed.
@@ -120,12 +121,14 @@ escapes are those of `json-exact`.
    the projects must pass
    with no change, and that is the test.
 
-### Step 3b: split the pipeline and keep the types
+### Step 3b: keep the types
 
-1. Split `check_with_layout` into the front and the back, with no change in output. The unit and functests are the test.
-2. The notes in `Checker`, `check_value_typed`, and the function that resolves a type all the way down. Unit tests: the
-   type of the nodes of `[1, 2.5]`, of a value in an enum with a type parameter, of an omitted argument, and of a
-   reference to a const.
+1. The notes in `Checker`, and `check_value_typed`, `check_value_as` and the `Typed` that they give. The type of a part
+   is looked at one level at a time, with `shallow`, as the checker does, and `scheme` resolves it all the way down,
+   with a limit, for the check of the value of a const against the type of its use. Unit tests: the type of the parts
+   of `[1, 2.5]`, of a value in an enum with a type parameter, of an untagged record, of a reference to a const, and
+   of what the value leaves open; a scheme to check another value against; and that the errors are those of
+   `check_value`.
 
 ### Step 3c: the encoder
 
