@@ -6,7 +6,7 @@
 a program written for JSON can read as the data that it expects, such as `{"Circle": {"radius": 1.5}}`. That needs the
 types, because a bare `5` is a `Nat` in Constructo and could be an `Int`, a `Float` or a `Nat` in the schema, and a
 field with a default may have been left out. The other is JSON that keeps every kind of value, needs no types, and
-can be read back to the same text, such as `{"nat": "5"}`. A single option `--to=json` would have to choose, and
+can be read back to the same values, such as `{"nat": "5"}`. A single option `--to=json` would have to choose, and
 whichever it chose, a person who expected the other would get a result that looks right and is not.
 
 ## Decision
@@ -30,7 +30,9 @@ whichever it chose, a person who expected the other would get a result that look
 
 - `convert` needs no types and no project for `json-exact`, and a values file is converted from its text alone, which
   decision 35 made possible.
-- The spelling of the keys is part of the format, and a later `--from=json-exact` reads exactly this.
+- The spelling of the keys is part of the format, and a later `--from=json-exact` reads exactly this. What it gives
+  back is the values and the text of their numbers. It is not the text of the file: comments, layout and the spelling
+  of the escapes in a string, where `"a"` and `"\u0061"` are the same string, are not kept.
 - The exit-codes document had said that there are no warnings. It now says that a warning is a line that starts
   `WARNING:`, and that it does not change the exit code. `check` still has none.
 - `json-typed` is a larger task, because it needs the type check to be shared with `check`. Until then it is an error to
@@ -43,6 +45,6 @@ The chosen option is the one under Decision. Alternatives considered:
 - A single `--to=json` that is typed when there are types and exact when there are none: the meaning of the output would
   depend on what else was given, and a missing types file would change the shape of the result.
 - `json-exact` with numbers as JSON numbers: shorter, but a `Nat` beyond 2^53 would be rounded by many readers, and `+5`
-  and `1.50` would lose their form, so the output could not be read back to the same text.
+  and `1.50` would lose their form, so the output could not be read back to the same numbers.
 - `--to=json` for the exact form and a later name for the typed one: the shorter name would go to the format that a
   person is less likely to want, and people would pick it without reading.
