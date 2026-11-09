@@ -130,12 +130,12 @@ This depends on the rule that a const name starts with a lower-case letter
 
 ### Tasks
 
-- [ ] Add the subcommand with `--to`, `--to-array` and `--compact`, and the inputs above.
-- [ ] Write the encoder, with unit tests for every row of the table, and the
+- [x] Add the subcommand with `--to`, `--to-array` and `--compact`, and the inputs above.
+- [x] Write the encoder, with unit tests for every row of the table, and the
       functional tests.
-- [ ] Add the `WARNING:` form of a diagnostic.
-- [ ] A spec of the convert command, and a decision for the two JSON strategies.
-- [ ] Update `docs/specs/exit-codes.md`, which says that there are no warnings, so
+- [x] Add the `WARNING:` form of a diagnostic.
+- [x] A spec of the convert command, and a decision for the two JSON strategies.
+- [x] Update `docs/specs/exit-codes.md`, which says that there are no warnings, so
       that a run with only warnings exits with 0, and the CHANGELOG.
 
 ## Step 2: Convert to JSONL (exact)

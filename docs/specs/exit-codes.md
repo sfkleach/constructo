@@ -10,9 +10,11 @@ problems give which. The messages themselves are described with the commands tha
 | 1    | Errors | The inputs were read and judged, and they have errors.                                         |
 | 2    | Usage  | The command could not be run as asked, or something it needs was wrong, so nothing was judged. |
 
-There are no other codes. There are no warnings, so a run that reports anything at all does not have exit code 0. A
-diagnostic is a line that starts `ERROR:` on the standard error, and a run that exits with 1 or 2 has printed at least
-one. A run with exit code 1 may print many.
+There are no other codes. A diagnostic is a line on the standard error that starts `ERROR:` or `WARNING:`. An error
+is what makes a run exit with 1 or 2, and such a run has printed at least one. A run with exit code 1 may print many. A
+warning says that the inputs were used but something was left out, and does not change the exit code, so a run that
+only warns exits with 0. Only `constructo convert` gives warnings so far, and `constructo check` gives none, so a run of
+it that reports anything at all does not have exit code 0.
 
 The test that separates 1 from 2 is whether the thing that is wrong is **in the data that is being checked**. A syntax
 error, a duplicate name and a value of the wrong type are in the data, and are 1. A file that cannot be read, an
@@ -65,6 +67,20 @@ are found.
 - A lock file that cannot be read or does not parse, and a project file that cannot be read while its digest is being
   worked out.
 
+## `constructo convert`
+
+[The convert command](convert-command.md) judges nothing about types, so what gives 1 is the inputs, and 2 is the
+command and the setup.
+
+- **Exit code 0:** the values were converted. The warning that more values follow, and `--help`, are 0.
+- **Exit code 1:** a syntax error in an input, an input that is a types file, no value to convert (without
+  `--to-array`), and a name that is given twice in a record or in the named arguments of a tuple. The run stops at the
+  first, and nothing is written to the standard output.
+- **Exit code 2:** an option or an argument that is not understood, which includes no `--to`, a `--to` that is not a
+  format and no inputs at all; `--config` given more than once or one that cannot be read, a `--cache` that is empty,
+  and an input that cannot be read, including the standard input. As for `check`, an unreadable input ends the run at
+  once, and a syntax error in an input that comes before it is found first.
+
 ## `constructo project`
 
 - `constructo project update` exits with 0 when it has written the lock or found it up to date, and with 2 for any
@@ -105,6 +121,7 @@ constructo check missing.types bad-syntax.types   # exit code 2
 ## Related
 
 - [The check command](check-command.md), for the stages of a run and where the errors of code 1 come from.
+- [The convert command](convert-command.md), for the warning and the errors of `convert`.
 - [The configuration file](config-file.md), [the project-file](project-file-format.md),
   [the lock file](lock-file-format.md), [the cache](cache-management.md) and
   [how git is run](git-management.md), for the errors of code 2.

@@ -155,6 +155,14 @@ Following the style in https://keepachangelog.com/en/1.0.0/
     unverified.
   - The library has the `project`, `lock`, `verify` and `fetch` modules.
 
+- The subcommand `constructo convert --to=json-exact [--to-array] [--compact] [-x] [--stdin] FILES...`, which writes
+  values as JSON with every kind of value explicit and no types needed (`{"nat": "5"}`, `{"constructor": "Move",
+  "record": {...}}`, and so on; numbers keep their text). It converts the first value and warns if more follow, or every
+  value into an array with `--to-array`. `--to` is matched exactly, and there is no bare `json`: `json-typed` is to
+  come. See `docs/specs/convert-command.md` and decision 36. The library has the `convert` module.
+- A diagnostic has a severity. A warning is written as `WARNING: <message> (<file>, line L, col C)` and does not change
+  the exit code. The library has `Severity` and `Diagnostic::warning`.
+
 ### Changed
 
 - Every types file must now come before every values file (decision 23). A types file that follows a values file is an
