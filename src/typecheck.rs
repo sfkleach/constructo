@@ -51,7 +51,7 @@ pub struct Env<'a> {
 /// reference to the const replaces them with fresh variables.
 #[derive(Debug, Clone)]
 pub struct Scheme {
-    ty: Ty,
+    pub(crate) ty: Ty,
     /// The number of types that the value left open.
     pub arity: usize,
     /// The type as it is written in a message.
@@ -111,10 +111,91 @@ pub fn check_value(env: &Env, widening: bool, value: &Value) -> Result<()> {
         widening,
         slots: Vec::new(),
         omitted: Vec::new(),
+        notes: None,
     };
     let top = checker.fresh();
     checker.check(value, &top)?;
     checker.check_omitted()
+}
+
+/// A value that has been checked, with what the check found out about it: the type that each of its parts was checked
+/// against. It is for a caller that needs the types and not only a verdict, such as the conversion of a value to a
+/// notation that depends on the types.
+pub struct Typed<'a, 'e> {
+    checker: Checker<'a, 'e>,
+}
+
+impl<'a, 'e> Typed<'a, 'e> {
+    /// The declarations that the value was checked against.
+    pub fn env(&self) -> &'e Env<'a> {
+        self.checker.env
+    }
+
+    /// The type that a part of the checked value was checked against, as far as it is known. The outermost type is
+    /// resolved, and the types inside it are resolved as they are looked at, with `shallow`. A part that was not
+    /// checked, such as one in the value of a const that it refers to, has none.
+    pub fn ty(&self, value: &Value) -> Option<Ty> {
+        let notes = self.checker.notes.as_ref()?;
+        notes.get(&(value as *const Value)).map(|ty| self.checker.shallow(ty))
+    }
+
+    /// Resolves the outermost variable of a type, which is the type that it has been bound to if it has been bound.
+    pub fn shallow(&self, ty: &Ty) -> Ty {
+        self.checker.shallow(ty)
+    }
+
+    /// Describes a type as a message does.
+    pub fn show(&self, ty: &Ty) -> String {
+        self.checker.show(ty)
+    }
+
+    /// The type of a part as a scheme, which stands on its own, so that another value can be checked against it. A
+    /// variable that is still free becomes an open type. It is `None` if the type has more than `limit` nodes, or if
+    /// the part was not checked.
+    pub fn scheme(&self, value: &Value, limit: usize) -> Option<Scheme> {
+        let ty = self.checker.notes.as_ref()?.get(&(value as *const Value))?;
+        let mut open = Vec::new();
+        let mut budget = limit;
+        let ty = self.checker.generalise(ty, &mut open, &mut budget)?;
+        let arity = open.len();
+        let text = self.checker.show(&ty);
+        Some(Scheme { ty, arity, text })
+    }
+}
+
+fn typed_checker<'a, 'e>(env: &'e Env<'a>, widening: bool) -> Checker<'a, 'e> {
+    Checker {
+        env,
+        widening,
+        slots: Vec::new(),
+        omitted: Vec::new(),
+        notes: Some(HashMap::new()),
+    }
+}
+
+/// Checks one top-level value, as `check_value` does, and keeps the type of each of its parts.
+pub fn check_value_typed<'a, 'e>(env: &'e Env<'a>, widening: bool, value: &Value) -> Result<Typed<'a, 'e>> {
+    let mut checker = typed_checker(env, widening);
+    let top = checker.fresh();
+    checker.check(value, &top)?;
+    checker.check_omitted()?;
+    Ok(Typed { checker })
+}
+
+/// Checks a value against a type that is known, which is how the value of a const is checked where it is used, and
+/// keeps the type of each of its parts. The type may have open types, which are taken to be unknown.
+pub fn check_value_as<'a, 'e>(
+    env: &'e Env<'a>,
+    widening: bool,
+    value: &Value,
+    scheme: &Scheme,
+) -> Result<Typed<'a, 'e>> {
+    let mut checker = typed_checker(env, widening);
+    let args: Vec<Ty> = (0..scheme.arity).map(|_| checker.fresh()).collect();
+    let expected = fill(&scheme.ty, &args);
+    checker.check(value, &expected)?;
+    checker.check_omitted()?;
+    Ok(Typed { checker })
 }
 
 /// The default for the most nodes that the inferred type of a const may have. Types share their parts, so a short value
@@ -212,6 +293,7 @@ fn check_declared_const(env: &Env, widening: bool, constant: &ConstDecl, ty: &Ty
         widening,
         slots: Vec::new(),
         omitted: Vec::new(),
+        notes: None,
     };
     // The type parameters are unknown types here, because the value has to be valid whatever they turn out to be.
     let args: Vec<Ty> = constant.params.iter().map(|p| Ty::Param(p.name.clone())).collect();
@@ -227,6 +309,7 @@ fn infer_const(env: &Env, widening: bool, infer_limit: usize, constant: &ConstDe
         widening,
         slots: Vec::new(),
         omitted: Vec::new(),
+        notes: None,
     };
     let top = checker.fresh();
     checker.check(&constant.value, &top)?;
@@ -254,7 +337,7 @@ fn infer_const(env: &Env, widening: bool, infer_limit: usize, constant: &ConstDe
 /// costs the same however large it is. Without that, a declaration such as `enum E<T> = Step(E<{ a: T, b: T }>)`
 /// would double the size of the argument at each level of nesting in a value.
 #[derive(Debug, Clone)]
-enum Ty {
+pub enum Ty {
     Nat,
     Int,
     Float,
@@ -285,7 +368,7 @@ pub fn gen_name(index: usize) -> String {
 }
 
 /// Replaces the open types of an inferred type with the given types.
-fn fill(ty: &Ty, args: &[Ty]) -> Ty {
+pub(crate) fn fill(ty: &Ty, args: &[Ty]) -> Ty {
     match ty {
         Ty::Gen(index) => args[*index].clone(),
         Ty::Array(element) => Ty::Array(Rc::new(fill(element, args))),
@@ -340,6 +423,9 @@ struct Checker<'a, 'e> {
     /// type. They are checked once the whole value has been, because the other arguments may fix the type of an omitted
     /// one, wherever in the value they are.
     omitted: Vec<(Pos, String, Ty)>,
+    /// The type that each value was checked against, by the address of the value, if they are being kept. A type is
+    /// recorded as it was given, which may be a variable that is bound later, so it is resolved when it is looked up.
+    notes: Option<HashMap<*const Value, Ty>>,
 }
 
 impl Checker<'_, '_> {
@@ -540,6 +626,9 @@ impl Checker<'_, '_> {
     }
 
     fn check(&mut self, value: &Value, original: &Ty) -> Result<()> {
+        if let Some(notes) = &mut self.notes {
+            notes.insert(value as *const Value, original.clone());
+        }
         let expected = self.shallow(original);
         let pos = value.pos;
         match &value.kind {
@@ -1003,7 +1092,7 @@ fn is_postfix_some(value: &Value) -> bool {
 /// Matches the arguments of a tuple constructor to its parameters, returning the index of the parameter that each
 /// argument is for, and the indexes of the named parameters that no argument is for. A parameter can be bound at most
 /// once.
-fn bind_arguments(
+pub(crate) fn bind_arguments(
     pos: Pos,
     constructor: &str,
     parameters: &[Parameter],
@@ -1054,7 +1143,7 @@ fn bind_arguments(
     Ok((targets, unbound))
 }
 
-fn instantiate_fields(fields: &[Field], params: &[TypeParam], args: &[Ty]) -> Vec<(String, Ty)> {
+pub(crate) fn instantiate_fields(fields: &[Field], params: &[TypeParam], args: &[Ty]) -> Vec<(String, Ty)> {
     fields
         .iter()
         .map(|f| (f.name.clone(), instantiate(&f.ty, params, args)))
@@ -1062,7 +1151,7 @@ fn instantiate_fields(fields: &[Field], params: &[TypeParam], args: &[Ty]) -> Ve
 }
 
 /// Turns a declared type into a `Ty`, replacing the type parameters with the given arguments.
-fn instantiate(ty: &Type, params: &[TypeParam], args: &[Ty]) -> Ty {
+pub(crate) fn instantiate(ty: &Type, params: &[TypeParam], args: &[Ty]) -> Ty {
     match ty {
         Type::Ref {
             name, args: type_args, ..
@@ -1836,6 +1925,7 @@ mod tests {
             widening: true,
             slots: Vec::new(),
             omitted: Vec::new(),
+            notes: None,
         };
         let pos = Pos { line: 1, col: 1 };
         let v = checker.fresh();
@@ -1900,5 +1990,144 @@ mod tests {
             .collect();
         // The declared const e is left out, and a comes first because the others depend on it.
         assert_eq!(order, vec!["a", "b", "c", "d"]);
+    }
+
+    /// The text of the type of the value and of each part of it that is asked for by a path of indexes into the
+    /// arrays, the arguments and the members, after the value has been checked with the types.
+    fn noted(types: &str, value: &str, path: &[usize], widening: bool) -> String {
+        let file = parse(&format!("{} {}", PRELUDE_TYPES, types)).unwrap();
+        let mut env = Env::new(&file.enums, &file.consts);
+        let consts: Vec<(usize, &ConstDecl)> = file.consts.iter().map(|c| (0, c)).collect();
+        assert!(check_consts(&mut env, widening, DEFAULT_INFER_LIMIT, &consts).is_empty());
+        let values = parse_values(value).unwrap();
+        let typed = check_value_typed(&env, widening, &values[0]).expect("the value should be well typed");
+        let mut node = &values[0];
+        for &index in path {
+            node = match &node.kind {
+                ValueKind::Array(items) => &items[index],
+                ValueKind::Record(members) => &members[index].value,
+                ValueKind::Tagged {
+                    body: Some(TaggedBody::Tuple(arguments)),
+                    ..
+                } => &arguments[index].value,
+                ValueKind::Tagged {
+                    body: Some(TaggedBody::Record(members)),
+                    ..
+                } => &members[index].value,
+                ValueKind::Tagged {
+                    body: Some(TaggedBody::Array(items)),
+                    ..
+                } => &items[index],
+                _ => panic!("the value has no part at this place"),
+            };
+        }
+        let ty = typed.ty(node).expect("the part was checked");
+        typed.show(&ty)
+    }
+
+    #[test]
+    fn the_whole_value_has_a_type() {
+        assert_eq!(noted("", "5", &[], true), "Nat");
+        assert_eq!(noted("", "[1, 2]", &[], true), "[Nat]");
+        assert_eq!(noted(SHAPES, "Circle { r: 1.5 }", &[], true), "Shape");
+    }
+
+    #[test]
+    fn a_number_that_is_widened_later_is_noted_as_the_wider_type() {
+        // The first number is a Nat when it is met, and is a Float once the second has been.
+        assert_eq!(noted("", "[1, 2.5]", &[0], true), "Float");
+        assert_eq!(noted("", "[1, 2.5]", &[1], true), "Float");
+        assert_eq!(noted("", "[1, 2.5]", &[], true), "[Float]");
+    }
+
+    #[test]
+    fn a_part_has_the_type_that_its_declaration_gives_it() {
+        assert_eq!(noted(SHAPES, "Circle { r: 1 }", &[0], true), "Float");
+        assert_eq!(noted(SHAPES, "Pair(1, 2)", &[1], true), "Int");
+        assert_eq!(
+            noted("enum Wrap<T> = Wrap(T);", "Wrap(\"x\")", &[], true),
+            "Wrap<String>"
+        );
+        assert_eq!(noted("enum Wrap<T> = Wrap(T);", "Wrap(\"x\")", &[0], true), "String");
+    }
+
+    #[test]
+    fn a_part_of_an_untagged_record_has_the_type_that_the_value_gave_it() {
+        assert_eq!(noted("", "{ a: 1, b: \"x\" }", &[], true), "{ a: Nat, b: String }");
+        assert_eq!(noted("", "{ a: 1, b: \"x\" }", &[1], true), "String");
+    }
+
+    #[test]
+    fn a_reference_to_a_const_has_the_type_it_is_expected_to_have() {
+        let types = "enum Box = Box(Float); const five = 5;";
+        assert_eq!(noted(types, "Box(five)", &[0], true), "Float");
+        assert_eq!(noted(types, "five", &[], true), "Nat");
+    }
+
+    #[test]
+    fn a_type_that_the_value_leaves_open_is_still_open() {
+        assert_eq!(noted("", "[]", &[], true), "[_]");
+    }
+
+    #[test]
+    fn a_part_that_was_not_checked_has_no_type() {
+        let file = parse("enum E = A;").unwrap();
+        let env = Env::new(&file.enums, &file.consts);
+        let values = parse_values("A; [1]").unwrap();
+        let typed = check_value_typed(&env, true, &values[0]).unwrap();
+        assert!(typed.ty(&values[1]).is_none());
+    }
+
+    #[test]
+    fn a_checked_value_gives_a_scheme_to_check_another_value_against() {
+        let file = parse(&format!("{} enum Box = Box(Float); const five = 5;", PRELUDE_TYPES)).unwrap();
+        let env = Env::new(&file.enums, &file.consts);
+        let values = parse_values("Box(five)").unwrap();
+        let typed = check_value_typed(&env, true, &values[0]).unwrap();
+        let ValueKind::Tagged {
+            body: Some(TaggedBody::Tuple(arguments)),
+            ..
+        } = &values[0].kind
+        else {
+            panic!("a tuple was written");
+        };
+        // The value of the const, checked against the type that its use gives it, is a Float.
+        let scheme = typed.scheme(&arguments[0].value, DEFAULT_INFER_LIMIT).unwrap();
+        assert_eq!(scheme.arity, 0);
+        let five = parse_values("5").unwrap();
+        let again = check_value_as(&env, true, &five[0], &scheme).unwrap();
+        let ty = again.ty(&five[0]).unwrap();
+        assert_eq!(again.show(&ty), "Float");
+        // A value that does not fit is refused, as it is when it is written there.
+        let word = parse_values("\"x\"").unwrap();
+        assert!(check_value_as(&env, true, &word[0], &scheme).is_err());
+    }
+
+    #[test]
+    fn a_scheme_has_open_types_for_what_is_unknown() {
+        let file = parse(PRELUDE_TYPES).unwrap();
+        let env = Env::new(&file.enums, &file.consts);
+        let values = parse_values("[]").unwrap();
+        let typed = check_value_typed(&env, true, &values[0]).unwrap();
+        let scheme = typed.scheme(&values[0], DEFAULT_INFER_LIMIT).unwrap();
+        assert_eq!(scheme.arity, 1);
+        assert!(typed.scheme(&values[0], 1).is_none(), "the limit applies");
+        // Any array fits it, because its one open type is taken to be whatever is needed.
+        let numbers = parse_values("[1, 2]").unwrap();
+        assert!(check_value_as(&env, true, &numbers[0], &scheme).is_ok());
+    }
+
+    #[test]
+    fn typed_checking_finds_the_errors_that_checking_does() {
+        let file = parse(&format!("{} {}", PRELUDE_TYPES, SHAPES)).unwrap();
+        let env = Env::new(&file.enums, &file.consts);
+        for text in ["Circle { r: \"x\" }", "Nope", "Pair(1)", "[1, \"x\"]", "Circle {}"] {
+            let value = &parse_values(text).unwrap()[0];
+            let plain = check_value(&env, true, value).unwrap_err();
+            let typed = check_value_typed(&env, true, value)
+                .err()
+                .expect("an error is expected");
+            assert_eq!(plain, typed, "{}", text);
+        }
     }
 }
