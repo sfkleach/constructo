@@ -103,7 +103,7 @@ impl Report {
     }
 }
 
-fn syntax_diagnostic(source: &Source, e: parser::SyntaxError) -> Diagnostic {
+pub(crate) fn syntax_diagnostic(source: &Source, e: parser::SyntaxError) -> Diagnostic {
     let diagnostic = Diagnostic::new(&source.name, e.pos, e.message);
     match e.context {
         Some(context) => diagnostic.with_note(format!("in {}", context)),
