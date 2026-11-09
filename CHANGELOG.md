@@ -160,6 +160,8 @@ Following the style in https://keepachangelog.com/en/1.0.0/
   "record": {...}}`, and so on; numbers keep their text). It converts the first value and warns if more follow, or every
   value into an array with `--to-array`. `--to` is matched exactly, and there is no bare `json`: `json-typed` is to
   come. See `docs/specs/convert-command.md` and decision 36. The library has the `convert` module.
+- `constructo convert --to=jsonl-exact` writes each value on a line of its own, in the `json-exact` encoding with no
+  white space, and every value is converted. `--to-array` is refused with it, and no values give no output.
 - A diagnostic has a severity. A warning is written as `WARNING: <message> (<file>, line L, col C)` and does not change
   the exit code. The library has `Severity` and `Diagnostic::warning`.
 

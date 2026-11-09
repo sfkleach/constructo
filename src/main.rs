@@ -119,14 +119,15 @@ enum Command {
 
     /// Convert values to another notation
     #[command(after_help = "\
-The first value is converted, and a warning says if more follow. Use --to-array to convert every value into an \
-array. The output is written only if there is no error. The settings file is read for [global] and [experimental].")]
+For json-exact the first value is converted, and a warning says if more follow. Use --to-array to convert every \
+value into an array. For jsonl-exact every value is a line. The output is written only if there is no error. The settings file is read for [global] and [experimental].")]
     Convert {
-        /// The notation to write. The choices are json-exact, which keeps every kind of value and needs no types
+        /// The notation to write. The choices are json-exact, which keeps every kind of value and needs no types, and
+        /// jsonl-exact, which is the same with each value on a line of its own
         #[arg(long, value_name = "FORMAT")]
         to: String,
 
-        /// Convert every value, of every input, into an array, instead of only the first value
+        /// With json-exact, convert every value, of every input, into an array, instead of only the first value
         #[arg(long)]
         to_array: bool,
 
@@ -431,6 +432,15 @@ fn main() -> ExitCode {
                     return ExitCode::from(EXIT_USAGE);
                 }
             };
+            // An array is how a single document holds many values, and a lines format has no such thing, so asking
+            // for both is a mistake that would otherwise be ignored without a word.
+            if to_array && format.is_lines() {
+                eprintln!(
+                    "ERROR: --to-array does not apply to {}, which writes each value on a line of its own",
+                    to
+                );
+                return ExitCode::from(EXIT_USAGE);
+            }
             let convert_matches = matches
                 .subcommand_matches("convert")
                 .expect("the convert subcommand was given");

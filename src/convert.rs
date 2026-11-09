@@ -15,6 +15,8 @@ pub enum Format {
     /// JSON in which every kind of value is written explicitly, so that the values and the text of their numbers are
     /// kept and no types are needed. Comments, layout and the spelling of string escapes are not kept.
     JsonExact,
+    /// The same as `JsonExact`, with each value on a line of its own: JSON lines.
+    JsonlExact,
 }
 
 impl Format {
@@ -24,14 +26,20 @@ impl Format {
     pub fn from_name(name: &str) -> Result<Format, String> {
         match name {
             "json-exact" => Ok(Format::JsonExact),
+            "jsonl-exact" => Ok(Format::JsonlExact),
             "json" => Err(
-                "json is not a format; choose json-exact (every kind kept, no types); json-typed (natural, \
-                           needs types) is not available yet"
+                "json is not a format; choose json-exact or jsonl-exact (every kind kept, no types); json-typed \
+                 (natural, needs types) is not available yet"
                     .to_string(),
             ),
-            "json-typed" => Err("json-typed is not available yet; choose json-exact".to_string()),
-            _ => Err(format!("{} is not a format; choose json-exact", name)),
+            "json-typed" => Err("json-typed is not available yet; choose json-exact or jsonl-exact".to_string()),
+            _ => Err(format!("{} is not a format; choose json-exact or jsonl-exact", name)),
         }
+    }
+
+    /// Whether the format is one value to a line, in which case there is no array and no layout to choose.
+    pub fn is_lines(self) -> bool {
+        matches!(self, Format::JsonlExact)
     }
 }
 
@@ -78,7 +86,18 @@ pub fn convert(sources: &[Source], options: &ConvertOptions) -> Result<Converted
                 .map(|v| (source.name.as_str(), v)),
         );
     }
-    let Format::JsonExact = options.format;
+    if options.format.is_lines() {
+        // Every value is a line of its own, so there is no first value to choose and no array to put them in. No value
+        // gives no output at all, as the lines of nothing are nothing.
+        let mut output = String::new();
+        for (name, value) in &values {
+            output.push_str(&encode_exact(name, value)?.write(true));
+        }
+        return Ok(Converted {
+            output,
+            warnings: Vec::new(),
+        });
+    }
     let mut warnings = Vec::new();
     let json = if options.to_array {
         let mut items = Vec::new();
@@ -649,11 +668,63 @@ mod tests {
     #[test]
     fn the_formats_are_matched_exactly() {
         assert_eq!(Format::from_name("json-exact"), Ok(Format::JsonExact));
-        for name in ["json", "JSON-Exact", "json-typed", "", "yaml"] {
+        assert_eq!(Format::from_name("jsonl-exact"), Ok(Format::JsonlExact));
+        for name in ["json", "jsonl", "JSON-Exact", "Jsonl-Exact", "json-typed", "", "yaml"] {
             assert!(Format::from_name(name).is_err(), "{}", name);
         }
         assert!(Format::from_name("json")
             .unwrap_err()
             .starts_with("json is not a format; choose json-exact"));
+    }
+
+    fn lines(sources: &[Source]) -> Result<Converted, String> {
+        let options = ConvertOptions {
+            format: Format::JsonlExact,
+            ..options(false)
+        };
+        convert(sources, &options).map_err(|d| d.to_string())
+    }
+
+    #[test]
+    fn jsonl_has_a_compact_line_for_each_value() {
+        let done = lines(&[
+            source("a.values", "1; [a, B];\nMove { x: 1 }"),
+            source("b.values", "\"hi\""),
+        ])
+        .unwrap();
+        assert_eq!(
+            done.output,
+            "{\"nat\":\"1\"}\n{\"array\":[{\"const\":\"a\"},{\"constructor\":\"B\"}]}\n\
+             {\"constructor\":\"Move\",\"record\":{\"x\":{\"nat\":\"1\"}}}\n{\"string\":\"hi\"}\n"
+        );
+        assert!(done.warnings.is_empty());
+    }
+
+    #[test]
+    fn jsonl_ignores_the_layout_and_the_array() {
+        let sources = [source("a.values", "1; 2")];
+        let pretty = ConvertOptions {
+            format: Format::JsonlExact,
+            to_array: true,
+            compact: false,
+            experimental: Experimental::default(),
+        };
+        assert_eq!(
+            convert(&sources, &pretty).unwrap().output,
+            lines(&sources).unwrap().output
+        );
+    }
+
+    #[test]
+    fn jsonl_with_no_values_is_empty_and_not_an_error() {
+        assert_eq!(lines(&[source("a.values", "")]).unwrap().output, "");
+        assert_eq!(lines(&[]).unwrap().output, "");
+    }
+
+    #[test]
+    fn jsonl_stops_at_the_first_error() {
+        let error = lines(&[source("a.values", "1; { a: 1, a: 2 }; Span(b: 1, b: 2)")]).unwrap_err();
+        assert!(error.contains("Duplicate field a"), "{}", error);
+        assert!(lines(&[source("a.values", "1; ["), source("t.types", "enum E = A;")]).is_err());
     }
 }
