@@ -94,8 +94,10 @@ tagged record or the named arguments of a tuple that has a name twice is an erro
 - The inputs are `FILES...` and `--stdin`, in that order, as for `check`: a file that cannot be read is exit code 2 and
   stops the run, a syntax error is exit code 1 and stops it, and the standard input is only read if nothing has failed.
   With no inputs it is a usage error, exit code 2.
-- A source is classified by `parse_file`. A types file, which is also an empty file, is
-  `ERROR: NAME is a types file; convert reads values files (NAME, line 1, col 1)`, exit code 1, at the first one.
+- A source is classified by `parse_file`. A types file is
+  `ERROR: NAME is a types file; convert reads values files (NAME, line 1, col 1)`, exit code 1, at the first one. A
+  file with no declarations and no values, which is empty or has only comments and which the parser takes for a types
+  file, is not one: it is ignored.
 - The first value of the first input that has one is converted. The first value after it, in any input, gets a
   `WARNING:` at its position, and only that one:
   `More values follow; only the first was converted, so use --to-array for all`. The exit code is still 0.
