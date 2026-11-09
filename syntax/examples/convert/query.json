@@ -1,6 +1,1 @@
-{
-  "constructor": "Some",
-  "tuple": [
-    {"nat": "5"}
-  ]
-}
+{"constructor": "Some", "tuple": [{"nat": "5"}]}

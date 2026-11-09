@@ -57,17 +57,29 @@ empty. Warnings and errors go to the standard error, in the usual form, which fo
 [the exit codes](exit-codes.md).
 
 `--compact` writes no white space at all: `{"nat":"5"}`. Without it the output is indented by two spaces, with a space
-after each `:` and `,`. A container is written on one line unless it holds a container that is not empty. So a number is
-`{"nat": "5"}`, an empty array is `{"array": []}`, and an array of numbers is spread over lines:
+after each `:` and `,`, and it is laid out for reading. A container is written on one line if that line is at most 80
+characters wide. The width is that of the text of the container alone, so the indentation, the key that it follows and
+a comma after it are not counted, and a container is laid out the same wherever it is. A container that is wider is
+spread over lines, with one member on each, and each member is laid out by the same rule. An empty container is always
+on one line. So `{"nat": "5"}` and `{"constructor": "Write", "tuple": [{"string": "hi"}]}` are one line each, and a
+longer value is spread, with the parts of it that are narrow enough still on one line:
 
 ```json
 {
-  "array": [
-    {"nat": "1"},
-    {"nat": "2"}
-  ]
+  "Config": {
+    "name": "n",
+    "on": false,
+    "speed": "Slow",
+    "tags": ["x"],
+    "size": {"w": 2.0, "h": 1.0}
+  }
 }
 ```
+
+There is no maximum column, since indentation can make a line as long as the nesting is deep. A string is never broken,
+so a long one makes a long line. The width is in characters, with each escape counted as the characters that it is
+written with. The layout depends on how long the text of a value is, so a change to a string can change the lines of
+the value that holds it.
 
 The output ends with a new line in both layouts. Strings are written with the escapes of RFC 8259: the quote, the
 backslash and the control characters are escaped, and everything else, including what is not ASCII, is written as it is.
@@ -93,7 +105,7 @@ values: comments, layout, and the spelling of the escapes in a string, since `"a
 | `Span(1, end: 3)`              | `{"constructor": "Span", "tuple": [{"nat": "1"}], "named": {"end": {"nat": "3"}}}` |
 | `Users[u1, Bob]`               | `{"constructor": "Users", "array": [{"const": "u1"}, {"constructor": "Bob"}]}`     |
 
-(The examples are shown on one line. Pretty output spreads the outer containers over lines as above.)
+(The examples are shown on one line each. Pretty output spreads those that are wider than 80 characters, as above.)
 
 - **Numbers keep their text.** The number is a string, exactly as it was written, so `+5` keeps its plus, `1.50` its
   trailing zero and `-2.5e3` its exponent. A number is never made into a JSON number, so that none can be rounded.

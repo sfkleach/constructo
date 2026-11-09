@@ -1634,8 +1634,6 @@ expect_convert_error "json is not a format" 2 "ERROR: json is not a format; choo
     "$CONVERT/leaf.values"
 expect_convert_error "the format is case-sensitive" 2 "ERROR: JSON-Exact is not a format" --to=JSON-Exact \
     "$CONVERT/leaf.values"
-expect_convert_error "json-typed is not there yet" 2 "ERROR: json-typed is not available yet" --to=json-typed \
-    "$CONVERT/leaf.values"
 expect_exit "convert: check's options are not accepted" 2 convert --to=json-exact --no-prelude "$CONVERT/leaf.values"
 expect_exit "convert: --config must be valid" 2 --config "$conv_dir/missing.toml" convert --to=json-exact \
     "$CONVERT/leaf.values"
@@ -1657,8 +1655,108 @@ expect_convert_error "jsonl-exact: a syntax error is an error" 1 "ERROR: " --to=
     "$CONVERT/syntax-error.values"
 expect_convert_error "jsonl-exact: --to-array does not apply" 2 "ERROR: --to-array does not apply to jsonl-exact" \
     --to=jsonl-exact --to-array "$CONVERT/leaf.values"
-expect_convert_error "jsonl is not a format" 2 "ERROR: jsonl is not a format; choose json-exact or jsonl-exact" \
+expect_convert_error "jsonl is not a format" 2 "ERROR: jsonl is not a format; choose json-exact, jsonl-exact" \
     --to=jsonl "$CONVERT/leaf.values"
+
+# `json-typed` writes natural JSON, and the values are checked against the types first.
+TYPED="$CONVERT/typed"
+expect_json "json-typed: every kind of value, pretty" "$TYPED/kinds.json" --to=json-typed --to-array \
+    "$TYPED/schema.types" "$TYPED/kinds.values"
+expect_json "json-typed: every kind of value, compact" "$TYPED/kinds.compact.json" --to=json-typed --to-array \
+    --compact "$TYPED/schema.types" "$TYPED/kinds.values"
+expect_json "json-typed: no values with --to-array is an empty array" "$CONVERT/empty.json" --to=json-typed --to-array \
+    "$TYPED/schema.types" "$CONVERT/empty.values"
+expect_convert_error "json-typed: no value is an error" 1 "ERROR: No value to convert" --to=json-typed \
+    "$TYPED/schema.types"
+expect_convert_error "json-typed: a type error is an error, and nothing is written" 1 \
+    "ERROR: Expected Float but found String" --to=json-typed "$TYPED/schema.types" "$TYPED/type-error.values"
+expect_convert_error "json-typed: an unknown constructor is an error" 1 "ERROR: Unknown constructor Nope" \
+    --to=json-typed "$TYPED/schema.types" "$TYPED/unknown-constructor.values"
+expect_convert_error "json-typed: Some(None) cannot be written" 1 \
+    "ERROR: Some(None) cannot be written as JSON, since it would read back as None" --to=json-typed \
+    "$TYPED/schema.types" "$TYPED/some-none.values"
+expect_convert_error "json-typed: Some(null) cannot be written" 1 "ERROR: Some(None) cannot be written as JSON" \
+    --to=json-typed "$TYPED/schema.types" "$TYPED/some-null.values"
+expect_convert_error "json-typed: an error in the types is an error" 1 "ERROR: Unknown type Missing" \
+    --to=json-typed "$TYPED/bad-types.types" "$TYPED/two.values"
+expect_convert_error "json-typed: --no-prelude leaves out Bool and Option" 1 "ERROR: Unknown type Option" \
+    --to=json-typed --no-prelude "$TYPED/schema.types" "$TYPED/two.values"
+expect_convert_error "json-typed: --no-widening needs the exact type" 1 "ERROR: Expected Float but found Nat" \
+    --to=json-typed --no-widening "$TYPED/schema.types" "$CONVERT/typed/widen.values"
+
+# Only the first value is converted, and so only it is checked. The warning is the one of json-exact.
+actual=0
+"$CONSTRUCTO" convert --to=json-typed "$TYPED/schema.types" "$TYPED/two.values" >"$conv_dir/out" 2>"$conv_dir/err" \
+    || actual=$?
+warning="WARNING: More values follow; only the first was converted, so use --to-array for all ("
+if [[ "$actual" -eq 0 && "$(cat "$conv_dir/out")" == '"Dot"' && "$(wc -l <"$conv_dir/err")" -eq 1 \
+    && "$(cat "$conv_dir/err")" == "$warning"*"two.values, line 2, col 1)" ]]; then
+    pass "json-typed: more values give one warning and the first is converted"
+else
+    fail "json-typed: more values give one warning (exit $actual, err '$(cat "$conv_dir/err")')"
+fi
+actual=0
+"$CONSTRUCTO" convert --to=json-typed "$TYPED/schema.types" "$TYPED/late-error.values" >"$conv_dir/out" 2>/dev/null \
+    || actual=$?
+if [[ "$actual" -eq 0 && "$(cat "$conv_dir/out")" == *'"Circle"'* ]]; then
+    pass "json-typed: a type error in a value that is not converted is not found"
+else
+    fail "json-typed: a type error in a value that is not converted (exit $actual, out '$(cat "$conv_dir/out")')"
+fi
+expect_convert_error "json-typed: the same error is found with --to-array" 1 "ERROR: Expected Float but found String" \
+    --to=json-typed --to-array "$TYPED/schema.types" "$TYPED/late-error.values"
+
+# The options for the types are for json-typed, and are refused for the formats that need no types.
+expect_convert_error "json-exact: --no-prelude does not apply" 2 "ERROR: --no-prelude does not apply to json-exact" \
+    --to=json-exact --no-prelude "$CONVERT/leaf.values"
+expect_convert_error "jsonl-exact: --project does not apply" 2 "ERROR: --project does not apply to jsonl-exact" \
+    --to=jsonl-exact --project="$conv_dir" "$CONVERT/leaf.values"
+expect_convert_error "json-exact: --dev does not apply" 2 "ERROR: --dev does not apply to json-exact" --to=json-exact \
+    --dev "$CONVERT/leaf.values"
+
+# The standard input holds the values, and the types come from the files.
+out="$(printf 'Dot;\n' | "$CONSTRUCTO" convert --to=json-typed --compact --stdin "$TYPED/schema.types" 2>&1)" || true
+if [[ "$out" == '"Dot"' ]]; then pass "json-typed: --stdin"; else fail "json-typed: --stdin (got '$out')"; fi
+
+# The settings file: the keys of [check] that apply, which an option overrides.
+printf '[check]\nwidening = false\n' >"$conv_dir/settings.toml"
+expect_convert_error "json-typed: widening = false in the settings file" 1 "ERROR: Expected Float but found Nat" \
+    --config "$conv_dir/settings.toml" --to=json-typed "$TYPED/schema.types" "$TYPED/widen.values"
+expect_json "json-typed: an option overrides the settings file" "$TYPED/widen.json" --config "$conv_dir/settings.toml" \
+    --to=json-typed --widening --compact "$TYPED/schema.types" "$TYPED/widen.values"
+
+# A project gives the types. A name is written as the declaring enum has it, without the project. A project that is
+# imported from a folder needs its lock, or --dev.
+proj="$conv_dir/proj"
+mkdir -p "$proj/lib" "$proj/app"
+printf '[project]\nname = "com.example.lib"\ninclude = ["*.types"]\n' >"$proj/lib/constructo.toml"
+printf 'enum Shape = Circle { r: Float }, Dot;\n' >"$proj/lib/shapes.types"
+printf '[project]\nname = "com.example.app"\ninclude = ["*.types"]\n\n[[import]]\nproject-name = "com.example.lib"\n' \
+    >"$proj/app/constructo.toml"
+printf 'group = "lib"\npath = "../lib"\n' >>"$proj/app/constructo.toml"
+printf 'enum Scene = Scene { shape: lib::Shape };\n' >"$proj/app/scene.types"
+printf 'Scene { shape: lib::Circle { r: 2 } };\nlib::Dot;\n' >"$proj/v.values"
+printf '{"Scene":{"shape":{"Circle":{"r":2.0}}}}\n' >"$proj/expected-first.json"
+printf '[{"Scene":{"shape":{"Circle":{"r":2.0}}}},"Dot"]\n' >"$proj/expected-all.json"
+expect_convert_error "json-typed: a project that imports a folder needs its lock" 1 "ERROR: The project imports" \
+    --to=json-typed --project="$proj/app" "$proj/v.values"
+expect_json "json-typed: --dev does not need the lock" "$proj/expected-all.json" --to=json-typed --to-array --compact \
+    --dev --project="$proj/app" "$proj/v.values"
+"$CONSTRUCTO" project update "$proj/app" >/dev/null 2>&1
+expect_json "json-typed: a project with a lock" "$proj/expected-all.json" --to=json-typed --to-array --compact \
+    --project="$proj/app" "$proj/v.values"
+actual=0
+"$CONSTRUCTO" convert --to=json-typed --compact --project="$proj/app" "$proj/v.values" >"$conv_dir/out" 2>/dev/null \
+    || actual=$?
+if [[ "$actual" -eq 0 && "$(cat "$conv_dir/out")" == "$(cat "$proj/expected-first.json")" ]]; then
+    pass "json-typed: the first value of a project"
+else
+    fail "json-typed: the first value of a project (exit $actual, out '$(cat "$conv_dir/out")')"
+fi
+rm -f "$proj/app/constructo.lock" "$proj/app/constructo.toml" "$proj/app/scene.types" "$proj/lib/constructo.toml" \
+    "$proj/lib/shapes.types" "$proj/v.values" "$proj/expected-first.json" "$proj/expected-all.json"
+rmdir "$proj/app" "$proj/lib" "$proj"
+rm -f "$conv_dir/settings.toml"
 
 # The standard input is read after the files.
 out="$(printf '7;\n' | "$CONSTRUCTO" convert --to=json-exact --compact --stdin 2>&1)" || true

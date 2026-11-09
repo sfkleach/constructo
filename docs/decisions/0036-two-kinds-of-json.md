@@ -23,8 +23,13 @@ whichever it chose, a person who expected the other would get a result that look
   and a run that only warns exits with 0.
 - A name that is given twice in a record is an error, since a JSON object cannot hold it twice, and no other check is
   made.
-- The pretty layout favours reading over a rule: two spaces of indentation, and a container is on one line if it holds
-  nothing that is not empty.
+- The pretty layout favours reading over a rule: two spaces of indentation, and a container is on one line if its text
+  on one line is at most 80 characters wide, and is otherwise spread over lines with one member on each. The width is
+  of the text alone, not counting the indentation or the key, so there is no maximum column, which nesting by
+  indentation would make meaningless, and a container is laid out the same wherever it is. A string is never broken.
+  Two rules were tried first and dropped: one line only if the container held no container, which made the common typed
+  shape `{"Circle": {"r": 1.0}}` three lines, and one line if it held at most two levels, which let an array of any
+  number of members become one line.
 
 ## Consequences
 

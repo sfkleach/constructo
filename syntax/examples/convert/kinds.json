@@ -7,62 +7,24 @@
   {"string": "plain"},
   {"string": "quote \" backslash \\ newline \n tab \t café"},
   {"array": []},
-  {
-    "array": [
-      {"nat": "1"},
-      {"nat": "2"}
-    ]
-  },
+  {"array": [{"nat": "1"}, {"nat": "2"}]},
   {"record": {}},
-  {
-    "record": {
-      "b": {"nat": "1"},
-      "a": {"string": "x"}
-    }
-  },
+  {"record": {"b": {"nat": "1"}, "a": {"string": "x"}}},
   {"const": "red"},
   {"const": "_hidden"},
   {"constructor": "Quit"},
   {"constructor": "shapes::Circle"},
   {"const": "a.b::red"},
-  {
-    "constructor": "Move",
-    "record": {
-      "x": {"nat": "1"},
-      "y": {"nat": "2"}
-    }
-  },
+  {"constructor": "Move", "record": {"x": {"nat": "1"}, "y": {"nat": "2"}}},
   {"constructor": "Move", "record": {}},
-  {
-    "constructor": "Write",
-    "tuple": [
-      {"string": "hi"}
-    ]
-  },
+  {"constructor": "Write", "tuple": [{"string": "hi"}]},
   {"constructor": "Ping", "tuple": []},
   {
     "constructor": "Span",
-    "tuple": [
-      {"nat": "1"}
-    ],
-    "named": {
-      "end": {"nat": "3"},
-      "start": {"nat": "2"}
-    }
+    "tuple": [{"nat": "1"}],
+    "named": {"end": {"nat": "3"}, "start": {"nat": "2"}}
   },
-  {
-    "constructor": "Span",
-    "tuple": [],
-    "named": {
-      "start": {"nat": "2"}
-    }
-  },
+  {"constructor": "Span", "tuple": [], "named": {"start": {"nat": "2"}}},
   {"constructor": "Users", "array": []},
-  {
-    "constructor": "Users",
-    "array": [
-      {"const": "u1"},
-      {"constructor": "Bob"}
-    ]
-  }
+  {"constructor": "Users", "array": [{"const": "u1"}, {"constructor": "Bob"}]}
 ]

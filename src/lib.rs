@@ -21,9 +21,11 @@ pub mod validate;
 pub mod verify;
 
 use ast::{ConstDecl, TypesFile};
+use convert::Json;
 use diagnostics::{Diagnostic, Pos};
 use parser::{parse_file, Parsed};
-use typecheck::{check_consts, check_value, Env};
+use typecheck::{check_consts, check_value, check_value_typed, Env};
+use typed::encode_typed;
 use validate::{validate, ParsedFile};
 
 pub use config::Config;
@@ -183,14 +185,76 @@ pub fn check_sources(sources: &[Source]) -> Report {
 /// first type error stops the run, unless `continue_after_error` is set, in which case there is one error per
 /// top-level value.
 pub fn check_sources_with(sources: &[Source], options: &CheckOptions) -> Report {
-    check_with_layout(sources, None, options)
+    check_with_layout(sources, None, options, &mut ValueMode::Check)
 }
 
 /// Checks a set of sources that belong to projects, as described by the layout. The checks are those of
 /// `check_sources_with`, except that a name is resolved in the project that the file belongs to, so that two projects
 /// can both declare a `Shape`. A name in a message is shown as it would be written in the file the message is about.
 pub fn check_in_projects(sources: &[Source], layout: &Layout, options: &CheckOptions) -> Report {
-    check_with_layout(sources, Some(layout), options)
+    check_with_layout(sources, Some(layout), options, &mut ValueMode::Check)
+}
+
+/// Converts the first value, or with `to_array` every value, of the values files among the sources to natural JSON,
+/// which needs the types. The sources are checked as `check_in_projects` checks them, with the options, except that a
+/// value is only checked if it is converted, and the first type error ends the run. The result is the JSON and the
+/// warning that more values follow, or the diagnostics, which are the errors of the checks and are never empty.
+pub fn convert_typed(
+    sources: &[Source],
+    layout: &Layout,
+    options: &CheckOptions,
+    to_array: bool,
+    compact: bool,
+) -> Result<convert::Converted, Vec<Diagnostic>> {
+    let options = CheckOptions {
+        type_check: true,
+        continue_after_error: false,
+        ..*options
+    };
+    let mut conversion = Conversion {
+        to_array,
+        converted: Vec::new(),
+        left_out: None,
+    };
+    let report = check_with_layout(
+        sources,
+        Some(layout),
+        &options,
+        &mut ValueMode::Convert(&mut conversion),
+    );
+    if !report.diagnostics.is_empty() {
+        return Err(report.diagnostics);
+    }
+    let json = if to_array {
+        Json::Array(conversion.converted)
+    } else {
+        match conversion.converted.into_iter().next() {
+            Some(json) => json,
+            None => {
+                // The first input that has values, or the last input if none has, which is the file that was given.
+                let named = report
+                    .kinds
+                    .iter()
+                    .position(|kind| *kind == Some(SourceKind::Values))
+                    .or(sources.len().checked_sub(1));
+                let name = named.map_or("", |index| sources[index].name.as_str());
+                let diagnostic = Diagnostic::new(name, Pos { line: 1, col: 1 }, "No value to convert");
+                return Err(vec![diagnostic]);
+            }
+        }
+    };
+    let warnings = conversion
+        .left_out
+        .map(|(index, pos)| {
+            let message = "More values follow; only the first was converted, so use --to-array for all";
+            Diagnostic::warning(&sources[index].name, pos, message)
+        })
+        .into_iter()
+        .collect();
+    Ok(convert::Converted {
+        output: json.write(compact),
+        warnings,
+    })
 }
 
 /// The layout of sources that were given without a project: they make one project that has no name, which imports the
@@ -227,7 +291,30 @@ pub(crate) fn plain_layout(sources: &[Source]) -> Layout {
     }
 }
 
-fn check_with_layout(sources: &[Source], layout: Option<&Layout>, options: &CheckOptions) -> Report {
+/// What a run does with the values once the types have been checked.
+enum ValueMode<'m> {
+    /// Check every value.
+    Check,
+    /// Check only the values that are converted, and write them as JSON.
+    Convert(&'m mut Conversion),
+}
+
+/// The state of a conversion to typed JSON, as the values are met.
+struct Conversion {
+    /// Convert every value, and not only the first.
+    to_array: bool,
+    /// The JSON of each value that has been converted, in order.
+    converted: Vec<Json>,
+    /// The first value that was not converted, with the index of its source, which is where the warning is.
+    left_out: Option<(usize, Pos)>,
+}
+
+fn check_with_layout(
+    sources: &[Source],
+    layout: Option<&Layout>,
+    options: &CheckOptions,
+    mode: &mut ValueMode,
+) -> Report {
     let mut kinds = vec![None; sources.len()];
     let mut parsed_sources = Vec::new();
     for (index, source) in sources.iter().enumerate() {
@@ -306,6 +393,7 @@ fn check_with_layout(sources: &[Source], layout: Option<&Layout>, options: &Chec
             &parsed_sources,
             &resolution.value_errors,
             options,
+            mode,
             &mut outcomes,
             &mut found,
         );
@@ -365,6 +453,7 @@ fn type_check_values(
     parsed_sources: &[Parsed],
     value_errors: &[(usize, usize, Diagnostic)],
     options: &CheckOptions,
+    mode: &mut ValueMode,
     outcomes: &mut [Outcome],
     diagnostics: &mut Vec<(usize, Diagnostic)>,
 ) -> Vec<ConstInfo> {
@@ -413,16 +502,36 @@ fn type_check_values(
             Parsed::Values(_) if stopped => outcomes[index] = Outcome::NotChecked,
             Parsed::Values(values) => {
                 for (position, value) in values.iter().enumerate() {
+                    if let ValueMode::Convert(conversion) = mode {
+                        // Only the values that are converted are checked. The first one that is not is only noted, for
+                        // the warning, and then the run is over.
+                        if !conversion.to_array && !conversion.converted.is_empty() {
+                            conversion.left_out = Some((index, value.pos));
+                            stopped = true;
+                            break;
+                        }
+                    }
                     // A value with a name that could not be resolved is reported for that, and is not type-checked.
                     let unresolved = value_errors
                         .iter()
                         .find(|(source, at, _)| *source == index && *at == position)
                         .map(|(_, _, diagnostic)| diagnostic.clone());
-                    let failure = match unresolved {
-                        Some(diagnostic) => Some(diagnostic),
-                        None => check_value(&env, options.widening, value)
+                    let failure = match (unresolved, &mut *mode) {
+                        (Some(diagnostic), _) => Some(diagnostic),
+                        (None, ValueMode::Check) => check_value(&env, options.widening, value)
                             .err()
                             .map(|e| Diagnostic::new(&sources[index].name, e.pos, e.message)),
+                        (None, ValueMode::Convert(conversion)) => {
+                            let json = check_value_typed(&env, options.widening, value)
+                                .and_then(|typed| encode_typed(&typed, options.widening, options.infer_limit, value));
+                            match json {
+                                Ok(json) => {
+                                    conversion.converted.push(json);
+                                    None
+                                }
+                                Err(e) => Some(Diagnostic::new(&sources[index].name, e.pos, e.message)),
+                            }
+                        }
                     };
                     if let Some(diagnostic) = failure {
                         diagnostics.push((index, diagnostic));
