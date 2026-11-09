@@ -1,9 +1,10 @@
 # The convert command
 
 `constructo convert` reads data-values and writes them in another notation. This document says what it reads, what it
-writes, what it prints when something is wrong, and what its exit code means. Only one format exists so far,
-`json-exact`, which writes every kind of value in an explicit form and needs no types. The formats that follow are the
-natural JSON that needs types (`json-typed`), JSON lines, and the conversions back, and each will be added here.
+writes, what it prints when something is wrong, and what its exit code means. Two formats exist so far: `json-exact`,
+which writes every kind of value in an explicit form and needs no types, and `jsonl-exact`, which writes the same on a
+line to each value. The formats that follow are the natural JSON that needs types (`json-typed`) and its lines, and the
+conversions back, and each will be added here.
 
 ```text
 constructo convert --to=FORMAT [--to-array] [--compact] [-x] [--stdin] [FILES]...
@@ -33,6 +34,9 @@ The prelude is not loaded and no project is read, because nothing is resolved. O
 the `Some(...)` that it stands for.
 
 ## One value, or all of them
+
+This section is about `json-exact`, which is a single document. `jsonl-exact` writes every value, as
+[its section](#the-format-jsonl-exact) says.
 
 - **By default the first value is converted.** It is the first value that there is, across the inputs in order, so an
   input with no values is passed over. If any value follows it, in the same input or in a later one, there is one
@@ -111,15 +115,33 @@ A JSON object cannot hold a name twice. A record, a record of a constructor, or 
 gives a name twice is an error at the second, and the conversion stops. The messages are those of the type check:
 `Duplicate field a`, and `Argument a is given more than once in NAME`.
 
+## The format `jsonl-exact`
+
+`--to=jsonl-exact` writes each value of each input, in order, as the `json-exact` encoding of it on one line, with no
+white space in it, and a new line at the end of each line. So a line is exactly what `--compact` gives for a value, and
+the lines are the elements of the array that `--to-array` gives for `json-exact`.
+
+- **Every value is converted**, so there is no first value to choose and no warning for the ones that follow.
+- **No values at all give no output**, and the exit code is 0. The lines of nothing are nothing, and an empty array
+  would not be a line.
+- **`--compact` makes no difference**, since a line has no layout. It is accepted.
+- **`--to-array` is a usage error**, exit code 2: `ERROR: --to-array does not apply to jsonl-exact, which writes each
+  value on a line of its own`. An array is how one document holds many values, and a lines format has no such thing, so
+  asking for both is refused and not ignored.
+- **The errors are those of `json-exact`**, and the conversion stops at the first. As nothing is written unless the
+  conversion is whole, an error in a late value leaves the standard output empty, and the lines that came before it are
+  not written.
+
 ## The option `--to`
 
-`--to` is required, and its value is matched exactly. `json-exact` is the only one that exists. Any other value is a
-usage error, exit code 2. A bare `json` is not a format, so that nobody takes the exact form for the natural one by
-default. The message starts `ERROR: json is not a format; choose json-exact (every kind kept, no types)` and goes on to
-say that `json-typed` (natural, needs types) is not available yet.
+`--to` is required, and its value is matched exactly. `json-exact` and `jsonl-exact` are the only ones that exist. Any
+other value is a usage error, exit code 2. A bare `json` is not a format, so that nobody takes the exact form for the
+natural one by default. The message starts `ERROR: json is not a format; choose json-exact or jsonl-exact (every kind
+kept, no types)` and goes on to say that `json-typed` (natural, needs types) is not available yet.
 
-`json-typed` on its own gives `ERROR: json-typed is not available yet; choose json-exact`, and any other name gives
-`ERROR: NAME is not a format; choose json-exact`. See [decision 36](../decisions/0036-two-kinds-of-json.md).
+`json-typed` on its own gives `ERROR: json-typed is not available yet; choose json-exact or jsonl-exact`, and any other
+name, `jsonl` among them, gives `ERROR: NAME is not a format; choose json-exact or jsonl-exact`. See
+[decision 36](../decisions/0036-two-kinds-of-json.md).
 
 ## Settings
 
@@ -135,8 +157,8 @@ be a folder that is not empty, but neither is used otherwise.
 | 0    | The values were converted, with or without a warning.                                         |
 | 1    | An input has a syntax error or is a types file, there is no value to convert, or a name is    |
 |      | given twice.                                                                                  |
-| 2    | An option is not understood, `--to` is missing or is not a format, there are no inputs, or    |
-|      | one cannot be read.                                                                           |
+| 2    | An option is not understood, `--to` is missing or is not a format, `--to-array` is given with |
+|      | a lines format, there are no inputs, or one cannot be read.                                   |
 
 ## Related
 

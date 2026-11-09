@@ -77,9 +77,9 @@ command and the setup.
   `--to-array`), and a name that is given twice in a record or in the named arguments of a tuple. The run stops at the
   first, and nothing is written to the standard output.
 - **Exit code 2:** an option or an argument that is not understood, which includes no `--to`, a `--to` that is not a
-  format and no inputs at all; `--config` given more than once or one that cannot be read, a `--cache` that is empty,
-  and an input that cannot be read, including the standard input. As for `check`, an unreadable input ends the run at
-  once, and a syntax error in an input that comes before it is found first.
+  format, `--to-array` with a lines format and no inputs at all; `--config` given more than once or one that cannot be
+  read, a `--cache` that is empty, and an input that cannot be read, including the standard input. As for `check`, an
+  unreadable input ends the run at once, and a syntax error in an input that comes before it is found first.
 
 ## `constructo project`
 

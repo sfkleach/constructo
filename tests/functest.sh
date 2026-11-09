@@ -1640,6 +1640,26 @@ expect_exit "convert: check's options are not accepted" 2 convert --to=json-exac
 expect_exit "convert: --config must be valid" 2 --config "$conv_dir/missing.toml" convert --to=json-exact \
     "$CONVERT/leaf.values"
 
+# `jsonl-exact` writes every value as a compact line, and the lines are the elements of the array of --to-array.
+expect_json "jsonl-exact: every kind of value is a line" "$CONVERT/kinds.jsonl" --to=jsonl-exact "$CONVERT/kinds.values"
+expect_json "jsonl-exact: every value is converted, with no warning" "$CONVERT/three.jsonl" --to=jsonl-exact \
+    "$CONVERT/three.values"
+expect_json "jsonl-exact: --compact makes no difference" "$CONVERT/three.jsonl" --to=jsonl-exact --compact \
+    "$CONVERT/three.values"
+expect_json "jsonl-exact: -x writes the postfix ? as Some" "$CONVERT/query.jsonl" --to=jsonl-exact -x \
+    "$CONVERT/query.values"
+expect_json "jsonl-exact: no values is no output" /dev/null --to=jsonl-exact "$CONVERT/empty.values"
+expect_json "jsonl-exact: the values of several inputs are in order" "$CONVERT/three.jsonl" --to=jsonl-exact \
+    "$CONVERT/leaf-1.values" "$CONVERT/leaf-23.values"
+expect_convert_error "jsonl-exact: a duplicate field is an error, and nothing is written" 1 "ERROR: Duplicate field a" \
+    --to=jsonl-exact "$CONVERT/leaf.values" "$CONVERT/duplicate-field.values"
+expect_convert_error "jsonl-exact: a syntax error is an error" 1 "ERROR: " --to=jsonl-exact "$CONVERT/leaf.values" \
+    "$CONVERT/syntax-error.values"
+expect_convert_error "jsonl-exact: --to-array does not apply" 2 "ERROR: --to-array does not apply to jsonl-exact" \
+    --to=jsonl-exact --to-array "$CONVERT/leaf.values"
+expect_convert_error "jsonl is not a format" 2 "ERROR: jsonl is not a format; choose json-exact or jsonl-exact" \
+    --to=jsonl "$CONVERT/leaf.values"
+
 # The standard input is read after the files.
 out="$(printf '7;\n' | "$CONSTRUCTO" convert --to=json-exact --compact --stdin 2>&1)" || true
 if [[ "$out" == '{"nat":"7"}' ]]; then pass "convert: --stdin"; else fail "convert: --stdin (got '$out')"; fi
