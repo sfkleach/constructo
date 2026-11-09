@@ -16,6 +16,7 @@ pub mod resolve;
 #[cfg(test)]
 mod test_support;
 pub mod typecheck;
+pub mod typed;
 pub mod validate;
 pub mod verify;
 
@@ -194,7 +195,7 @@ pub fn check_in_projects(sources: &[Source], layout: &Layout, options: &CheckOpt
 
 /// The layout of sources that were given without a project: they make one project that has no name, which imports the
 /// prelude into `local` if the prelude is among the sources. The prelude is known by its name.
-fn plain_layout(sources: &[Source]) -> Layout {
+pub(crate) fn plain_layout(sources: &[Source]) -> Layout {
     let plain = ProjectInfo {
         name: String::new(),
         imports: Vec::new(),

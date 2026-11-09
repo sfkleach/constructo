@@ -97,6 +97,26 @@ impl<'a> Env<'a> {
         self
     }
 
+    /// The const with the name, if there is one.
+    pub fn constant(&self, name: &str) -> Option<&'a ConstDecl> {
+        self.consts.get(name).copied()
+    }
+
+    /// The constructor with the name, with the enum that declares it, if there is one in scope.
+    pub fn constructor(&self, name: &str) -> Option<(&'a EnumDecl, &'a Variant)> {
+        self.constructors.get(name).copied()
+    }
+
+    /// The enum with the name, whether or not a values file can see it.
+    pub fn declared_enum(&self, name: &str) -> Option<&'a EnumDecl> {
+        self.declared.get(name).copied()
+    }
+
+    /// The most nodes that the default value of an omitted argument may have.
+    pub fn default_limit(&self) -> usize {
+        self.default_limit
+    }
+
     /// The inferred type of a const, if it has been worked out.
     pub fn inferred_type(&self, name: &str) -> Option<&Scheme> {
         self.inferred.get(name)

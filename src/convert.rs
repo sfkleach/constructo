@@ -123,10 +123,14 @@ pub fn convert(sources: &[Source], options: &ConvertOptions) -> Result<Converted
     })
 }
 
-/// A JSON value, of the three kinds that `json-exact` needs. An object keeps its members in the order given.
+/// A JSON value. An object keeps its members in the order given. A number is kept as the text that is to be written,
+/// which is what makes a number that is too large for a double exact.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Json {
     Str(String),
+    Number(String),
+    Bool(bool),
+    Null,
     Array(Vec<Json>),
     Object(Vec<(String, Json)>),
 }
@@ -146,9 +150,23 @@ impl Json {
         out
     }
 
-    fn write_compact(&self, out: &mut String) {
+    /// Writes a value that is not a container, and says whether it was one.
+    fn write_scalar(&self, out: &mut String) -> bool {
         match self {
             Json::Str(s) => write_string(out, s),
+            Json::Number(text) => out.push_str(text),
+            Json::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+            Json::Null => out.push_str("null"),
+            Json::Array(_) | Json::Object(_) => return false,
+        }
+        true
+    }
+
+    fn write_compact(&self, out: &mut String) {
+        if self.write_scalar(out) {
+            return;
+        }
+        match self {
             Json::Array(items) => {
                 out.push('[');
                 for (i, item) in items.iter().enumerate() {
@@ -171,6 +189,7 @@ impl Json {
                 }
                 out.push('}');
             }
+            _ => unreachable!("a scalar has been written"),
         }
     }
 
@@ -179,17 +198,17 @@ impl Json {
     /// one line.
     fn is_nested(&self) -> bool {
         match self {
-            Json::Str(_) => false,
             Json::Array(items) => items.iter().any(Json::is_full),
             Json::Object(members) => members.iter().any(|(_, value)| value.is_full()),
+            _ => false,
         }
     }
 
     fn is_full(&self) -> bool {
         match self {
-            Json::Str(_) => false,
             Json::Array(items) => !items.is_empty(),
             Json::Object(members) => !members.is_empty(),
+            _ => false,
         }
     }
 
@@ -223,7 +242,7 @@ impl Json {
                     out.push_str(if i + 1 < members.len() { ",\n" } else { "\n" });
                 }
             }
-            Json::Str(_) => unreachable!("a string is never nested"),
+            _ => unreachable!("a scalar is never nested"),
         }
         out.push_str(&"  ".repeat(depth));
         out.push(close);
@@ -231,8 +250,10 @@ impl Json {
 
     /// Writes a value whose containers hold no containers, on one line, with a space after each `:` and `,`.
     fn write_flat(&self, out: &mut String) {
+        if self.write_scalar(out) {
+            return;
+        }
         match self {
-            Json::Str(s) => write_string(out, s),
             Json::Array(items) => {
                 out.push('[');
                 for (i, item) in items.iter().enumerate() {
@@ -255,6 +276,7 @@ impl Json {
                 }
                 out.push('}');
             }
+            _ => unreachable!("a scalar has been written"),
         }
     }
 }
@@ -727,5 +749,29 @@ mod tests {
         let error = lines(&[source("a.values", "1; { a: 1, a: 2 }; Span(b: 1, b: 2)")]).unwrap_err();
         assert!(error.contains("Duplicate field a"), "{}", error);
         assert!(lines(&[source("a.values", "1; ["), source("t.types", "enum E = A;")]).is_err());
+    }
+
+    #[test]
+    fn numbers_booleans_and_null_are_written_as_they_are() {
+        let json = Json::Object(vec![
+            ("n".to_string(), Json::Number("12345678901234567890.0".to_string())),
+            ("t".to_string(), Json::Bool(true)),
+            ("f".to_string(), Json::Bool(false)),
+            ("z".to_string(), Json::Null),
+            (
+                "a".to_string(),
+                Json::Array(vec![Json::Number("1".to_string()), Json::Null]),
+            ),
+        ]);
+        assert_eq!(
+            json.write(true),
+            "{\"n\":12345678901234567890.0,\"t\":true,\"f\":false,\"z\":null,\"a\":[1,null]}\n"
+        );
+        // The array has something in it, so the object that holds it is spread over lines, and the array is not.
+        let pretty = "{\n  \"n\": 12345678901234567890.0,\n  \"t\": true,\n  \"f\": false,\n  \"z\": null,\n  \
+                      \"a\": [1, null]\n}\n";
+        assert_eq!(json.write(false), pretty);
+        let nested = Json::Array(vec![Json::Array(vec![Json::Bool(true)])]);
+        assert_eq!(nested.write(false), "[\n  [true]\n]\n");
     }
 }
