@@ -12,7 +12,8 @@ use std::collections::HashSet;
 /// The notations that values can be converted to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Format {
-    /// JSON in which every kind of value is written explicitly, so that nothing is lost and no types are needed.
+    /// JSON in which every kind of value is written explicitly, so that the values and the text of their numbers are
+    /// kept and no types are needed. Comments, layout and the spelling of string escapes are not kept.
     JsonExact,
 }
 

@@ -14,7 +14,8 @@ There are two JSON strategies, and a format names both the syntax and the
 strategy:
 
 - `json-exact` is explicit and needs no types. Every value is written with its
-  kind, so the text of a values file can be rebuilt from it exactly.
+  kind, and each number with the text that it was written with, so the values can be rebuilt from it. Comments, the
+  layout and the spelling of the escapes in a string are not kept.
 - `json-typed` is natural JSON, the shape that other systems expect. It needs the
   Constructo data-types, because the reverse direction cannot be told what a
   JSON `5` or `"Dot"` is without a target type, and the forward direction is

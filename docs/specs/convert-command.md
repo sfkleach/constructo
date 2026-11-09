@@ -70,7 +70,9 @@ backslash and the control characters are escaped, and everything else, including
 
 ## The format `json-exact`
 
-Every value is a JSON object that says what kind of value it is, so that nothing is lost, and it can be read back.
+Every value is a JSON object that says what kind of value it is, so that its kind, its structure and the text of its
+numbers are kept, and it can be read back as the same value. What is not kept is the text of the file around the
+values: comments, layout, and the spelling of the escapes in a string, since `"a"` and `"\u0061"` are the same string.
 
 | A value                        | Is written as                                                                      |
 |--------------------------------|------------------------------------------------------------------------------------|
