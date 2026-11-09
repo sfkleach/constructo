@@ -120,7 +120,8 @@ enum Command {
     /// Convert values to another notation
     #[command(after_help = "\
 For json-exact the first value is converted, and a warning says if more follow. Use --to-array to convert every \
-value into an array. For jsonl-exact every value is a line. The output is written only if there is no error. The settings file is read for [global] and [experimental].")]
+value into an array. For jsonl-exact every value is a line. The output is written only if there is no error. The \
+settings file is read for [global] and [experimental].")]
     Convert {
         /// The notation to write. The choices are json-exact, which keeps every kind of value and needs no types, and
         /// jsonl-exact, which is the same with each value on a line of its own
@@ -500,51 +501,68 @@ fn main() -> ExitCode {
                 );
                 return ExitCode::SUCCESS;
             }
-            // The project is read after the settings, so that a problem with either is reported by itself. There is
-            // always a project: without one named it is a virtual project with nothing but the prelude.
-            //
-            // The lock is read first, since the projects in repositories are loaded from the commits that it names. A
-            // run with no project named has no lock. A problem with the lock file itself is a problem with the
-            // invocation.
-            let lock = match project.as_deref() {
-                Some(folder) => read_lock(folder),
-                None => Ok(None),
-            };
-            // A lock that cannot be used is reported at once, unless `--dev` means it is not needed. A project in a
-            // repository needs it whatever `--dev` says, and then it is reported when that project is reached.
-            if let (Err(e), false) = (&lock, dev) {
-                eprintln!("{}", e);
-                return ExitCode::from(EXIT_USAGE);
-            }
-            let set = match project.as_deref() {
-                Some(folder) => ProjectSet::load_with(
-                    folder,
-                    load_prelude,
-                    Remotes::Locked {
-                        cache: cache_for(cache.as_deref()),
-                        lock: lock.clone(),
-                    },
-                ),
-                None => Ok(ProjectSet::unnamed(load_prelude)),
-            };
-            let set = match set {
+            let set = match load_projects(project.as_deref(), load_prelude, dev, cache.as_deref()) {
                 Ok(set) => set,
-                Err(e) => {
-                    eprintln!("{}", e);
-                    let unlocked = matches!(e, ProjectError::Unverified(_));
-                    return ExitCode::from(if unlocked { EXIT_ERRORS } else { EXIT_USAGE });
-                }
+                Err(code) => return code,
             };
-            // The lock is verified before anything else is read, and only when a project was named. `--dev` leaves
-            // out the projects that are folders on disk, and not those from repositories.
-            if project.is_some() {
-                if let Some(code) = verify_projects(&set, lock.as_ref().ok().and_then(Option::as_ref), dev) {
-                    return code;
-                }
-            }
             check(stdin, verbose, dev, &options, &set, &files)
         }
     }
+}
+
+/// Loads the project that is named, or the virtual project of the prelude alone if none is, and verifies it against its
+/// lock. The error is the exit code, after the problem has been written. The lock is read first, since the projects in
+/// repositories are loaded from the commits that it names, and `dev` leaves out the verification of the projects that
+/// are folders on disk.
+fn load_projects(
+    project: Option<&Path>,
+    load_prelude: bool,
+    dev: bool,
+    cache: Option<&Path>,
+) -> Result<ProjectSet, ExitCode> {
+    // The project is read after the settings, so that a problem with either is reported by itself. There is
+    // always a project: without one named it is a virtual project with nothing but the prelude.
+    //
+    // The lock is read first, since the projects in repositories are loaded from the commits that it names. A
+    // run with no project named has no lock. A problem with the lock file itself is a problem with the
+    // invocation.
+    let lock = match project {
+        Some(folder) => read_lock(folder),
+        None => Ok(None),
+    };
+    // A lock that cannot be used is reported at once, unless `--dev` means it is not needed. A project in a
+    // repository needs it whatever `--dev` says, and then it is reported when that project is reached.
+    if let (Err(e), false) = (&lock, dev) {
+        eprintln!("{}", e);
+        return Err(ExitCode::from(EXIT_USAGE));
+    }
+    let set = match project {
+        Some(folder) => ProjectSet::load_with(
+            folder,
+            load_prelude,
+            Remotes::Locked {
+                cache: cache_for(cache),
+                lock: lock.clone(),
+            },
+        ),
+        None => Ok(ProjectSet::unnamed(load_prelude)),
+    };
+    let set = match set {
+        Ok(set) => set,
+        Err(e) => {
+            eprintln!("{}", e);
+            let unlocked = matches!(e, ProjectError::Unverified(_));
+            return Err(ExitCode::from(if unlocked { EXIT_ERRORS } else { EXIT_USAGE }));
+        }
+    };
+    // The lock is verified before anything else is read, and only when a project was named. `--dev` leaves
+    // out the projects that are folders on disk, and not those from repositories.
+    if project.is_some() {
+        if let Some(code) = verify_projects(&set, lock.as_ref().ok().and_then(Option::as_ref), dev) {
+            return Err(code);
+        }
+    }
+    Ok(set)
 }
 
 /// Verifies the projects against the lock file of the root project. The result is the exit code if there is a problem.
@@ -656,14 +674,15 @@ fn convert_files(stdin: bool, options: &ConvertOptions, files: &[PathBuf]) -> Ex
     }
 }
 
-fn check(
-    stdin: bool,
-    verbose: bool,
-    dev: bool,
-    options: &CheckOptions,
+/// Reads the inputs of a run: the types files of the projects, then the files that were given, then the standard input.
+/// The error is the exit code, after the problem has been written. Reading stops at the first syntax error, which is
+/// found later, with the others, by the check.
+fn read_sources(
     set: &ProjectSet,
     files: &[PathBuf],
-) -> ExitCode {
+    stdin: bool,
+    experimental: Experimental,
+) -> Result<Vec<Source>, ExitCode> {
     // The inputs are read one at a time, and reading stops at the first syntax error. That way an unreadable later
     // input cannot hide an earlier syntax error, which is the error the run is meant to stop at. The files of the
     // projects come first, and the project says that they are types files.
@@ -686,31 +705,46 @@ fn check(
             }),
             Err(e) => {
                 eprintln!("ERROR: Cannot read {}: {}", file.path.display(), e);
-                return ExitCode::from(EXIT_USAGE);
+                return Err(ExitCode::from(EXIT_USAGE));
             }
         }
         let source = sources.last().expect("a source was just pushed");
-        if syntax_error(source, options.experimental).is_some() {
+        if syntax_error(source, experimental).is_some() {
             syntax_failed = true;
             break;
         }
-        if index < from_projects.len() && source_kind(source, options.experimental) == SourceKind::Values {
+        if index < from_projects.len() && source_kind(source, experimental) == SourceKind::Values {
             let message = "The project includes this file as a types file but it holds data-values";
             eprintln!("{}", Diagnostic::new(&source.name, Pos { line: 1, col: 1 }, message));
-            return ExitCode::from(EXIT_ERRORS);
+            return Err(ExitCode::from(EXIT_ERRORS));
         }
     }
     if stdin && !syntax_failed {
         let mut text = String::new();
         if let Err(e) = std::io::stdin().read_to_string(&mut text) {
             eprintln!("ERROR: Cannot read standard input: {}", e);
-            return ExitCode::from(EXIT_USAGE);
+            return Err(ExitCode::from(EXIT_USAGE));
         }
         sources.push(Source {
             name: "<stdin>".to_string(),
             text,
         });
     }
+    Ok(sources)
+}
+
+fn check(
+    stdin: bool,
+    verbose: bool,
+    dev: bool,
+    options: &CheckOptions,
+    set: &ProjectSet,
+    files: &[PathBuf],
+) -> ExitCode {
+    let sources = match read_sources(set, files, stdin, options.experimental) {
+        Ok(sources) => sources,
+        Err(code) => return code,
+    };
 
     // The processing is deliberately independent of the command line so that it is available as a library.
     let report = check_in_projects(&sources, &layout(set, sources.len()), options);
