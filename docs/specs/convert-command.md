@@ -1,13 +1,14 @@
 # The convert command
 
 `constructo convert` reads data-values and writes them in another notation. This document says what it reads, what it
-writes, what it prints when something is wrong, and what its exit code means. Two formats exist so far: `json-exact`,
-which writes every kind of value in an explicit form and needs no types, and `jsonl-exact`, which writes the same
-encoding on a line for each value. The formats that follow are the natural JSON that needs types (`json-typed`) and
-its lines, and the conversions back, and each will be added here.
+writes, what it prints when something is wrong, and what its exit code means. Three formats exist so far: `json-exact`,
+which writes every kind of value in an explicit form and needs no types, `jsonl-exact`, which writes the same encoding
+on a line for each value, and `json-typed`, which writes natural JSON in the shapes that serde uses, and needs the
+types. The formats that follow are the lines of the typed form and the conversions back, and each will be added here.
 
 ```text
-constructo convert --to=FORMAT [--to-array] [--compact] [-x] [--stdin] [FILES]...
+constructo convert --to=json-exact|jsonl-exact [--to-array] [--compact] [-x] [--stdin] [FILES]...
+constructo convert --to=json-typed [--to-array] [--compact] [--project=FOLDER] [OPTIONS] [FILES]...
 ```
 
 ## Inputs
@@ -16,10 +17,11 @@ The inputs are the `FILES`, in the order that they are written, and then the sta
 which is processed as one more file, named `<stdin>`, after the others. A run needs at least one of them, and without
 one the command line is refused as a usage error (exit code 2).
 
-An input is read as a values file. The inputs are read one at a time. An input that cannot be read ends the run at once
-with exit code 2. An input that has a syntax error, or is a types file, ends the reading with exit code 1, so that an
-unreadable input after it is never reached, as for [the check command](check-command.md). The standard input is only
-read if none of the files has failed.
+For `json-exact` and `jsonl-exact` an input is read as a values file. For `json-typed` the inputs are those of [the
+check command](check-command.md), as [its section](#the-format-json-typed) says. The inputs are read one at a time. An
+input that cannot be read ends the run at once with exit code 2. An input that has a syntax error, or for `json-exact`
+and `jsonl-exact` is a types file, ends the reading with exit code 1, so that an unreadable input after it is never
+reached, as for [the check command](check-command.md). The standard input is only read if none of the files has failed.
 
 - **A types file** is an error, whatever its place: `NAME is a types file; convert reads values files`, at line 1,
   column 1 of the file. The kind of a file is decided by its first token, as the check command says.
@@ -29,14 +31,16 @@ read if none of the files has failed.
   against a schema: `[1, "x"]` is converted as it is. A name is not looked up either. A name is a const or a constructor
   by its form alone, as [decision 35](../decisions/0035-a-const-name-starts-with-a-lower-case-letter.md) says.
 
-The prelude is not loaded and no project is read, because nothing is resolved. Of the options of the check command, only
-`-x` and `--no-experimental` are accepted, since the postfix `?` has to be switched on to be parsed. A `?` is written as
-the `Some(...)` that it stands for.
+For these two formats the prelude is not loaded and no project is read, because nothing is resolved. Of the options of
+the check command, only `-x` and `--no-experimental` are accepted, since the postfix `?` has to be switched on to be
+parsed. A `?` is written as the `Some(...)` that it stands for. The options that `json-typed` takes in addition, such
+as `--project` and `--no-prelude`, are refused: `ERROR: --no-prelude does not apply to json-exact, which needs no
+types`, with exit code 2.
 
 ## One value, or all of them
 
-This section is about `json-exact`, which is a single document. `jsonl-exact` writes every value, as
-[its section](#the-format-jsonl-exact) says.
+This section is about `json-exact` and `json-typed`, which each write a single document. `jsonl-exact` writes every
+value, as [its section](#the-format-jsonl-exact) says.
 
 - **By default the first value is converted.** It is the first value that there is, across the inputs in order, so an
   input with no values is passed over. If any value follows it, in the same input or in a later one, there is one
@@ -47,8 +51,9 @@ This section is about `json-exact`, which is a single document. `jsonl-exact` wr
 - **Without `--to-array`, no value at all is an error**: `No value to convert`, at line 1, column 1 of the first input,
   with exit code 1.
 
-Only the values that are converted are encoded. So a duplicate name in a value that comes after the first one is not an
-error unless `--to-array` is given.
+Only the values that are converted are encoded, and for `json-typed` only they are type-checked. So a duplicate name in
+a value that comes after the first one is not an error unless `--to-array` is given, and nor is a type error. Converting
+the first value is a convenience, and it does not ask for the rest of the file to be right.
 
 ## Output
 
@@ -144,37 +149,134 @@ the lines are the elements of the array that `--to-array` gives for `json-exact`
   conversion is whole, an error in a late value leaves the standard output empty, and the lines that came before it are
   not written.
 
+## The format `json-typed`
+
+`--to=json-typed` writes natural JSON, in the shapes that serde writes for the Rust types that the declarations would
+be, so that a program that reads such JSON can read it. What a value is written as depends on its type, which is why the
+types are needed. They decide whether `5` is `5` or `5.0`, what an omitted argument is, and which names are `Bool` and
+`Option`. See [decision 37](../decisions/0037-typed-json-follows-serde.md).
+
+### Inputs and checking
+
+The inputs are those of the check command, in the same order: the types files of the project named by
+`--project=FOLDER`, then the `FILES`, then the standard input if `--stdin` is given. The `FILES` and the standard input
+may hold types files as well as values files, told apart by the first token, and every types file must come before every
+values file. Only the values files give values. The prelude is loaded unless `--no-prelude` is given, and `Bool` and
+`Option` are those of the prelude.
+
+The types are checked as the check command checks them: syntax, names, and the validity checks. Then the values that are
+converted are type-checked, and any error is reported as the check command reports it, with exit code 1 and nothing on
+the standard output. The run stops at the first type error. The first value, the warning, `--to-array`, the layout and
+`--compact` are as for `json-exact`.
+
+### The options
+
+| Option                            | Meaning                                                  |
+|-----------------------------------|----------------------------------------------------------|
+| `--project=FOLDER`                | The project whose types files come first.                |
+| `--prelude`, `--no-prelude`       | Whether the prelude is loaded.                           |
+| `--widening`, `--no-widening`     | Whether a `Nat` fits where an `Int` or `Float` is.       |
+| `--allow-refs`, `--no-allow-refs` | Whether the value of a const may name another const.     |
+| `--infer-limit=N`                 | The most nodes that the type of a const may have.        |
+| `--default-limit=N`               | The most nodes that an omitted argument's default has.   |
+| `--dev`, `--no-dev`               | Whether imported folders are left out of the lock check. |
+| `-x`, `--no-experimental`         | The experimental features of the syntax.                 |
+
+They mean what they mean for [the check command](check-command.md), and the keys of `[check]` of a settings file with
+the same names, `prelude`, `widening`, `allow-refs`, `infer-limit`, `default-limit` and `dev`, set them. The values are
+always type-checked, and the run stops at the first error, so `--no-type-check` and `--continue` are not accepted, and
+nor are `--verbose` and `--print-config`. A project that imports a folder needs its lock, unless `--dev` is given, as
+for the check command.
+
+### The mapping
+
+| A value                                  | Is written as                              |
+|------------------------------------------|--------------------------------------------|
+| `5`, `+5`, `-5`, `1.50`                  | `5`, `5`, `-5`, `1.50`                     |
+| `"hi"`                                   | `"hi"`                                     |
+| `[1, 2]`                                 | `[1, 2]`                                   |
+| an untagged record `{ b: 1, a: "x" }`    | `{"b": 1, "a": "x"}`                       |
+| `Bool`: `true`, `False`                  | `true`, `false`                            |
+| `Option`: `None`, `null`                 | `null`                                     |
+| `Option`: `Some(1)`                      | `1`                                        |
+| a const reference `five`                 | the value of the const, written as here    |
+| a bare constructor `Dot`                 | `"Dot"`                                    |
+| a record constructor `Circle { r: 1.0 }` | `{"Circle": {"r": 1.0}}`                   |
+| a tuple constructor `Pair(1, 2)`         | `{"Pair": [1, 2]}`                         |
+| a tuple with one parameter `Wrapper(5)`  | `{"Wrapper": 5}`                           |
+| a tuple with none, `Ping()`              | `{"Ping": []}`                             |
+| an array constructor `Items[1, 2]`       | `{"Items": [1, 2]}`                        |
+
+- **Names.** The name of a constructor is the one that its enum declares, whatever project it is in and however the
+  importing project has hidden or renamed it. `lib::Circle` from the project `com.example.lib` is `"Circle"`.
+- **Enums.** A constructor with no body is a string, and any other is an object with the name for its one key. So an
+  enum of bare constructors is a string, as in `"Fast"`, and a bare constructor of an enum that has others with fields,
+  such as `Dot`, is a string too.
+- **Tuples.** The arguments are written in the order of the parameters, with no names, and an argument that was left out
+  is written as its default. A tuple with one parameter is written as that value alone, as serde writes a newtype
+  variant, and one with none is `[]`.
+- **Records.** The fields are written in the order of the declaration, wherever they were written. An untagged record
+  has the type that its value gives it, so it keeps the order that it was written in, and a field of the type
+  `{ w: Float, h: Float }` has the order of that type.
+- **Numbers.** A number is written as the text that it was written as, so that one of any size is exact, and what a
+  reader can hold is the reader's limit. A `+` is dropped and so are the zeros in front of the whole part, since JSON
+  allows neither (`+5` is `5` and `007` is `7`). A number in a `Float` slot that has no point or exponent gets `.0`, so
+  `1` where a `Float` is expected is `1.0`, and a typed reader sees a float. The slot is the type that the value has
+  when the whole of it has been checked, so in `[1, 2.5]` both are floats.
+- **Bool and Option.** They are told by the project that declares them, and not by their names, so an enum of your own
+  that is called `Bool` is an ordinary enum, and so are both of them under `--no-prelude`. `Some(x)` is written as `x`,
+  and `None` and `null` as `null`.
+- **`Some(None)`.** An `Option` inside an `Option` is written as the one that is inside, and `Some(None)` would be read
+  back as `None`, so it is an error: `Some(None) cannot be written as JSON, since it would read back as None`, at the
+  value, with exit code 1. `Some(null)` is the same, since `null` is `None`.
+- **Omitted arguments.** The default of a type is the zero of a number (`0`, `0`, `0.0`), the empty string, the empty
+  array, the record of the defaults of the fields, and the first constructor of an enum with the defaults of its fields,
+  as [decision 18](../decisions/0018-an-omitted-named-argument-takes-the-default-of-its-type.md) says. For `Bool` that
+  is `false`, for `Option` it is `null`, and a one-parameter tuple is written as its one value.
+- **Consts.** A reference to a const is replaced by its value, which is checked again against the type that the
+  reference has, so that it is written for that type. `five`, where `const five = 5;`, is `5` on its own and `5.0` where
+  a `Float` is expected. Each reference to a generic const is written for its own type.
+
+### Errors of the encoding
+
+Besides the errors of the check, the encoding refuses a value that is nested more than 300 levels deep, counting the
+consts that it refers to: `The value is nested too deeply to convert`. A chain of consts is as deep as it is long, so a
+very long one is refused and not followed. Nothing else is an error: a value that has passed the check has a JSON form.
+
 ## The option `--to`
 
-`--to` is required, and its value is matched exactly. `json-exact` and `jsonl-exact` are the only ones that exist. Any
-other value is a usage error, exit code 2. A bare `json` is not a format, so that nobody takes the exact form for the
-natural one by default. The message starts `ERROR: json is not a format; choose json-exact or jsonl-exact (every kind
-kept, no types)` and goes on to say that `json-typed` (natural, needs types) is not available yet.
-
-`json-typed` on its own gives `ERROR: json-typed is not available yet; choose json-exact or jsonl-exact`, and any other
-name, `jsonl` among them, gives `ERROR: NAME is not a format; choose json-exact or jsonl-exact`. See
-[decision 36](../decisions/0036-two-kinds-of-json.md).
+`--to` is required, and its value is matched exactly. `json-exact`, `jsonl-exact` and `json-typed` are the only ones
+that exist. Any other value is a usage error, exit code 2. A bare `json` is not a format, so that nobody takes the exact
+form for the natural one by default. The message starts `ERROR: json is not a format; choose json-exact (every kind
+kept, no types)` and goes on to name `jsonl-exact` and `json-typed` (natural, needs types). Any other name, `jsonl`
+among them, gives `ERROR: NAME is not a format; choose json-exact, jsonl-exact or json-typed`. See [decision
+36](../decisions/0036-two-kinds-of-json.md).
 
 ## Settings
 
 `--to-array` and `--compact` are choices for a run and are not settings. The configuration file has no table for the
-command. It reads `[global]` and `[experimental]`, as [the configuration file](config-file.md) says. The global options
-`--config` and `--cache` are accepted. The file that `--config` names is read and has to be valid, and `--cache` has to
-be a folder that is not empty, but neither is used otherwise.
+command. It reads `[global]` and `[experimental]`, and for `json-typed` also the keys of `[check]` that are listed
+above, as [the configuration file](config-file.md) says. The global options `--config` and `--cache` are accepted. The
+file that `--config` names is read and has to be valid, and `--cache` has to be a folder that is not empty. The cache is
+used by `json-typed` for a project from a repository, and otherwise neither is used.
 
 ## Exit codes
 
 | Code | When                                                                                          |
 |------|-----------------------------------------------------------------------------------------------|
 | 0    | The values were converted, with or without a warning.                                         |
-| 1    | An input has a syntax error or is a types file, there is no value to convert, or a name is    |
-|      | given twice.                                                                                  |
+| 1    | An input has a syntax error, there is no value to convert, or a name is given twice. For      |
+|      | `json-exact` an input that is a types file. For `json-typed` an error in the types, a type    |
+|      | error, `Some(None)`, or a project that does not match its lock.                               |
 | 2    | An option is not understood, `--to` is missing or is not a format, `--to-array` is given with |
-|      | a lines format, there are no inputs, or one cannot be read.                                   |
+|      | a lines format, an option for types is given with a format that needs none, there are no      |
+|      | inputs, one cannot be read, or the project or the settings file is bad.                       |
 
 ## Related
 
 - [The check command](check-command.md), for how the inputs are read, and how types files and values files are told
   apart.
 - [The exit codes](exit-codes.md) and [the configuration file](config-file.md).
-- Decisions 35 and 36, in `docs/decisions/`.
+- [Validity checks](validity-checks.md), [type checking](type-checking.md) and
+  [resolving identifiers](resolving-identifiers.md), for the checks that `json-typed` makes before it converts.
+- Decisions 18, 35, 36 and 37, in `docs/decisions/`.

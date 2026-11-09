@@ -154,14 +154,21 @@ Following the style in https://keepachangelog.com/en/1.0.0/
     user says how to run it. A project from a repository must stay inside its clone, and `--dev` does not make it
     unverified.
   - The library has the `project`, `lock`, `verify` and `fetch` modules.
-
 - The subcommand `constructo convert --to=json-exact [--to-array] [--compact] [-x] [--stdin] FILES...`, which writes
   values as JSON with every kind of value explicit and no types needed (`{"nat": "5"}`, `{"constructor": "Move",
   "record": {...}}`, and so on; numbers keep their text). It converts the first value and warns if more follow, or every
-  value into an array with `--to-array`. `--to` is matched exactly, and there is no bare `json`: `json-typed` is to
-  come. See `docs/specs/convert-command.md` and decision 36. The library has the `convert` module.
+  value into an array with `--to-array`. `--to` is matched exactly, and there is no bare `json`. See
+  `docs/specs/convert-command.md` and decision 36. The library has the `convert` module.
 - `constructo convert --to=jsonl-exact` writes each value on a line of its own, in the `json-exact` encoding with no
   white space, and every value is converted. `--to-array` is refused with it, and no values give no output.
+- `constructo convert --to=json-typed` writes natural JSON in the shapes of serde, which needs the types. The inputs and
+  the options are those of `check` (`--project`, `--prelude`, `--widening`, `--allow-refs`, `--infer-limit`,
+  `--default-limit`, `--dev`, and the `[check]` keys that go with them). The values are type-checked, and only the ones
+  that are converted. `Bool` and `Option` of the prelude are `true`, `false`, `null` and the value, a bare constructor
+  is a string, a number in a `Float` slot has a point, an omitted argument is written as its default, and a const is
+  replaced by its value. `Some(None)` is refused. See `docs/specs/convert-command.md` and decision 37.
+- The pretty output of `convert` puts a container on one line if it is at most 80 characters wide, not counting the
+  indentation, and spreads it over lines otherwise.
 - A diagnostic has a severity. A warning is written as `WARNING: <message> (<file>, line L, col C)` and does not change
   the exit code. The library has `Severity` and `Diagnostic::warning`.
 

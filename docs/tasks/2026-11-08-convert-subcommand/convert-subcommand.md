@@ -217,9 +217,9 @@ made here and recorded.
 
 ### Tasks
 
-- [ ] Share the type-check of `check` with `convert`, with its options.
-- [ ] Write the typed encoder, with a unit test for every row above, and the functional tests.
-- [ ] Add the spec section and a decision that the typed shape follows serde.
+- [x] Share the type-check of `check` with `convert`, with its options.
+- [x] Write the typed encoder, with a unit test for every row above, and the functional tests.
+- [x] Add the spec section and a decision that the typed shape follows serde.
 
 ## Step 4: Convert to JSONL, typed
 
