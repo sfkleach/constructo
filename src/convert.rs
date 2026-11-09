@@ -9,6 +9,7 @@ use crate::diagnostics::{Diagnostic, Pos};
 use crate::parser::{parse_file, Experimental, Parsed};
 use crate::{syntax_diagnostic, Source};
 use std::collections::HashSet;
+use std::io::Write;
 
 /// The notations that values can be converted to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,34 +88,65 @@ pub fn values_of(source: &Source, experimental: Experimental) -> Result<Vec<Valu
     }
 }
 
-/// Converts the values of the sources, which are in the order that they were given. The sources are all parsed first,
-/// and the first error, of syntax or of a type of file or of encoding, is the result, so that nothing is half written.
-pub fn convert(sources: &[Source], options: &ConvertOptions) -> Result<Converted, Diagnostic> {
+/// Every value of the sources, in order, each with the name of the source that it is in. It is an error if a source has
+/// a syntax error or is a types file, so every source is read before any value is converted.
+fn all_values(sources: &[Source], experimental: Experimental) -> Result<Vec<(&str, Value)>, Diagnostic> {
     let mut values: Vec<(&str, Value)> = Vec::new();
     for source in sources {
         values.extend(
-            values_of(source, options.experimental)?
+            values_of(source, experimental)?
                 .into_iter()
                 .map(|v| (source.name.as_str(), v)),
         );
     }
+    Ok(values)
+}
+
+/// What can go wrong with a conversion that is written as it goes.
+#[derive(Debug)]
+pub enum LinesError {
+    /// The inputs have an error. Lines that were converted before it have been written.
+    Invalid(Diagnostic),
+    /// The output could not be written, such as when the reader of a pipe has gone.
+    Write(std::io::Error),
+}
+
+/// Converts every value of the sources to a line of `json-exact`, with no white space, and writes each to `out` as soon
+/// as it is converted. The sources are all read first, so an error in the syntax of any of them, or a types file, is
+/// found before anything is written. After that the first error in a value ends the run, and the lines before it have
+/// been written. A line that is written is complete. No values give no output.
+pub fn convert_lines(sources: &[Source], options: &ConvertOptions, out: &mut dyn Write) -> Result<(), LinesError> {
+    let values = all_values(sources, options.experimental).map_err(LinesError::Invalid)?;
+    for (name, value) in &values {
+        let line = encode_exact(name, value).map_err(LinesError::Invalid)?.write(true);
+        out.write_all(line.as_bytes()).map_err(LinesError::Write)?;
+    }
+    Ok(())
+}
+
+/// Converts the values of the sources, which are in the order that they were given, and gives the output as a whole.
+/// The sources are all parsed first, and the first error, of syntax or of a type of file or of encoding, is the result,
+/// so that nothing is half written. The lines formats are written as they go by `convert_lines`, and here their lines
+/// are only collected, so that an error gives no output.
+pub fn convert(sources: &[Source], options: &ConvertOptions) -> Result<Converted, Diagnostic> {
     if options.format.needs_types() {
         // The conversion that needs the types is `convert_typed`, which is given the layout of the projects as well.
         let message = "json-typed needs the types, so it is converted with convert_typed";
         return Err(Diagnostic::new("", Pos { line: 1, col: 1 }, message));
     }
     if options.format.is_lines() {
-        // Every value is a line of its own, so there is no first value to choose and no array to put them in. No value
-        // gives no output at all, as the lines of nothing are nothing.
-        let mut output = String::new();
-        for (name, value) in &values {
-            output.push_str(&encode_exact(name, value)?.write(true));
-        }
-        return Ok(Converted {
-            output,
-            warnings: Vec::new(),
-        });
+        let mut output = Vec::new();
+        return match convert_lines(sources, options, &mut output) {
+            Ok(()) => Ok(Converted {
+                output: String::from_utf8(output).expect("JSON is UTF-8"),
+                warnings: Vec::new(),
+            }),
+            Err(LinesError::Invalid(diagnostic)) => Err(diagnostic),
+            // Writing to a vector cannot fail, and this is only a defensive check.
+            Err(LinesError::Write(e)) => Err(Diagnostic::new("", Pos { line: 1, col: 1 }, e.to_string())),
+        };
     }
+    let values = all_values(sources, options.experimental)?;
     let mut warnings = Vec::new();
     let json = if options.to_array {
         let mut items = Vec::new();
@@ -918,5 +950,83 @@ mod tests {
             json = Json::Array(vec![json, Json::Str("x".repeat(100))]);
         }
         assert!(json.write(false).lines().count() > 300);
+    }
+
+    /// A writer that keeps what it is given in the chunks that it was given, and can be made to fail.
+    #[derive(Default)]
+    struct Sink {
+        chunks: Vec<String>,
+        fail_after: Option<usize>,
+    }
+
+    impl Write for Sink {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if self.fail_after == Some(self.chunks.len()) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "the reader has gone",
+                ));
+            }
+            self.chunks.push(String::from_utf8(bytes.to_vec()).unwrap());
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn stream(sources: &[Source], sink: &mut Sink) -> Result<(), LinesError> {
+        let options = ConvertOptions {
+            format: Format::JsonlExact,
+            ..options(false)
+        };
+        convert_lines(sources, &options, sink)
+    }
+
+    #[test]
+    fn the_lines_are_written_one_at_a_time_as_they_are_converted() {
+        let mut sink = Sink::default();
+        stream(&[source("a.values", "1; 2"), source("b.values", "red")], &mut sink).unwrap();
+        assert_eq!(
+            sink.chunks,
+            ["{\"nat\":\"1\"}\n", "{\"nat\":\"2\"}\n", "{\"const\":\"red\"}\n"]
+        );
+    }
+
+    #[test]
+    fn the_lines_before_an_error_in_a_value_have_been_written() {
+        let mut sink = Sink::default();
+        let result = stream(&[source("a.values", "1; { a: 1, a: 2 }; 3")], &mut sink);
+        let Err(LinesError::Invalid(diagnostic)) = result else {
+            panic!("an error in a value was expected");
+        };
+        assert!(diagnostic.to_string().contains("Duplicate field a"));
+        assert_eq!(sink.chunks, ["{\"nat\":\"1\"}\n"]);
+    }
+
+    #[test]
+    fn an_error_in_the_syntax_of_any_source_is_found_before_anything_is_written() {
+        let mut sink = Sink::default();
+        let result = stream(&[source("a.values", "1; 2"), source("b.values", "[1,")], &mut sink);
+        assert!(matches!(result, Err(LinesError::Invalid(_))));
+        assert!(sink.chunks.is_empty());
+        let result = stream(&[source("a.values", "1"), source("t.types", "enum E = A;")], &mut sink);
+        assert!(matches!(result, Err(LinesError::Invalid(_))));
+        assert!(sink.chunks.is_empty());
+    }
+
+    #[test]
+    fn a_failure_to_write_ends_the_run_and_is_reported_as_one() {
+        let mut sink = Sink {
+            fail_after: Some(1),
+            ..Sink::default()
+        };
+        let result = stream(&[source("a.values", "1; 2; 3")], &mut sink);
+        let Err(LinesError::Write(e)) = result else {
+            panic!("a failure to write was expected");
+        };
+        assert_eq!(e.kind(), std::io::ErrorKind::BrokenPipe);
+        assert_eq!(sink.chunks.len(), 1);
     }
 }

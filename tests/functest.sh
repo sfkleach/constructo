@@ -1649,10 +1649,33 @@ expect_json "jsonl-exact: -x writes the postfix ? as Some" "$CONVERT/query.jsonl
 expect_json "jsonl-exact: no values is no output" /dev/null --to=jsonl-exact "$CONVERT/empty.values"
 expect_json "jsonl-exact: the values of several inputs are in order" "$CONVERT/three.jsonl" --to=jsonl-exact \
     "$CONVERT/leaf-1.values" "$CONVERT/leaf-23.values"
-expect_convert_error "jsonl-exact: a duplicate field is an error, and nothing is written" 1 "ERROR: Duplicate field a" \
-    --to=jsonl-exact "$CONVERT/leaf.values" "$CONVERT/duplicate-field.values"
-expect_convert_error "jsonl-exact: a syntax error is an error" 1 "ERROR: " --to=jsonl-exact "$CONVERT/leaf.values" \
-    "$CONVERT/syntax-error.values"
+# The lines are written as they are converted, so the lines before an error in a value are written. An error that is
+# found before any value is converted, such as one in the syntax, leaves the standard output empty.
+actual=0
+"$CONSTRUCTO" convert --to=jsonl-exact "$CONVERT/leaf.values" "$CONVERT/duplicate-field.values" >"$conv_dir/out" \
+    2>"$conv_dir/err" || actual=$?
+first="$(head -n 1 "$conv_dir/err")"
+if [[ "$actual" -eq 1 && "$(cat "$conv_dir/out")" == '{"nat":"5"}' && "$first" == "ERROR: Duplicate field a"* ]]; then
+    pass "jsonl-exact: the lines before an error in a value are written"
+else
+    fail "jsonl-exact: the lines before an error (exit $actual, out '$(cat "$conv_dir/out")', err '$first')"
+fi
+expect_convert_error "jsonl-exact: a syntax error is found before anything is written" 1 "ERROR: " --to=jsonl-exact \
+    "$CONVERT/leaf.values" "$CONVERT/syntax-error.values"
+expect_convert_error "jsonl-exact: a types file is found before anything is written" 1 "ERROR: *is a types file" \
+    --to=jsonl-exact "$CONVERT/leaf.values" "$CONVERT/types-file.types"
+
+# A reader that goes away, as `head` does, ends the run with exit code 2 and no message, and not with a panic.
+seq 1 20000 | sed 's/$/;/' >"$conv_dir/long.values"
+code_file="$conv_dir/code"
+( "$CONSTRUCTO" convert --to=jsonl-exact "$conv_dir/long.values" 2>"$conv_dir/err"; echo $? >"$code_file" ) \
+    | head -n 1 >"$conv_dir/out" || true
+if [[ "$(cat "$code_file")" -eq 2 && "$(cat "$conv_dir/out")" == '{"nat":"1"}' && ! -s "$conv_dir/err" ]]; then
+    pass "jsonl-exact: a reader that has gone ends the run quietly with exit code 2"
+else
+    fail "jsonl-exact: a reader that has gone (exit $(cat "$code_file"), err '$(head -c 200 "$conv_dir/err")')"
+fi
+rm -f "$conv_dir/long.values" "$code_file"
 expect_convert_error "jsonl-exact: --to-array does not apply" 2 "ERROR: --to-array does not apply to jsonl-exact" \
     --to=jsonl-exact --to-array "$CONVERT/leaf.values"
 expect_convert_error "jsonl is not a format" 2 "ERROR: jsonl is not a format; choose json-exact, jsonl-exact" \

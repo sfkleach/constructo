@@ -57,9 +57,15 @@ the first value is a convenience, and it does not ask for the rest of the file t
 
 ## Output
 
-The output is written to the standard output, and only if the conversion is whole: an error leaves the standard output
-empty. Warnings and errors go to the standard error, in the usual form, which for a warning starts `WARNING:`. See
-[the exit codes](exit-codes.md).
+The output is written to the standard output. A format that writes one document, `json-exact` and `json-typed`, writes
+it only if the conversion is whole, since a document that was cut short by an error would not be valid JSON, so an error
+leaves the standard output empty. A lines format writes each line as it is converted, as [its
+section](#the-format-jsonl-exact) says. Warnings and errors go to the standard error, in the usual form, which for a
+warning starts `WARNING:`. See [the exit codes](exit-codes.md).
+
+If the output cannot be written, as when it is a pipe whose reader has gone, the run ends with exit code 2. A reader
+that has gone, as `head` does, is what the reader asked for, so there is no message for it, and for any other failure
+the message is `ERROR: Cannot write the output: REASON`.
 
 `--compact` writes no white space at all: `{"nat":"5"}`. Without it the output is indented by two spaces, with a space
 after each `:` and `,`, and it is laid out for reading. A container is written on one line if that line is at most 80
@@ -145,9 +151,12 @@ the lines are the elements of the array that `--to-array` gives for `json-exact`
 - **`--to-array` is a usage error**, exit code 2: `ERROR: --to-array does not apply to jsonl-exact, which writes each
   value on a line of its own`. An array is how one document holds many values, and a lines format has no such thing, so
   asking for both is refused and not ignored.
-- **The errors are those of `json-exact`**, and the conversion stops at the first. As nothing is written unless the
-  conversion is whole, an error in a late value leaves the standard output empty, and the lines that came before it are
-  not written.
+- **The lines are streamed.** Each is written as soon as its value is converted, so a large input does not have to be
+  held as output, and a program that reads the lines can start before the conversion is over.
+- **The errors are those of `json-exact`**, and the conversion stops at the first. Every input is read before any value
+  is converted, so an error in the syntax of any of them, or a types file, leaves the standard output empty. An error in
+  a value, such as a name given twice, comes when the value is reached, and the lines before it have been written. Every
+  line that is written is complete, and the error is reported on the standard error with exit code 1.
 
 ## The format `json-typed`
 
@@ -270,7 +279,8 @@ used by `json-typed` for a project from a repository, and otherwise neither is u
 |      | error, `Some(None)`, or a project that does not match its lock.                               |
 | 2    | An option is not understood, `--to` is missing or is not a format, `--to-array` is given with |
 |      | a lines format, an option for types is given with a format that needs none, there are no      |
-|      | inputs, one cannot be read, or the project or the settings file is bad.                       |
+|      | inputs, one cannot be read, the project or the settings file is bad, or the output cannot be  |
+|      | written.                                                                                      |
 
 ## Related
 

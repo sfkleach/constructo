@@ -83,7 +83,8 @@ codes.
 - **Exit code 2:** an option or an argument that is not understood, which includes no `--to`, a `--to` that is not a
   format, `--to-array` with a lines format, an option for types (`--project`, `--no-prelude` and the others) with a
   format that needs no types, and no inputs at all; `--config` given more than once or one that cannot be read, a
-  `--cache` that is empty, and an input that cannot be read, including the standard input. For `json-typed`, the
+  `--cache` that is empty, an input that cannot be read, including the standard input, and an output that cannot be
+  written, such as a pipe whose reader has gone. For `json-typed`, the
   problems with a project-file or with how projects are found, as for `check`. As for `check`, an unreadable input ends
   the run at once, and a syntax error in an input that comes before it is found first.
 
