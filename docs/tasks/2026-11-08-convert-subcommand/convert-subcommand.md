@@ -67,7 +67,9 @@ message for `json` says that the typed one is not available yet.
 - A syntax error stops the run at the first one, as for `check`, with exit code 1.
   A record or a set of named arguments that has a name twice is an error with
   exit code 1.
-- Nothing is written to the standard output if there is an error.
+- Nothing is written to the standard output if there is an error. This is for the
+  formats that write one JSON document, which would not be valid if it were cut
+  short. The lines formats stream (Steps 2 and 4).
 
 ### One value, or all of them
 
@@ -222,6 +224,51 @@ made here and recorded.
 - [x] Add the spec section and a decision that the typed shape follows serde.
 
 ## Step 4: Convert to JSONL, typed
+
+Implement the next format `--to=jsonl-typed`, which takes a sequence of values and
+streams them in compact JSONL format using the same conversion rules as for
+JSON-typed (Step 3), as `jsonl-exact` does for `json-exact` (Step 2).
+
+```
+constructo convert --to=jsonl-typed shapes.types shapes.values > shapes.jsonl
+```
+
+The behaviour is that of `jsonl-exact`, with the inputs and options of `json-typed`:
+
+- Every value of every values file is converted, each as the `json-typed` form of it
+  on one line with no white space, and a new line after each. There is no first
+  value to choose, so no warning.
+- Every value is therefore type-checked, since every value is converted. The first
+  error ends the run, as for `json-typed`. The lines are streamed: each is written
+  as soon as its value is converted, so an error in a late value leaves the lines
+  before it written, and then the error is reported with exit code 1. Every line
+  that is written is complete, and an error in the types or in the syntax, which is
+  found before any value is converted, leaves the standard output empty.
+- No values at all, which includes inputs that are only types files, give no output,
+  with exit code 0.
+- `--compact` makes no difference and is accepted. `--to-array` is a usage error
+  (exit code 2), as for `jsonl-exact`, since a lines format has no array.
+- The inputs, the options for types (`--project`, `--prelude`, `--widening`,
+  `--allow-refs`, `--infer-limit`, `--default-limit`, `--dev`), the `[check]` keys of
+  a settings file and the exit codes are those of `json-typed`. The options for
+  types are refused for the formats that need none.
+- Each line is exactly what `--compact` gives for that value with `json-typed`, so
+  the lines are the elements of the array that `--to-array` gives. The functional
+  tests check that.
+
+Streaming is not for `json-exact` and `json-typed`, which write one document. A
+document that was cut short by an error would not be valid JSON, so for those the
+output is only written if the conversion is whole (Step 1). `jsonl-exact` (Step 2)
+is changed to stream as well, so that the two lines formats behave alike.
+
+### Tasks
+
+- [ ] Add the format, sharing the typed encoder, with unit tests.
+- [ ] Stream the lines of both lines formats, so that the library writes to a sink
+      and not to a string, and change `jsonl-exact` and its spec text and functest
+      to match.
+- [ ] Functional tests with the examples of Step 3, and the spec section.
+- [ ] Update `docs/specs/convert-command.md`, `exit-codes.md` and the CHANGELOG.
 
 
 ## Step 5: Convert from JSON (exact)
