@@ -1,0 +1,27 @@
+// One of each kind of value, converted together with --to-array.
+5;
++5;
+-5;
+1.50;
+"text \" with \n escapes";
+[1, 2.5];
+{ b: 1, a: "x" };
+true;
+false;
+None;
+Some(1);
+Some(Some(2));
+Fast;
+Circle { r: 1 };
+Dot;
+Pair(1, 2);
+Wrapper(5);
+Ping();
+Items[1, 2];
+Items[];
+Tagged(size: 2, label: "t");
+Config { size: { h: 1, w: 2 }, speed: Slow, name: Some("n"), on: false, tags: ["x"] };
+Config { name: None, on: true, speed: Fast, tags: [], size: { w: 0.5, h: 1.5 } };
+Defaults();
+five;
+names;

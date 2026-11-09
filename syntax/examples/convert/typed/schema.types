@@ -1,0 +1,9 @@
+// The types for the typed conversions in this folder.
+enum Speed = Fast, Slow;
+enum Pair2 = Pair2(x: Nat, y: Nat);
+enum Shape =
+    Circle { r: Float }, Dot, Pair(Nat, Nat), Wrapper(Nat), Ping(), Items[Nat], Tagged(label: String, size: Float);
+enum Config = Config { name: Option<String>, on: Bool, speed: Speed, tags: [String], size: { w: Float, h: Float } };
+enum Defaults = Defaults(a: Nat, b: Float, c: String, d: [Nat], e: Option<Nat>, f: Bool, g: Speed, h: Pair2);
+const five = 5;
+const names = ["a", "b"];

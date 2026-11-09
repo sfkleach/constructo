@@ -6,8 +6,8 @@ use constructo::lock::Lock;
 use constructo::project::{init_project, Init, ProjectError, Remotes, PROJECT_FILE};
 use constructo::verify::{read_lock, update_lock_with, verify_lock_with};
 use constructo::{
-    check_in_projects, source_kind, syntax_error, CheckOptions, Config, Experimental, ImportInfo, InputFile, Layout,
-    Outcome, Project, ProjectInfo, ProjectSet, Source, SourceKind,
+    check_in_projects, convert_typed, source_kind, syntax_error, CheckOptions, Config, Experimental, ImportInfo,
+    InputFile, Layout, Outcome, Project, ProjectInfo, ProjectSet, Source, SourceKind,
 };
 use std::collections::{HashSet, VecDeque};
 use std::ffi::OsString;
@@ -108,6 +108,70 @@ enum ProjectCommand {
     },
 }
 
+/// The ids of the options of `TypingArgs`, which are the names of the options with underscores.
+const TYPING_OPTIONS: [&str; 11] = [
+    "prelude",
+    "no_prelude",
+    "widening",
+    "no_widening",
+    "allow_refs",
+    "no_allow_refs",
+    "infer_limit",
+    "default_limit",
+    "dev",
+    "no_dev",
+    "project",
+];
+
+/// The options that decide how the types are found and used, which `check` and `convert --to=json-typed` share.
+#[derive(clap::Args, Debug)]
+struct TypingArgs {
+    /// Load the standard prelude (Bool and Option) [default]
+    #[arg(long, overrides_with = "no_prelude")]
+    prelude: bool,
+
+    /// Do not load the standard prelude (Bool and Option)
+    #[arg(long, overrides_with = "prelude")]
+    no_prelude: bool,
+
+    /// Let a Nat fit where an Int or Float is expected, and an Int where a Float is expected [default]
+    #[arg(long, overrides_with = "no_widening")]
+    widening: bool,
+
+    /// Require numbers to have exactly the expected type: no Nat as an Int, and no Nat or Int as a Float
+    #[arg(long, overrides_with = "widening")]
+    no_widening: bool,
+
+    /// Let the definition of a const refer to other consts
+    #[arg(long, overrides_with = "no_allow_refs")]
+    allow_refs: bool,
+
+    /// Do not let the definition of a const refer to other consts [default]
+    #[arg(long, overrides_with = "allow_refs")]
+    no_allow_refs: bool,
+
+    /// The most nodes that the type inferred for a const may have [default: 10000]
+    #[arg(long, value_name = "N")]
+    infer_limit: Option<usize>,
+
+    /// The most nodes that the default value of an omitted argument may have [default: 10000]
+    #[arg(long, value_name = "N")]
+    default_limit: Option<usize>,
+
+    /// Do not verify the imported projects that are folders on disk against constructo.lock, and do not need
+    /// the file for them. For a project that is being developed. Projects from a repository are still verified
+    #[arg(long, short, overrides_with = "no_dev")]
+    dev: bool,
+
+    /// Verify the imported projects against constructo.lock [default]
+    #[arg(long, overrides_with = "dev")]
+    no_dev: bool,
+
+    /// Use the project in the folder: the types files that its constructo.toml names come first, then FILES
+    #[arg(long, value_name = "FOLDER")]
+    project: Option<PathBuf>,
+}
+
 #[derive(Subcommand, Debug)]
 enum Command {
     /// Work with a project
@@ -123,8 +187,8 @@ For json-exact the first value is converted, and a warning says if more follow. 
 value into an array. For jsonl-exact every value is a line. The output is written only if there is no error. The \
 settings file is read for [global] and [experimental].")]
     Convert {
-        /// The notation to write. The choices are json-exact, which keeps every kind of value and needs no types, and
-        /// jsonl-exact, which is the same with each value on a line of its own
+        /// The notation to write: json-exact, which keeps every kind of value and needs no types, jsonl-exact, which
+        /// is the same with each value on a line of its own, or json-typed, which is natural JSON and needs the types
         #[arg(long, value_name = "FORMAT")]
         to: String,
 
@@ -139,6 +203,9 @@ settings file is read for [global] and [experimental].")]
         /// Also read the standard input as if it were another file
         #[arg(long)]
         stdin: bool,
+
+        #[command(flatten)]
+        typing: TypingArgs,
 
         /// Switch on experimental features. On its own it switches on all of them, and `-x=FEATURE` switches on just
         /// that one. The option can be repeated, and for each feature the last of this and --no-experimental wins.
@@ -167,8 +234,8 @@ settings file is read for [global] and [experimental].")]
         )]
         no_experimental: Vec<Feature>,
 
-        /// The files of values to convert
-        #[arg(value_name = "FILES", required_unless_present = "stdin")]
+        /// The files to convert. With json-typed, the types files come among them or from --project
+        #[arg(value_name = "FILES", required_unless_present_any = ["stdin", "project"])]
         files: Vec<PathBuf>,
     },
 
@@ -186,13 +253,8 @@ https://github.com/sfkleach/constructo/blob/main/docs/specs/config-file.md")]
         #[arg(long)]
         stdin: bool,
 
-        /// Load the standard prelude (Bool and Option) [default]
-        #[arg(long, overrides_with = "no_prelude")]
-        prelude: bool,
-
-        /// Do not load the standard prelude (Bool and Option)
-        #[arg(long, overrides_with = "prelude")]
-        no_prelude: bool,
+        #[command(flatten)]
+        typing: TypingArgs,
 
         /// Check that data-values match the data-types [default]
         #[arg(long, overrides_with = "no_type_check")]
@@ -202,14 +264,6 @@ https://github.com/sfkleach/constructo/blob/main/docs/specs/config-file.md")]
         #[arg(long, overrides_with = "type_check")]
         no_type_check: bool,
 
-        /// Let a Nat fit where an Int or Float is expected, and an Int where a Float is expected [default]
-        #[arg(long, overrides_with = "no_widening")]
-        widening: bool,
-
-        /// Require numbers to have exactly the expected type: no Nat as an Int, and no Nat or Int as a Float
-        #[arg(long, overrides_with = "widening")]
-        no_widening: bool,
-
         /// After a type error, carry on with the next value to report more errors
         #[arg(long = "continue", overrides_with = "no_continue")]
         continue_after_error: bool,
@@ -217,22 +271,6 @@ https://github.com/sfkleach/constructo/blob/main/docs/specs/config-file.md")]
         /// Stop at the first type error [default]
         #[arg(long = "no-continue", overrides_with = "continue_after_error")]
         no_continue: bool,
-
-        /// Let the definition of a const refer to other consts
-        #[arg(long, overrides_with = "no_allow_refs")]
-        allow_refs: bool,
-
-        /// Do not let the definition of a const refer to other consts [default]
-        #[arg(long, overrides_with = "allow_refs")]
-        no_allow_refs: bool,
-
-        /// The most nodes that the type inferred for a const may have [default: 10000]
-        #[arg(long, value_name = "N")]
-        infer_limit: Option<usize>,
-
-        /// The most nodes that the default value of an omitted argument may have [default: 10000]
-        #[arg(long, value_name = "N")]
-        default_limit: Option<usize>,
 
         /// Switch on experimental features. On its own it switches on all of them, and `-x=FEATURE` switches on just
         /// that one. The option can be repeated, and for each feature the last of this and --no-experimental wins.
@@ -269,23 +307,10 @@ https://github.com/sfkleach/constructo/blob/main/docs/specs/config-file.md")]
         #[arg(long, overrides_with = "verbose")]
         no_verbose: bool,
 
-        /// Do not verify the imported projects that are folders on disk against constructo.lock, and do not need
-        /// the file for them. For a project that is being developed. Projects from a repository are still verified
-        #[arg(long, short, overrides_with = "no_dev")]
-        dev: bool,
-
-        /// Verify the imported projects against constructo.lock [default]
-        #[arg(long, overrides_with = "dev")]
-        no_dev: bool,
-
         /// Print the settings that the run would use, after the defaults, --config and the other options, as a
         /// commented TOML file that --config can read, and exit without checking. It is a template for a config file
         #[arg(long)]
         print_config: bool,
-
-        /// Check the project in the folder: the types files that its constructo.toml names come first, then FILES
-        #[arg(long, value_name = "FOLDER")]
-        project: Option<PathBuf>,
 
         /// The files to check
         #[arg(value_name = "FILES", required_unless_present_any = ["stdin", "print_config", "project"])]
@@ -422,6 +447,7 @@ fn main() -> ExitCode {
             to_array,
             compact,
             stdin,
+            typing,
             experimental: _,
             no_experimental: _,
             files,
@@ -433,8 +459,8 @@ fn main() -> ExitCode {
                     return ExitCode::from(EXIT_USAGE);
                 }
             };
-            // An array is how a single document holds many values, and a lines format has no such thing, so asking
-            // for both is a mistake that would otherwise be ignored without a word.
+            // An array is how one document holds many values, and a lines format has no such thing, so asking for both
+            // is a mistake that would otherwise be ignored without a word.
             if to_array && format.is_lines() {
                 eprintln!(
                     "ERROR: --to-array does not apply to {}, which writes each value on a line of its own",
@@ -445,38 +471,87 @@ fn main() -> ExitCode {
             let convert_matches = matches
                 .subcommand_matches("convert")
                 .expect("the convert subcommand was given");
-            let options = ConvertOptions {
-                format,
-                to_array,
-                compact,
-                experimental: experimental(config.check_options().experimental, &feature_changes(convert_matches)),
+            let from_file = config.check_options();
+            let experimental = experimental(from_file.experimental, &feature_changes(convert_matches));
+            if !format.needs_types() {
+                // The options for the types are refused and not ignored, for the reason that --to-array is.
+                for id in TYPING_OPTIONS {
+                    if convert_matches.value_source(id) == Some(clap::parser::ValueSource::CommandLine) {
+                        eprintln!(
+                            "ERROR: --{} does not apply to {}, which needs no types",
+                            id.replace('_', "-"),
+                            to
+                        );
+                        return ExitCode::from(EXIT_USAGE);
+                    }
+                }
+                let options = ConvertOptions {
+                    format,
+                    to_array,
+                    compact,
+                    experimental,
+                };
+                return convert_files(stdin, &options, &files);
+            }
+            let TypingArgs {
+                prelude,
+                no_prelude,
+                widening,
+                no_widening,
+                allow_refs,
+                no_allow_refs,
+                infer_limit,
+                default_limit,
+                dev,
+                no_dev,
+                project,
+            } = typing;
+            // The values are always checked, and the run stops at the first type error, so `type_check` and
+            // `continue_after_error` are not settings here.
+            let options = CheckOptions {
+                type_check: true,
+                widening: setting(widening, no_widening, from_file.widening),
+                continue_after_error: false,
+                allow_refs: setting(allow_refs, no_allow_refs, from_file.allow_refs),
+                infer_limit: infer_limit.unwrap_or(from_file.infer_limit),
+                default_limit: default_limit.unwrap_or(from_file.default_limit),
+                experimental,
             };
-            convert_files(stdin, &options, &files)
+            let load_prelude = setting(prelude, no_prelude, config.prelude());
+            let dev = setting(dev, no_dev, config.dev());
+            let set = match load_projects(project.as_deref(), load_prelude, dev, cache.as_deref()) {
+                Ok(set) => set,
+                Err(code) => return code,
+            };
+            convert_typed_files(stdin, to_array, compact, &options, &set, &files)
         }
         Command::Check {
             stdin,
-            prelude,
-            no_prelude,
+            typing,
             type_check,
             no_type_check,
-            widening,
-            no_widening,
             continue_after_error,
             no_continue,
-            allow_refs,
-            no_allow_refs,
-            infer_limit,
-            default_limit,
             experimental: _,
             no_experimental: _,
             verbose,
             no_verbose,
-            dev,
-            no_dev,
             print_config,
-            project,
             files,
         } => {
+            let TypingArgs {
+                prelude,
+                no_prelude,
+                widening,
+                no_widening,
+                allow_refs,
+                no_allow_refs,
+                infer_limit,
+                default_limit,
+                dev,
+                no_dev,
+                project,
+            } = typing;
             // The subcommand is there, since the command line was parsed into it.
             let check_matches = matches
                 .subcommand_matches("check")
@@ -731,6 +806,37 @@ fn read_sources(
         });
     }
     Ok(sources)
+}
+
+/// Converts the values to typed JSON. The inputs are those of `check`, read in the same way, and the conversion is of
+/// the library, which does the checking. Nothing is written to the standard output unless the conversion is whole.
+fn convert_typed_files(
+    stdin: bool,
+    to_array: bool,
+    compact: bool,
+    options: &CheckOptions,
+    set: &ProjectSet,
+    files: &[PathBuf],
+) -> ExitCode {
+    let sources = match read_sources(set, files, stdin, options.experimental) {
+        Ok(sources) => sources,
+        Err(code) => return code,
+    };
+    match convert_typed(&sources, &layout(set, sources.len()), options, to_array, compact) {
+        Ok(done) => {
+            for warning in &done.warnings {
+                eprintln!("{}", warning);
+            }
+            print!("{}", done.output);
+            ExitCode::SUCCESS
+        }
+        Err(diagnostics) => {
+            for diagnostic in &diagnostics {
+                eprintln!("{}", diagnostic);
+            }
+            ExitCode::from(EXIT_ERRORS)
+        }
+    }
 }
 
 fn check(

@@ -2,22 +2,9 @@
   "constructor": "Move",
   "record": {
     "x": {"nat": "1"},
-    "tags": {
-      "array": [
-        {"const": "a"},
-        {"constructor": "B"}
-      ]
-    },
+    "tags": {"array": [{"const": "a"}, {"constructor": "B"}]},
     "at": {
-      "record": {
-        "p": {
-          "constructor": "Point",
-          "tuple": [
-            {"nat": "1"},
-            {"nat": "2"}
-          ]
-        }
-      }
+      "record": {"p": {"constructor": "Point", "tuple": [{"nat": "1"}, {"nat": "2"}]}}
     }
   }
 }

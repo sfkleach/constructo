@@ -18,6 +18,9 @@ pub enum Format {
     JsonExact,
     /// The same as `JsonExact`, with each value on a line of its own: JSON lines.
     JsonlExact,
+    /// Natural JSON, in the shapes that serde writes. The types decide what is written, so the values are checked
+    /// against them first.
+    JsonTyped,
 }
 
 impl Format {
@@ -28,14 +31,22 @@ impl Format {
         match name {
             "json-exact" => Ok(Format::JsonExact),
             "jsonl-exact" => Ok(Format::JsonlExact),
+            "json-typed" => Ok(Format::JsonTyped),
             "json" => Err(
-                "json is not a format; choose json-exact or jsonl-exact (every kind kept, no types); json-typed \
-                 (natural, needs types) is not available yet"
+                "json is not a format; choose json-exact (every kind kept, no types), jsonl-exact (the same, a value \
+                 to a line) or json-typed (natural, needs types)"
                     .to_string(),
             ),
-            "json-typed" => Err("json-typed is not available yet; choose json-exact or jsonl-exact".to_string()),
-            _ => Err(format!("{} is not a format; choose json-exact or jsonl-exact", name)),
+            _ => Err(format!(
+                "{} is not a format; choose json-exact, jsonl-exact or json-typed",
+                name
+            )),
         }
+    }
+
+    /// Whether the values are checked against types, which are then among the inputs, before they are converted.
+    pub fn needs_types(self) -> bool {
+        matches!(self, Format::JsonTyped)
     }
 
     /// Whether the format is one value to a line, in which case there is no array and no layout to choose.
@@ -87,6 +98,11 @@ pub fn convert(sources: &[Source], options: &ConvertOptions) -> Result<Converted
                 .map(|v| (source.name.as_str(), v)),
         );
     }
+    if options.format.needs_types() {
+        // The conversion that needs the types is `convert_typed`, which is given the layout of the projects as well.
+        let message = "json-typed needs the types, so it is converted with convert_typed";
+        return Err(Diagnostic::new("", Pos { line: 1, col: 1 }, message));
+    }
     if options.format.is_lines() {
         // Every value is a line of its own, so there is no first value to choose and no array to put them in. No value
         // gives no output at all, as the lines of nothing are nothing.
@@ -137,8 +153,9 @@ pub enum Json {
 
 impl Json {
     /// Writes the value with no white space, or when not compact, with two spaces of indentation, and ends it with a
-    /// new line either way. A container that holds no other container is written on one line even then, so that a
-    /// number is `{"nat": "5"}` and not five lines.
+    /// new line either way. When it is not compact, a container is written on one line if that is at most `WIDTH`
+    /// characters wide, not counting the indentation, so that `{"nat": "5"}` is not five lines, and is otherwise
+    /// spread over lines, with one member on each.
     pub fn write(&self, compact: bool) -> String {
         let mut out = String::new();
         if compact {
@@ -193,27 +210,51 @@ impl Json {
         }
     }
 
-    /// Whether the value is a container that holds another container that is not empty, which is what makes it span
-    /// several lines. An empty container is as short as a string, so it does not count, and `{"array": []}` stays on
-    /// one line.
-    fn is_nested(&self) -> bool {
-        match self {
-            Json::Array(items) => items.iter().any(Json::is_full),
-            Json::Object(members) => members.iter().any(|(_, value)| value.is_full()),
-            _ => false,
+    /// The width of the value written on one line, if it is at most `budget` characters, and `None` if it is more. The
+    /// measuring stops as soon as the budget is spent, so a large value costs no more to turn down than a small one.
+    fn flat_width(&self, budget: usize) -> Option<usize> {
+        // Adds to the width so far, and gives `None` once it is over the budget.
+        fn add(spent: &mut usize, width: usize, budget: usize) -> Option<()> {
+            *spent += width;
+            (*spent <= budget).then_some(())
         }
+        let mut spent = 0;
+        match self {
+            Json::Str(s) => add(&mut spent, string_width(s, budget), budget)?,
+            Json::Number(text) => add(&mut spent, text.chars().count(), budget)?,
+            Json::Bool(b) => add(&mut spent, if *b { 4 } else { 5 }, budget)?,
+            Json::Null => add(&mut spent, 4, budget)?,
+            Json::Array(items) => {
+                add(&mut spent, 2, budget)?;
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 {
+                        add(&mut spent, 2, budget)?;
+                    }
+                    let width = item.flat_width(budget - spent)?;
+                    add(&mut spent, width, budget)?;
+                }
+            }
+            Json::Object(members) => {
+                add(&mut spent, 2, budget)?;
+                for (i, (key, value)) in members.iter().enumerate() {
+                    if i > 0 {
+                        add(&mut spent, 2, budget)?;
+                    }
+                    // The key, its quotes and the `: ` after it.
+                    add(&mut spent, string_width(key, budget) + 2, budget)?;
+                    let width = value.flat_width(budget - spent)?;
+                    add(&mut spent, width, budget)?;
+                }
+            }
+        }
+        Some(spent)
     }
 
-    fn is_full(&self) -> bool {
-        match self {
-            Json::Array(items) => !items.is_empty(),
-            Json::Object(members) => !members.is_empty(),
-            _ => false,
-        }
-    }
-
+    /// Writes the value, which is `depth` levels in. A value that is at most `WIDTH` wide on one line is written on one
+    /// line, wherever it is, and one that is not is spread over lines. A value that is not a container, and an empty
+    /// one, is always on one line.
     fn write_pretty(&self, out: &mut String, depth: usize) {
-        if !self.is_nested() {
+        if self.flat_width(WIDTH).is_some() || !matches!(self, Json::Array(_) | Json::Object(_)) {
             self.write_flat(out);
             return;
         }
@@ -242,13 +283,13 @@ impl Json {
                     out.push_str(if i + 1 < members.len() { ",\n" } else { "\n" });
                 }
             }
-            _ => unreachable!("a scalar is never nested"),
+            _ => unreachable!("only a container is spread over lines"),
         }
         out.push_str(&"  ".repeat(depth));
         out.push(close);
     }
 
-    /// Writes a value whose containers hold no containers, on one line, with a space after each `:` and `,`.
+    /// Writes the value on one line, with a space after each `:` and `,`.
     fn write_flat(&self, out: &mut String) {
         if self.write_scalar(out) {
             return;
@@ -279,6 +320,27 @@ impl Json {
             _ => unreachable!("a scalar has been written"),
         }
     }
+}
+
+/// The most characters wide that a container may be, written on one line, for the pretty layout to keep it there. The
+/// indentation and the key that it follows are not counted, so the layout of a value is the same wherever it is.
+const WIDTH: usize = 80;
+
+/// The characters that a string takes when it is written, with its quotes and escapes. It stops counting once the width
+/// is over `budget`, and then gives a width that is over it.
+fn string_width(text: &str, budget: usize) -> usize {
+    let mut width = 2;
+    for c in text.chars() {
+        width += match c {
+            '"' | '\\' | '\n' | '\r' | '\t' | '\u{8}' | '\u{c}' => 2,
+            c if (c as u32) < 0x20 => 6,
+            _ => 1,
+        };
+        if width > budget {
+            break;
+        }
+    }
+    width
 }
 
 /// Writes a string with the escapes of RFC 8259: the quote, the backslash and the control characters are escaped, and
@@ -546,11 +608,27 @@ mod tests {
     }
 
     #[test]
-    fn a_container_with_a_container_is_spread_over_lines() {
+    fn a_container_that_is_narrow_enough_is_on_one_line_however_much_it_nests() {
+        assert_eq!(pretty("Quit"), "{\"constructor\": \"Quit\"}\n");
+        let circle = Json::Object(vec![(
+            "Circle".to_string(),
+            Json::Object(vec![("r".to_string(), Json::Number("1.0".to_string()))]),
+        )]);
+        assert_eq!(circle.write(false), "{\"Circle\": {\"r\": 1.0}}\n");
+        assert_eq!(pretty("[1, 2]"), "{\"array\": [{\"nat\": \"1\"}, {\"nat\": \"2\"}]}\n");
         assert_eq!(
-            pretty("[1, 2]"),
-            "{\n  \"array\": [\n    {\"nat\": \"1\"},\n    {\"nat\": \"2\"}\n  ]\n}\n"
+            pretty("Write(\"hi\")"),
+            "{\"constructor\": \"Write\", \"tuple\": [{\"string\": \"hi\"}]}\n"
         );
+    }
+
+    #[test]
+    fn an_empty_container_is_on_one_line() {
+        let json = Json::Object(vec![(
+            "a".to_string(),
+            Json::Object(vec![("b".to_string(), Json::Array(Vec::new()))]),
+        )]);
+        assert_eq!(json.write(false), "{\"a\": {\"b\": []}}\n");
     }
 
     #[test]
@@ -560,10 +638,11 @@ mod tests {
             compact(text),
             r#"{"constructor":"Move","record":{"x":{"nat":"1"},"tags":{"array":[{"const":"a"}]}}}"#
         );
+        // The whole value is too wide for a line, so it is spread, and each member that fits is on one line.
         assert_eq!(
             pretty(text),
-            "{\n  \"constructor\": \"Move\",\n  \"record\": {\n    \"x\": {\"nat\": \"1\"},\n    \"tags\": {\n      \
-             \"array\": [\n        {\"const\": \"a\"}\n      ]\n    }\n  }\n}\n"
+            "{\n  \"constructor\": \"Move\",\n  \"record\": \
+             {\"x\": {\"nat\": \"1\"}, \"tags\": {\"array\": [{\"const\": \"a\"}]}}\n}\n"
         );
     }
 
@@ -692,12 +771,14 @@ mod tests {
     fn the_formats_are_matched_exactly() {
         assert_eq!(Format::from_name("json-exact"), Ok(Format::JsonExact));
         assert_eq!(Format::from_name("jsonl-exact"), Ok(Format::JsonlExact));
-        for name in ["json", "jsonl", "JSON-Exact", "Jsonl-Exact", "json-typed", "", "yaml"] {
+        assert_eq!(Format::from_name("json-typed"), Ok(Format::JsonTyped));
+        for name in ["json", "jsonl", "JSON-Exact", "Jsonl-Exact", "Json-Typed", "", "yaml"] {
             assert!(Format::from_name(name).is_err(), "{}", name);
         }
         assert!(Format::from_name("json")
             .unwrap_err()
             .starts_with("json is not a format; choose json-exact"));
+        assert!(Format::JsonTyped.needs_types() && !Format::JsonExact.needs_types());
     }
 
     fn lines(sources: &[Source]) -> Result<Converted, String> {
@@ -767,11 +848,75 @@ mod tests {
             json.write(true),
             "{\"n\":12345678901234567890.0,\"t\":true,\"f\":false,\"z\":null,\"a\":[1,null]}\n"
         );
-        // The array has something in it, so the object that holds it is spread over lines, and the array is not.
-        let pretty = "{\n  \"n\": 12345678901234567890.0,\n  \"t\": true,\n  \"f\": false,\n  \"z\": null,\n  \
-                      \"a\": [1, null]\n}\n";
-        assert_eq!(json.write(false), pretty);
+        assert_eq!(
+            json.write(false),
+            "{\"n\": 12345678901234567890.0, \"t\": true, \"f\": false, \"z\": null, \"a\": [1, null]}\n"
+        );
         let nested = Json::Array(vec![Json::Array(vec![Json::Bool(true)])]);
-        assert_eq!(nested.write(false), "[\n  [true]\n]\n");
+        assert_eq!(nested.write(false), "[[true]]\n");
+    }
+
+    /// An array that holds one string of `n` characters, which is `n + 4` characters wide on one line.
+    fn wide(n: usize) -> Json {
+        Json::Array(vec![Json::Str("x".repeat(n))])
+    }
+
+    #[test]
+    fn a_container_is_on_one_line_if_it_is_at_most_80_wide() {
+        assert_eq!(wide(76).write(false).lines().count(), 1);
+        assert_eq!(wide(77).write(false).lines().count(), 3);
+        assert_eq!(wide(77).write(false), format!("[\n  \"{}\"\n]\n", "x".repeat(77)));
+    }
+
+    #[test]
+    fn the_indentation_and_the_key_are_not_counted() {
+        // The outer array is too wide, so each inner one is indented, and is on one line though the line is longer.
+        let inner = Json::Object(vec![("key".to_string(), wide(66))]);
+        let outer = Json::Array(vec![inner.clone(), inner]);
+        let text = outer.write(false);
+        assert_eq!(text.lines().count(), 4);
+        assert!(text.lines().nth(1).unwrap().len() > 80);
+    }
+
+    #[test]
+    fn a_long_string_is_never_broken() {
+        let json = Json::Object(vec![("s".to_string(), Json::Str("y".repeat(200)))]);
+        assert_eq!(json.write(false), format!("{{\n  \"s\": \"{}\"\n}}\n", "y".repeat(200)));
+    }
+
+    #[test]
+    fn the_width_is_in_characters_and_counts_the_escapes() {
+        // Seventy-six characters that are not ASCII are 76 wide, which fits.
+        assert_eq!(
+            Json::Array(vec![Json::Str("\u{e9}".repeat(76))])
+                .write(false)
+                .lines()
+                .count(),
+            1
+        );
+        // Each newline is written as two characters, so 38 of them are 80 wide, and 39 are not.
+        assert_eq!(
+            Json::Array(vec![Json::Str("\n".repeat(38))])
+                .write(false)
+                .lines()
+                .count(),
+            1
+        );
+        assert_eq!(
+            Json::Array(vec![Json::Str("\n".repeat(39))])
+                .write(false)
+                .lines()
+                .count(),
+            3
+        );
+    }
+
+    #[test]
+    fn a_very_deep_value_is_written_without_overflowing_the_stack() {
+        let mut json = Json::Null;
+        for _ in 0..300 {
+            json = Json::Array(vec![json, Json::Str("x".repeat(100))]);
+        }
+        assert!(json.write(false).lines().count() > 300);
     }
 }
