@@ -160,13 +160,17 @@ Following the style in https://keepachangelog.com/en/1.0.0/
   value into an array with `--to-array`. `--to` is matched exactly, and there is no bare `json`. See
   `docs/specs/convert-command.md` and decision 36. The library has the `convert` module.
 - `constructo convert --to=jsonl-exact` writes each value on a line of its own, in the `json-exact` encoding with no
-  white space, and every value is converted. `--to-array` is refused with it, and no values give no output.
+  white space, and every value is converted. The lines are written as they are converted, so the lines before an error
+  in a value are written, and an error in the syntax of an input is found before any line. `--to-array` is refused with
+  it, and no values give no output.
 - `constructo convert --to=json-typed` writes natural JSON in the shapes of serde, which needs the types. The inputs and
   the options are those of `check` (`--project`, `--prelude`, `--widening`, `--allow-refs`, `--infer-limit`,
   `--default-limit`, `--dev`, and the `[check]` keys that go with them). The values are type-checked, and only the ones
   that are converted. `Bool` and `Option` of the prelude are `true`, `false`, `null` and the value, a bare constructor
   is a string, a number in a `Float` slot has a point, an omitted argument is written as its default, and a const is
   replaced by its value. `Some(None)` is refused. See `docs/specs/convert-command.md` and decision 37.
+- The output of `convert` that cannot be written, such as to a pipe whose reader has gone, ends the run with exit code
+  2, quietly for a reader that has gone, and not with a panic.
 - The pretty output of `convert` puts a container on one line if it is at most 80 characters wide, not counting the
   indentation, and spreads it over lines otherwise.
 - A diagnostic has a severity. A warning is written as `WARNING: <message> (<file>, line L, col C)` and does not change

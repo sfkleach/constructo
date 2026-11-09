@@ -1,5 +1,5 @@
 use clap::{ArgAction, ArgMatches, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
-use constructo::convert::{convert, values_of, ConvertOptions, Format};
+use constructo::convert::{convert, convert_lines, values_of, ConvertOptions, Format, LinesError};
 use constructo::diagnostics::{Diagnostic, Pos};
 use constructo::fetch::Cache;
 use constructo::lock::Lock;
@@ -11,7 +11,7 @@ use constructo::{
 };
 use std::collections::{HashSet, VecDeque};
 use std::ffi::OsString;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -700,8 +700,8 @@ fn read_input(file: &InputFile) -> std::io::Result<String> {
 
 /// Reads the files and then the standard input, and converts what was read. As with `check`, an input that cannot be
 /// read ends the run at once with exit code 2, and reading stops after an input that has an error, so that an
-/// unreadable input after it is never reached. Nothing is written to the standard output unless the conversion is
-/// whole.
+/// unreadable input after it is never reached. A format that writes one document writes nothing unless the conversion
+/// is whole, and a lines format writes each line as it goes.
 fn convert_files(stdin: bool, options: &ConvertOptions, files: &[PathBuf]) -> ExitCode {
     let mut sources = Vec::new();
     let mut failed = false;
@@ -734,19 +734,62 @@ fn convert_files(stdin: bool, options: &ConvertOptions, files: &[PathBuf]) -> Ex
             text,
         });
     }
+    if options.format.is_lines() {
+        return stream_lines(&sources, options);
+    }
     match convert(&sources, options) {
         Ok(done) => {
             for warning in &done.warnings {
                 eprintln!("{}", warning);
             }
-            print!("{}", done.output);
-            ExitCode::SUCCESS
+            match write_stdout(&done.output) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(code) => code,
+            }
         }
         Err(diagnostic) => {
             eprintln!("{}", diagnostic);
             ExitCode::from(EXIT_ERRORS)
         }
     }
+}
+
+/// Writes the lines of a lines format to the standard output as they are converted. The lines before an error are
+/// written, and are flushed before the error is reported, so that they come first.
+fn stream_lines(sources: &[Source], options: &ConvertOptions) -> ExitCode {
+    let mut out = std::io::BufWriter::new(std::io::stdout().lock());
+    let result = convert_lines(sources, options, &mut out);
+    match result {
+        Ok(()) => match out.flush() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => write_failure(&e),
+        },
+        Err(LinesError::Invalid(diagnostic)) => {
+            // The error is about the inputs, so a failure to write what came before it is not reported over it.
+            let _ = out.flush();
+            eprintln!("{}", diagnostic);
+            ExitCode::from(EXIT_ERRORS)
+        }
+        Err(LinesError::Write(e)) => write_failure(&e),
+    }
+}
+
+/// Writes the output of a conversion that is one document to the standard output. The error is the exit code.
+fn write_stdout(text: &str) -> Result<(), ExitCode> {
+    let mut out = std::io::stdout().lock();
+    out.write_all(text.as_bytes())
+        .and_then(|()| out.flush())
+        .map_err(|e| write_failure(&e))
+}
+
+/// The exit code when the output could not be written. It is a problem with where the output goes and not with the
+/// inputs, so it is 2. A pipe whose reader has gone, as when the output is piped into `head`, is what the reader asked
+/// for and gets no message.
+fn write_failure(e: &std::io::Error) -> ExitCode {
+    if e.kind() != std::io::ErrorKind::BrokenPipe {
+        eprintln!("ERROR: Cannot write the output: {}", e);
+    }
+    ExitCode::from(EXIT_USAGE)
 }
 
 /// Reads the inputs of a run: the types files of the projects, then the files that were given, then the standard input.
@@ -827,8 +870,10 @@ fn convert_typed_files(
             for warning in &done.warnings {
                 eprintln!("{}", warning);
             }
-            print!("{}", done.output);
-            ExitCode::SUCCESS
+            match write_stdout(&done.output) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(code) => code,
+            }
         }
         Err(diagnostics) => {
             for diagnostic in &diagnostics {
