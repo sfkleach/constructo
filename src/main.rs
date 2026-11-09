@@ -1,4 +1,5 @@
 use clap::{ArgAction, ArgMatches, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
+use constructo::convert::{convert, values_of, ConvertOptions, Format};
 use constructo::diagnostics::{Diagnostic, Pos};
 use constructo::fetch::Cache;
 use constructo::lock::Lock;
@@ -115,6 +116,59 @@ enum Command {
 
     /// Print the version of constructo, as `constructo --version` does
     Version,
+
+    /// Convert values to another notation
+    #[command(after_help = "\
+The first value is converted, and a warning says if more follow. Use --to-array to convert every value into an \
+array. The output is written only if there is no error. The settings file is read for [global] and [experimental].")]
+    Convert {
+        /// The notation to write. The choices are json-exact, which keeps every kind of value and needs no types
+        #[arg(long, value_name = "FORMAT")]
+        to: String,
+
+        /// Convert every value, of every input, into an array, instead of only the first value
+        #[arg(long)]
+        to_array: bool,
+
+        /// Write the output with no white space
+        #[arg(long)]
+        compact: bool,
+
+        /// Also read the standard input as if it were another file
+        #[arg(long)]
+        stdin: bool,
+
+        /// Switch on experimental features. On its own it switches on all of them, and `-x=FEATURE` switches on just
+        /// that one. The option can be repeated, and for each feature the last of this and --no-experimental wins.
+        #[arg(
+            short = 'x',
+            long,
+            value_name = "FEATURE",
+            value_enum,
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "all",
+            action = ArgAction::Append
+        )]
+        experimental: Vec<Feature>,
+
+        /// Switch off experimental features. On its own it switches off all of them, and `--no-experimental=FEATURE`
+        /// switches off just that one. The option can be repeated.
+        #[arg(
+            long,
+            value_name = "FEATURE",
+            value_enum,
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "all",
+            action = ArgAction::Append
+        )]
+        no_experimental: Vec<Feature>,
+
+        /// The files of values to convert
+        #[arg(value_name = "FILES", required_unless_present = "stdin")]
+        files: Vec<PathBuf>,
+    },
 
     /// Check the syntax and type-correctness of Constructo files
     #[command(after_help = "\
@@ -361,6 +415,33 @@ fn main() -> ExitCode {
                 }
             }
         }
+        Command::Convert {
+            to,
+            to_array,
+            compact,
+            stdin,
+            experimental: _,
+            no_experimental: _,
+            files,
+        } => {
+            let format = match Format::from_name(&to) {
+                Ok(format) => format,
+                Err(message) => {
+                    eprintln!("ERROR: {}", message);
+                    return ExitCode::from(EXIT_USAGE);
+                }
+            };
+            let convert_matches = matches
+                .subcommand_matches("convert")
+                .expect("the convert subcommand was given");
+            let options = ConvertOptions {
+                format,
+                to_array,
+                compact,
+                experimental: experimental(config.check_options().experimental, &feature_changes(convert_matches)),
+            };
+            convert_files(stdin, &options, &files)
+        }
         Command::Check {
             stdin,
             prelude,
@@ -511,6 +592,57 @@ fn read_input(file: &InputFile) -> std::io::Result<String> {
     match file.embedded {
         Some(text) => Ok(text.to_string()),
         None => std::fs::read_to_string(&file.path),
+    }
+}
+
+/// Reads the files and then the standard input, and converts what was read. As with `check`, an input that cannot be
+/// read ends the run at once with exit code 2, and reading stops after an input that has an error, so that an
+/// unreadable input after it is never reached. Nothing is written to the standard output unless the conversion is
+/// whole.
+fn convert_files(stdin: bool, options: &ConvertOptions, files: &[PathBuf]) -> ExitCode {
+    let mut sources = Vec::new();
+    let mut failed = false;
+    for path in files {
+        match std::fs::read_to_string(path) {
+            Ok(text) => sources.push(Source {
+                name: path.display().to_string(),
+                text,
+            }),
+            Err(e) => {
+                eprintln!("ERROR: Cannot read {}: {}", path.display(), e);
+                return ExitCode::from(EXIT_USAGE);
+            }
+        }
+        let source = sources.last().expect("a source was just pushed");
+        // The conversion reports this error, as the first one, so it is only noticed here to stop reading.
+        if values_of(source, options.experimental).is_err() {
+            failed = true;
+            break;
+        }
+    }
+    if stdin && !failed {
+        let mut text = String::new();
+        if let Err(e) = std::io::stdin().read_to_string(&mut text) {
+            eprintln!("ERROR: Cannot read standard input: {}", e);
+            return ExitCode::from(EXIT_USAGE);
+        }
+        sources.push(Source {
+            name: "<stdin>".to_string(),
+            text,
+        });
+    }
+    match convert(&sources, options) {
+        Ok(done) => {
+            for warning in &done.warnings {
+                eprintln!("{}", warning);
+            }
+            print!("{}", done.output);
+            ExitCode::SUCCESS
+        }
+        Err(diagnostic) => {
+            eprintln!("{}", diagnostic);
+            ExitCode::from(EXIT_ERRORS)
+        }
     }
 }
 

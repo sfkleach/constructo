@@ -5,7 +5,102 @@
 
 use crate::ast::{Argument, Member, TaggedBody, Value, ValueKind};
 use crate::diagnostics::{Diagnostic, Pos};
+use crate::parser::{parse_file, Experimental, Parsed};
+use crate::{syntax_diagnostic, Source};
 use std::collections::HashSet;
+
+/// The notations that values can be converted to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Format {
+    /// JSON in which every kind of value is written explicitly, so that nothing is lost and no types are needed.
+    JsonExact,
+}
+
+impl Format {
+    /// The format with the name that is given, which is matched exactly. The error is the message to show, with no
+    /// `ERROR:` in front. A bare `json` is not a format, so that nobody picks one of the two JSON strategies by
+    /// accident, and `json-typed` is to come.
+    pub fn from_name(name: &str) -> Result<Format, String> {
+        match name {
+            "json-exact" => Ok(Format::JsonExact),
+            "json" => Err(
+                "json is not a format; choose json-exact (every kind kept, no types); json-typed (natural, \
+                           needs types) is not available yet"
+                    .to_string(),
+            ),
+            "json-typed" => Err("json-typed is not available yet; choose json-exact".to_string()),
+            _ => Err(format!("{} is not a format; choose json-exact", name)),
+        }
+    }
+}
+
+/// The choices of one conversion.
+#[derive(Debug, Clone, Copy)]
+pub struct ConvertOptions {
+    pub format: Format,
+    /// Convert every value, as an array, and not just the first.
+    pub to_array: bool,
+    /// Write no white space.
+    pub compact: bool,
+    pub experimental: Experimental,
+}
+
+/// The result of a conversion: the text to write, and the warnings to report. The exit code is 0 for a result.
+#[derive(Debug)]
+pub struct Converted {
+    pub output: String,
+    pub warnings: Vec<Diagnostic>,
+}
+
+/// The values of a source. It is an error if the source has a syntax error or is a types file. A file with nothing in
+/// it, which the parser takes for a types file, has no values.
+pub fn values_of(source: &Source, experimental: Experimental) -> Result<Vec<Value>, Diagnostic> {
+    match parse_file(&source.text, experimental).1 {
+        Err(e) => Err(syntax_diagnostic(source, e)),
+        Ok(Parsed::Types(file)) if file.enums.is_empty() && file.consts.is_empty() => Ok(Vec::new()),
+        Ok(Parsed::Types(_)) => {
+            let message = format!("{} is a types file; convert reads values files", source.name);
+            Err(Diagnostic::new(&source.name, Pos { line: 1, col: 1 }, message))
+        }
+        Ok(Parsed::Values(found)) => Ok(found),
+    }
+}
+
+/// Converts the values of the sources, which are in the order that they were given. The sources are all parsed first,
+/// and the first error, of syntax or of a type of file or of encoding, is the result, so that nothing is half written.
+pub fn convert(sources: &[Source], options: &ConvertOptions) -> Result<Converted, Diagnostic> {
+    let mut values: Vec<(&str, Value)> = Vec::new();
+    for source in sources {
+        values.extend(
+            values_of(source, options.experimental)?
+                .into_iter()
+                .map(|v| (source.name.as_str(), v)),
+        );
+    }
+    let Format::JsonExact = options.format;
+    let mut warnings = Vec::new();
+    let json = if options.to_array {
+        let mut items = Vec::new();
+        for (name, value) in &values {
+            items.push(encode_exact(name, value)?);
+        }
+        Json::Array(items)
+    } else {
+        let Some((name, first)) = values.first() else {
+            let name = sources.first().map_or("", |s| s.name.as_str());
+            return Err(Diagnostic::new(name, Pos { line: 1, col: 1 }, "No value to convert"));
+        };
+        if let Some((later, second)) = values.get(1) {
+            let message = "More values follow; only the first was converted, so use --to-array for all";
+            warnings.push(Diagnostic::warning(later, second.pos, message));
+        }
+        encode_exact(name, first)?
+    };
+    Ok(Converted {
+        output: json.write(options.compact),
+        warnings,
+    })
+}
 
 /// A JSON value, of the three kinds that `json-exact` needs. An object keeps its members in the order given.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,17 +111,17 @@ pub enum Json {
 }
 
 impl Json {
-    /// Writes the value with no white space, or when not compact, with two spaces of indentation and a new line at
-    /// the end. A container that holds no other container is written on one line even then, so that a number is
-    /// `{"nat": "5"}` and not five lines.
+    /// Writes the value with no white space, or when not compact, with two spaces of indentation, and ends it with a
+    /// new line either way. A container that holds no other container is written on one line even then, so that a
+    /// number is `{"nat": "5"}` and not five lines.
     pub fn write(&self, compact: bool) -> String {
         let mut out = String::new();
         if compact {
             self.write_compact(&mut out);
         } else {
             self.write_pretty(&mut out, 0);
-            out.push('\n');
         }
+        out.push('\n');
         out
     }
 
@@ -264,7 +359,10 @@ mod tests {
     }
 
     fn compact(text: &str) -> String {
-        convert_with(text, true, Experimental::default()).expect("the value should convert")
+        let out = convert_with(text, true, Experimental::default()).expect("the value should convert");
+        out.strip_suffix('\n')
+            .expect("the output ends with a new line")
+            .to_string()
     }
 
     fn pretty(text: &str) -> String {
@@ -357,7 +455,10 @@ mod tests {
 
     #[test]
     fn the_postfix_query_is_written_as_some() {
-        let out = convert_with("5?", true, Experimental::all()).unwrap();
+        let out = convert_with("5?", true, Experimental::all())
+            .unwrap()
+            .trim_end()
+            .to_string();
         assert_eq!(out, r#"{"constructor":"Some","tuple":[{"nat":"5"}]}"#);
     }
 
@@ -418,7 +519,10 @@ mod tests {
 
     #[test]
     fn the_compact_form_has_no_new_line() {
-        assert!(!compact("5").ends_with('\n'));
+        assert_eq!(
+            convert_with("5", true, Experimental::default()).unwrap(),
+            "{\"nat\":\"5\"}\n"
+        );
         assert!(pretty("5").ends_with("}\n"));
     }
 
@@ -427,5 +531,121 @@ mod tests {
         let out = compact("Span(1, end: 3)");
         let at = |key: &str| out.find(key).unwrap();
         assert!(at("constructor") < at("tuple") && at("tuple") < at("named"));
+    }
+
+    fn source(name: &str, text: &str) -> Source {
+        Source {
+            name: name.to_string(),
+            text: text.to_string(),
+        }
+    }
+
+    fn options(to_array: bool) -> ConvertOptions {
+        ConvertOptions {
+            format: Format::JsonExact,
+            to_array,
+            compact: true,
+            experimental: Experimental::default(),
+        }
+    }
+
+    fn run(sources: &[Source], to_array: bool) -> Result<Converted, String> {
+        convert(sources, &options(to_array)).map_err(|d| d.to_string())
+    }
+
+    #[test]
+    fn the_first_value_is_converted_and_the_second_is_warned_of() {
+        let done = run(&[source("a.values", "1;\n2;\n3")], false).unwrap();
+        assert_eq!(done.output.trim_end(), "{\"nat\":\"1\"}");
+        let warnings: Vec<String> = done.warnings.iter().map(|w| w.to_string()).collect();
+        assert_eq!(
+            warnings,
+            [
+                "WARNING: More values follow; only the first was converted, so use --to-array for all \
+              (a.values, line 2, col 1)"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_single_value_has_no_warning() {
+        assert!(run(&[source("a.values", "1")], false).unwrap().warnings.is_empty());
+    }
+
+    #[test]
+    fn an_empty_input_is_skipped_and_the_warning_may_be_in_a_later_input() {
+        let sources = [source("a.values", ""), source("b.values", "7"), source("c.values", "8")];
+        let done = run(&sources, false).unwrap();
+        assert_eq!(done.output.trim_end(), "{\"nat\":\"7\"}");
+        assert_eq!(done.warnings.len(), 1);
+        assert!(done.warnings[0].to_string().ends_with("(c.values, line 1, col 1)"));
+    }
+
+    #[test]
+    fn to_array_takes_every_value_of_every_input_in_order() {
+        let sources = [
+            source("a.values", "1; 2"),
+            source("b.values", ""),
+            source("c.values", "red"),
+        ];
+        let done = run(&sources, true).unwrap();
+        assert_eq!(done.output.trim_end(), r#"[{"nat":"1"},{"nat":"2"},{"const":"red"}]"#);
+        assert!(done.warnings.is_empty());
+    }
+
+    #[test]
+    fn to_array_with_no_values_is_an_empty_array() {
+        assert_eq!(run(&[source("a.values", "")], true).unwrap().output.trim_end(), "[]");
+        assert_eq!(run(&[], true).unwrap().output.trim_end(), "[]");
+    }
+
+    #[test]
+    fn no_value_is_an_error_naming_the_first_input() {
+        let sources = [source("a.values", ""), source("b.values", "")];
+        assert_eq!(
+            run(&sources, false).unwrap_err(),
+            "ERROR: No value to convert (a.values, line 1, col 1)"
+        );
+    }
+
+    #[test]
+    fn a_types_file_is_an_error() {
+        let sources = [source("ok.values", "1"), source("t.types", "enum E = A;")];
+        assert_eq!(
+            run(&sources, false).unwrap_err(),
+            "ERROR: t.types is a types file; convert reads values files (t.types, line 1, col 1)"
+        );
+    }
+
+    #[test]
+    fn a_file_with_only_comments_has_no_values() {
+        let sources = [source("e.values", "// Nothing here.\n")];
+        assert_eq!(run(&sources, true).unwrap().output.trim_end(), "[]");
+        assert!(run(&sources, false).is_err());
+    }
+
+    #[test]
+    fn a_syntax_error_is_the_result() {
+        let error = run(&[source("a.values", "1; 2"), source("b.values", "[1,")], false).unwrap_err();
+        assert!(error.starts_with("ERROR: "), "{}", error);
+        assert!(error.contains("b.values"), "{}", error);
+    }
+
+    #[test]
+    fn without_to_array_only_the_first_value_is_encoded() {
+        // The duplicate is in the second value, which is not converted, so it is not found.
+        assert!(run(&[source("a.values", "1; { a: 1, a: 2 }")], false).is_ok());
+        assert!(run(&[source("a.values", "1; { a: 1, a: 2 }")], true).is_err());
+    }
+
+    #[test]
+    fn the_formats_are_matched_exactly() {
+        assert_eq!(Format::from_name("json-exact"), Ok(Format::JsonExact));
+        for name in ["json", "JSON-Exact", "json-typed", "", "yaml"] {
+            assert!(Format::from_name(name).is_err(), "{}", name);
+        }
+        assert!(Format::from_name("json")
+            .unwrap_err()
+            .starts_with("json is not a format; choose json-exact"));
     }
 }
