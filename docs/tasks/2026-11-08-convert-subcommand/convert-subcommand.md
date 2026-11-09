@@ -55,9 +55,11 @@ message for `json` says that the typed one is not available yet.
   With neither, it is a usage error (exit code 2). A file that cannot be read is
   exit code 2.
 - Only values files are converted, and a file is classified by its first token,
-  as `check` does. A types file (one that starts with `enum` or `const`, or is
-  empty) is an error with exit code 1, for example
+  as `check` does. A types file (one that starts with `enum` or `const`) is an
+  error with exit code 1, for example
   `ERROR: types.types is a types file; convert reads values files (types.types, line 1, col 1)`.
+  A file with no declarations and no values, which is empty or has only comments,
+  is ignored: it has nothing to convert, and which kind it is makes no difference.
 - No types are read and no type check is made, so the options of `check` for
   projects, the prelude and consts (`--project`, `--no-prelude`,
   `--allow-refs`) are not options of `convert`. `--config` and `--cache` are
@@ -69,8 +71,9 @@ message for `json` says that the typed one is not available yet.
 
 ### One value, or all of them
 
-- By default a single value is converted: the first value of the first input.
-  If any other value follows, in that input or another, one warning is written
+- By default a single value is converted: the first value that there is, across
+  the inputs in order, so an input with no values is passed over. If any other
+  value follows, in that input or another, one warning is written
   to the standard error, in the form of an error diagnostic:
 
   ```text
@@ -81,8 +84,8 @@ message for `json` says that the typed one is not available yet.
 - With `--to-array` the output is a JSON array of every value of every input, in
   the order that they were read. A single value is an array of one, and no value
   gives `[]`.
-- Without `--to-array` an input with no values is an error with exit code 1:
-  `No value to convert`.
+- Without `--to-array`, no value at all in any input, which includes inputs that
+  are all empty, is an error with exit code 1: `No value to convert`.
 
 ### Layout
 
