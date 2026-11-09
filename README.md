@@ -33,7 +33,9 @@ The project provides a Rust library for processing Constructo files and the
 `constructo` command-line tool. `constructo check` validates the syntax and
 consistency of data-type declarations (duplicates, unknown types, generic
 arity and so on), checks data values against those types, and loads a small
-standard prelude declaring `Bool` and `Option<T>`.
+standard prelude declaring `Bool` and `Option<T>`. `constructo convert --to=json-exact`
+writes values as JSON, with every kind of value explicit; see the
+[spec](docs/specs/convert-command.md).
 
 Types can be organised into *projects*: a folder with a `constructo.toml` that
 names the project and lists the projects it imports, whether from a folder, from
