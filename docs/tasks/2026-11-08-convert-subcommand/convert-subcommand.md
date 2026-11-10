@@ -421,16 +421,114 @@ are those of Step 5. What differs is the framing:
 
 ## Step 7: Convert from JSON (typed)
 
+Given a JSON file in the `json-typed` format and the type that it is a value of, translate it back into a
+data-values file.
+
 ```
-constructo convert --from=json-typed --project=. shapes.json > shapes.values
+constructo convert --from=json-typed --type=Shape --project=. shapes.json > shapes.values
+constructo convert --from=json-typed --type='[Shape]' --project=. shapes.json > shapes.values
+constructo convert --from=json-typed --type=Shape shapes.types -- shapes.json > shapes.values
 ```
 
-`json-typed` needs a target type to read, which is a data-type in the project.
+Steps 7 and 8 are taken together, as 5 and 6 were, because the reading of a value is the same and only the framing
+differs. This section is about what they share. The direction, the output and the exit codes are those of Step 5.
+
+### The type
+
+- JSON such as `5` or `{"Circle": {"r": 1.5}}` does not say what it is a value of, so `--type=TYPE` names it. It is
+  required with `--from=json-typed` and `--from=jsonl-typed`, and refused as a usage error with the exact formats.
+- `TYPE` is any type expression of the types grammar, and not only the name of a declared type: `Shape`,
+  `[Shape]`, `Option<Shape>` or an inline record type. It is parsed with the types grammar and resolved in the root
+  project, with the imports of that project, as the project in force sees it.
+- A document is exactly one value of that type. An array is read as the value only if the type is an array type, so
+  there is no list form, as `--to-array` has for `json-exact`. To read many values use `jsonl-typed`, or read an array
+  as one value with `--type='[Shape]'`.
+
+### Inputs
+
+- The types come from `--project` and what it imports, and may also come among the files, as for `--to=json-typed`.
+  There is always a project in force, even if it is only the virtual one, so a types file among the files belongs to
+  it. The typing options `--project`, `--dev`, `--no-dev`, `--prelude`, `--no-prelude`, `--allow-refs`,
+  `--no-allow-refs`, `--widening`, `--no-widening`, `--infer-limit` and `--default-limit` are accepted, and the
+  settings file is read for `[global]` and the matching keys of `[check]`, as it is for `--to=json-typed`.
+  `--compact`, `--stdin`, `--config` and `--cache` are accepted. `--to-array` and `-x` are refused.
+- **A file is a types file or a JSON file by its first token**, as `check` tells types files from values files: `enum`
+  and `const` start a types file and the start of a JSON value starts a JSON file. A file with no tokens is
+  ambiguous. **Before the first JSON file has been met it is an empty types file and is ignored. After one it is
+  JSON, and so is the error `Expected a JSON value`.** The only risk is a silent doing of nothing where the input was
+  meant to be something else.
+- **`--` removes the guess.** It is the conventional end of options, which clap already understands, and here it also
+  ends the types files. The files before it are types files, even an empty one. The files after it, and `--stdin`, are
+  JSON, even an empty one, which is the error above. A file that is the wrong kind for its side is an error. Without
+  `--` the files are told apart as above. As options cannot come after `--`, `--stdin` and the rest are given before it.
+  The position of `--` is read from the raw arguments, as the occurrences of `--config` are counted.
+
+### The reading
+
+The mapping is that of decision 37 in reverse, driven by the type and by the JSON together.
+
+- **Constructors.** A string is a bare constructor, `{"Circle": {...}}` is a constructor with a record, an array is a
+  tuple, a one-parameter tuple is its one value unwrapped, and `{"Ping": []}` is `Ping()`. The name must be one of the
+  enum that the type says.
+- **The prelude.** `Bool` and `Option` of the prelude, identified as `--to` identifies them, are `true`, `false`,
+  `null` and the unwrapped value. A `null` for `Option<Option<T>>` is `None`, since `Some(None)` is never written.
+- **Consts are never recreated.** `--to` inlines them, so a value is read as the value itself.
+- **Numbers.** The digits are copied as written and nothing is rounded. The text is adjusted to the slot and is
+  refused where it cannot fit: `5` in an `Int` slot is written `+5`, `5` in a `Float` slot is `5.0`, and `1e3` in a
+  `Float` slot is `1.0e3`. A `1.5` or a `-1` in a `Nat` slot is an error at the number. This is `--to`'s adding of `.0`
+  and dropping of `+`, in reverse.
+- **Keys are strict.** An unknown key is an error at the key. A missing field with no default is an error at the
+  object, and a missing field with a default is left out of the text, since data-values may omit it. The fields are
+  written in the order of the JSON.
+- **Names.** A constructor is written plain where it resolves to the right enum in the root project, and qualified,
+  as the imports of that project let one write it, only where the plain name would be ambiguous. The `Some`, `None`,
+  `true` and `false` of the prelude are always plain.
+- **Errors** are at the position of the JSON that is wrong, as for Step 5, and say what was expected and what was
+  found: `Expected a string for Shape, found a number`.
+- **The output** is written as for Step 5: a value ends `;` and a new line, on one line if it is at most 80 characters
+  wide and otherwise spread, or one line each with `--compact`.
+
+### Framing
+
+- **`json-typed`.** The JSON document is parsed whole, and then read as the type. A syntax error, or a type error, in it
+  writes nothing, since it is one value. A document with no JSON in it is the error above.
+- The first problem ends the run with exit code 1. The values of the inputs before it have been written.
+
+### Tasks
+
+- [ ] `--type`, the parsing and resolving of a type expression in the root project, with unit tests for a declared
+      type, an array, `Option`, an inline record, a generic with arguments and an unknown name.
+- [ ] The reader of `json-typed` for each kind of type and each shape of the mapping, with the numbers, the keys, the
+      names and the prelude, and unit tests for each error. A round trip over the typed examples: `--to=json-typed`
+      and then `--from=json-typed` give the values again, apart from the consts that are inlined and the omitted
+      arguments that are written out.
+- [ ] Types files among the files, the empty-file rule, and `--`, with unit tests for the order, the empty file on
+      either side and the wrong kind on a side.
+- [ ] `--from=json-typed` in the command, with the options and the refusals above.
+- [ ] Functional tests, the spec section, a decision, and the exit codes, the settings and the CHANGELOG.
 
 ## Step 8: Convert from JSONL (typed)
 
+Given a JSONL file in the `jsonl-typed` format and the type that each line is a value of, translate it back into a
+data-values file.
+
 ```
-constructo convert --from=jsonl-typed --project=. shapes.jsonl > shapes.values
+constructo convert --from=jsonl-typed --type=Shape --project=. shapes.jsonl > shapes.values
 ```
 
+The type, the inputs, the options, the reading of a value, the output and the exit codes are those of Step 7. What
+differs is the framing, which is that of Step 6:
 
+- Each line is one value of the type. A line that is an array is a value only if the type is an array type.
+- A line with only white space is skipped, and `\r\n` is accepted. A last line with no new line is fine. An empty file
+  has no lines, so it is valid and has no values. A JSON file that is empty is therefore an empty `jsonl-typed` file,
+  and the guess about an empty file above applies only to deciding that it is not a types file.
+- A position is in the file. The lines are read one at a time, so a problem on a line ends the run with exit code 1 at
+  that line, and the values of the lines before it have been written.
+
+### Tasks
+
+- [ ] The framing of `jsonl-typed`, sharing the reading of a value with Step 7, with unit tests for the lines, the
+      blank lines, the line endings, an array on a line and the errors.
+- [ ] Functional tests with the files that `--to=jsonl-typed` writes, including a round trip, the spec section and
+      the CHANGELOG.
