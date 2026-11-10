@@ -22,17 +22,18 @@ about how forgiving the reader is, where its JSON parser comes from, and how it 
 - **An empty file is an error for `json-exact`**, `Expected a JSON value`, because an empty file is not a JSON document,
   though it can be a file of data-values. An empty array is no values. A file of `jsonl-exact` may be empty.
 - **The values are written as the run goes, and the run stops at the first problem.** The output need not be tidy
-  when something is wrong. A JSON document is parsed whole first, because JSON cannot be read in part, and its values are
-  then written one by one. A file of `jsonl-exact` is read a line at a time, so it is neither held in memory nor
-  waited for to its end.
-- **A file of `json-typed` is not read back yet.** The error for one has a note that says what it may be.
+  when something is wrong. A JSON document is parsed whole first, because JSON cannot be read in part, and its values
+  are then written one by one. A file of `jsonl-exact` is read a line at a time, so it is neither held in
+  memory nor waited for to its end.
+- **A file of `json-typed` is not read by the exact formats.** The error for one has a note that says what it may be.
+  It is read with a type, as [decision 39](0039-reading-json-typed-back-is-driven-by-a-type.md) says.
 
 ## Consequences
 
 - What comes back is the values and the text of their numbers, and a round trip through `--to` and `--from` is exact in
   that sense. It is not the text of the original file.
-- The values are written in a layout of their own, in `src/values_text.rs`, by the same rule as the pretty JSON: one line
-  if it is at most 80 characters wide, not counting the indentation.
+- The values are written in a layout of their own, in `src/values_text.rs`, by the same rule as the pretty JSON: one
+  line if it is at most 80 characters wide, not counting the indentation.
 - A dependency such as `serde_json` would have given less code, and no positions without more work.
 
 ## Options and Outcome

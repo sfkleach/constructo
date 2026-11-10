@@ -749,4 +749,57 @@ mod tests {
             assert_eq!(again, json, "{ty} {value}");
         }
     }
+
+    /// A reader that gives two good lines, a bad one, and then lines for ever, which is only read as far as the bad
+    /// line if a lines input is read a line at a time and is not read whole.
+    struct Endless {
+        sent: usize,
+    }
+
+    impl std::io::Read for Endless {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            const LINES: [&str; 3] = ["\"Dot\"\n", "\"Dot\"\n", "\"Cube\"\n"];
+            let line = LINES.get(self.sent).copied().unwrap_or("\"Dot\"\n");
+            self.sent += 1;
+            let bytes = line.as_bytes();
+            buffer[..bytes.len()].copy_from_slice(bytes);
+            Ok(bytes.len())
+        }
+    }
+
+    #[test]
+    fn a_lines_input_is_read_a_line_at_a_time() {
+        let mut sources = vec![prelude_source()];
+        sources.push(Source {
+            name: "types".to_string(),
+            text: SHAPES.to_string(),
+        });
+        let layout = plain_layout(&sources);
+        let mut out = Vec::new();
+        let mut result = None;
+        convert_typed_back(&sources, &layout, &CheckOptions::default(), "Shape", &mut |context| {
+            let mut reader = std::io::BufReader::new(Endless { sent: 0 });
+            result = Some(convert::convert_from_typed_lines(
+                context,
+                "in.jsonl",
+                &mut reader,
+                true,
+                true,
+                &mut out,
+            ));
+            Ok(())
+        })
+        .unwrap();
+        match result.expect("The reader ran.") {
+            Err(convert::LinesError::Invalid(diagnostics)) => {
+                assert!(
+                    diagnostics[0].to_string().contains("in.jsonl, line 3, col 1"),
+                    "{}",
+                    diagnostics[0]
+                );
+            }
+            _ => panic!("The third line is not a constructor of Shape."),
+        }
+        assert_eq!(String::from_utf8(out).unwrap(), "Dot;\nDot;\n");
+    }
 }

@@ -478,8 +478,8 @@ The mapping is that of decision 37 in reverse, driven by the type and by the JSO
   `Float` slot is `1.0e3`. A `1.5` or a `-1` in a `Nat` slot is an error at the number. This is `--to`'s adding of `.0`
   and dropping of `+`, in reverse.
 - **Keys are strict.** An unknown key is an error at the key. A missing field with no default is an error at the
-  object, and a missing field with a default is left out of the text, since data-values may omit it. The fields are
-  written in the order of the JSON.
+  object, since the types require every field of a record. Only the trailing named parameters of a tuple may be left
+  out, and take their defaults. The fields are written in the order of the JSON.
 - **Names.** A constructor is written plain where it resolves to the right enum in the root project, and qualified,
   as the imports of that project let one write it, only where the plain name would be ambiguous. The `Some`, `None`,
   `true` and `false` of the prelude are always plain.
@@ -496,16 +496,16 @@ The mapping is that of decision 37 in reverse, driven by the type and by the JSO
 
 ### Tasks
 
-- [ ] `--type`, the parsing and resolving of a type expression in the root project, with unit tests for a declared
+- [x] `--type`, the parsing and resolving of a type expression in the root project, with unit tests for a declared
       type, an array, `Option`, an inline record, a generic with arguments and an unknown name.
-- [ ] The reader of `json-typed` for each kind of type and each shape of the mapping, with the numbers, the keys, the
+- [x] The reader of `json-typed` for each kind of type and each shape of the mapping, with the numbers, the keys, the
       names and the prelude, and unit tests for each error. A round trip over the typed examples: `--to=json-typed`
       and then `--from=json-typed` give the values again, apart from the consts that are inlined and the omitted
       arguments that are written out.
-- [ ] Types files among the files, the empty-file rule, and `--`, with unit tests for the order, the empty file on
+- [x] Types files among the files, the empty-file rule, and `--`, with unit tests for the order, the empty file on
       either side and the wrong kind on a side.
-- [ ] `--from=json-typed` in the command, with the options and the refusals above.
-- [ ] Functional tests, the spec section, a decision, and the exit codes, the settings and the CHANGELOG.
+- [x] `--from=json-typed` in the command, with the options and the refusals above.
+- [x] Functional tests, the spec section, a decision, and the exit codes, the settings and the CHANGELOG.
 
 ## Step 8: Convert from JSONL (typed)
 
@@ -528,7 +528,7 @@ differs is the framing, which is that of Step 6:
 
 ### Tasks
 
-- [ ] The framing of `jsonl-typed`, sharing the reading of a value with Step 7, with unit tests for the lines, the
+- [x] The framing of `jsonl-typed`, sharing the reading of a value with Step 7, with unit tests for the lines, the
       blank lines, the line endings, an array on a line and the errors.
-- [ ] Functional tests with the files that `--to=jsonl-typed` writes, including a round trip, the spec section and
+- [x] Functional tests with the files that `--to=jsonl-typed` writes, including a round trip, the spec section and
       the CHANGELOG.

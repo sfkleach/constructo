@@ -1,16 +1,18 @@
 use clap::{ArgAction, ArgGroup, ArgMatches, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use constructo::convert::{
-    convert, convert_from_source, convert_jsonl_from_reader, convert_lines, values_of, ConvertOptions, Format,
-    FromFormat, LinesError,
+    convert, convert_from_source, convert_from_typed_lines, convert_from_typed_source, convert_jsonl_from_reader,
+    convert_lines, values_of, ConvertOptions, Format, FromFormat, LinesError,
 };
 use constructo::diagnostics::{Diagnostic, Pos};
 use constructo::fetch::Cache;
 use constructo::lock::Lock;
 use constructo::project::{init_project, Init, ProjectError, Remotes, PROJECT_FILE};
+use constructo::typed_files::{first_token, types_end, FirstToken};
 use constructo::verify::{read_lock, update_lock_with, verify_lock_with};
 use constructo::{
-    check_in_projects, convert_typed, convert_typed_lines, source_kind, syntax_error, CheckOptions, Config,
-    Experimental, ImportInfo, InputFile, Layout, Outcome, Project, ProjectInfo, ProjectSet, Source, SourceKind,
+    check_in_projects, convert_typed, convert_typed_back, convert_typed_lines, source_kind, syntax_error, CheckOptions,
+    Config, Experimental, ImportInfo, InputFile, Layout, Outcome, Project, ProjectInfo, ProjectSet, ReadContext,
+    Source, SourceKind,
 };
 use std::collections::{HashSet, VecDeque};
 use std::ffi::OsString;
@@ -200,9 +202,15 @@ written as text to the standard output. The settings file is read for [global] a
         #[arg(long, value_name = "FORMAT")]
         to: Option<String>,
 
-        /// The notation to read, writing the values as text: json-exact or jsonl-exact, as --to writes them
+        /// The notation to read, writing the values as text: json-exact, jsonl-exact, json-typed or jsonl-typed, as
+        /// --to writes them
         #[arg(long, value_name = "FORMAT")]
         from: Option<String>,
+
+        /// With json-typed or jsonl-typed, the type that each value is read as, such as Shape or [Shape], which is
+        /// resolved in the project that --project names
+        #[arg(long = "type", value_name = "TYPE")]
+        type_expr: Option<String>,
 
         /// With json-exact, convert every value, of every input, into an array, instead of only the first value
         #[arg(long)]
@@ -246,7 +254,8 @@ written as text to the standard output. The settings file is read for [global] a
         )]
         no_experimental: Vec<Feature>,
 
-        /// The files to convert. With json-typed, the types files come among them or from --project
+        /// The files to convert. With --to=json-typed the types files come among them or from --project, and with
+        /// --from=json-typed they come first, until the first file that is JSON or a `--`, which ends them
         #[arg(value_name = "FILES", required_unless_present_any = ["stdin", "project"])]
         files: Vec<PathBuf>,
     },
@@ -346,8 +355,6 @@ fn config_occurrences(args: impl IntoIterator<Item = OsString>) -> usize {
 /// arguments and the others are what is left. Clap's own indices cannot be used, since they count the options and
 /// their values and not the places in the arguments, and they do not count the marker. If more arguments follow
 /// the marker than there are files, which is when the marker is the value of an option, there is no marker.
-// It is used by the reading of typed JSON, which is added in a later step.
-#[cfg_attr(not(test), allow(dead_code))]
 fn files_before_marker(args: &[OsString], total: usize) -> Option<usize> {
     let marker = args.iter().position(|arg| arg == "--")?;
     total.checked_sub(args.len() - marker - 1)
@@ -469,6 +476,7 @@ fn main() -> ExitCode {
         Command::Convert {
             to,
             from,
+            type_expr,
             to_array,
             compact,
             stdin,
@@ -481,9 +489,32 @@ fn main() -> ExitCode {
                 let convert_matches = matches
                     .subcommand_matches("convert")
                     .expect("the convert subcommand was given");
-                return convert_back(&from, compact, stdin, &files, convert_matches);
+                let back = Back {
+                    name: &from,
+                    type_expr,
+                    compact,
+                    stdin,
+                    files: &files,
+                    matches: convert_matches,
+                };
+                let format = match FromFormat::from_name(&from) {
+                    Ok(format) => format,
+                    Err(message) => {
+                        eprintln!("ERROR: {}", message);
+                        return ExitCode::from(EXIT_USAGE);
+                    }
+                };
+                return if format.needs_types() {
+                    convert_back_typed(format, &back, typing, &config, cache.as_deref())
+                } else {
+                    convert_back(format, &back)
+                };
             }
             let to = to.expect("the argument group needs --to or --from");
+            if type_expr.is_some() {
+                eprintln!("ERROR: --type does not apply with --to, which writes JSON; it names the type to read as");
+                return ExitCode::from(EXIT_USAGE);
+            }
             let format = match Format::from_name(&to) {
                 Ok(format) => format,
                 Err(message) => {
@@ -786,95 +817,259 @@ fn convert_files(stdin: bool, options: &ConvertOptions, files: &[PathBuf]) -> Ex
     }
 }
 
-/// Reads values back from JSON, with `--from`, and writes them as text to the standard output. The inputs are read and
-/// converted one at a time, so that the values of an input are written before a later input is looked at. An input
-/// that cannot be read ends the run with exit code 2, after what came before it has been written, and a problem in an
-/// input ends it with exit code 1.
-fn convert_back(name: &str, compact: bool, stdin: bool, files: &[PathBuf], matches: &ArgMatches) -> ExitCode {
-    let from = match FromFormat::from_name(name) {
-        Ok(from) => from,
+/// What the reading of values back from JSON is given by the command line.
+struct Back<'a> {
+    /// The name of the format, as it was written.
+    name: &'a str,
+    type_expr: Option<String>,
+    compact: bool,
+    stdin: bool,
+    files: &'a [PathBuf],
+    matches: &'a ArgMatches,
+}
+
+/// The first of the options that are refused with `--from` and that were given on the command line, as the error to
+/// show. They are refused and not ignored, since they would otherwise do nothing without a word.
+fn refused_with_from(matches: &ArgMatches, ids: impl IntoIterator<Item = &'static str>, why: &str) -> Option<String> {
+    ids.into_iter()
+        .find(|id| matches.value_source(id) == Some(clap::parser::ValueSource::CommandLine))
+        .map(|id| format!("--{} does not apply with --from, which {}", id.replace('_', "-"), why))
+}
+
+/// Reads one JSON input that was given by a path or on the standard input: the text, or the message that says why not.
+fn read_json_text(path: Option<&Path>) -> Result<Source, String> {
+    match path {
+        Some(path) => match std::fs::read_to_string(path) {
+            Ok(text) => Ok(Source {
+                name: path.display().to_string(),
+                text,
+            }),
+            Err(e) => Err(format!("Cannot read {}: {}", path.display(), e)),
+        },
+        None => {
+            let mut text = String::new();
+            match std::io::stdin().read_to_string(&mut text) {
+                Ok(_) => Ok(Source {
+                    name: "<stdin>".to_string(),
+                    text,
+                }),
+                Err(e) => Err(format!("Cannot read standard input: {}", e)),
+            }
+        }
+    }
+}
+
+/// Reads one input of a lines format by the conversion that is given its name and a reader, which is a file or the
+/// standard input if there is no path. The result is the message that says why the input cannot be read, if it cannot,
+/// and otherwise nothing.
+fn read_lines(
+    path: Option<&Path>,
+    convert: impl FnOnce(&str, &mut std::io::BufReader<Box<dyn Read>>) -> Result<Option<std::io::Error>, LinesError>,
+) -> Result<Option<String>, LinesError> {
+    match path {
+        Some(path) => {
+            let name = path.display().to_string();
+            match std::fs::File::open(path) {
+                Ok(file) => {
+                    let mut reader = std::io::BufReader::new(Box::new(file) as Box<dyn Read>);
+                    Ok(convert(&name, &mut reader)?.map(|e| format!("Cannot read {}: {}", name, e)))
+                }
+                Err(e) => Ok(Some(format!("Cannot read {}: {}", name, e))),
+            }
+        }
+        None => {
+            let mut reader = std::io::BufReader::new(Box::new(std::io::stdin().lock()) as Box<dyn Read>);
+            Ok(convert("<stdin>", &mut reader)?.map(|e| format!("Cannot read standard input: {}", e)))
+        }
+    }
+}
+
+/// Reads values back from `json-exact` or `jsonl-exact`, with `--from`, and writes them as text to the standard output.
+/// The inputs are read and converted one at a time, so that the values of an input are written before a later input is
+/// looked at. An input that cannot be read ends the run with exit code 2, after what came before it has been written,
+/// and a problem in an input ends it with exit code 1.
+fn convert_back(from: FromFormat, back: &Back) -> ExitCode {
+    let refused = ["to_array", "experimental", "no_experimental"]
+        .into_iter()
+        .chain(TYPING_OPTIONS);
+    if let Some(message) = refused_with_from(back.matches, refused, "only reads JSON") {
+        eprintln!("ERROR: {}", message);
+        return ExitCode::from(EXIT_USAGE);
+    }
+    if back.type_expr.is_some() {
+        eprintln!("ERROR: --type does not apply to {}, which needs no types", back.name);
+        return ExitCode::from(EXIT_USAGE);
+    }
+    let mut unreadable = None;
+    let code = stream_lines(|out| {
+        let inputs = back
+            .files
+            .iter()
+            .map(|path| Some(path.as_path()))
+            .chain(back.stdin.then_some(None));
+        for input in inputs {
+            let result = if from == FromFormat::JsonlExact {
+                // The lines are converted as they are read, so that one is not kept back until the end of the input.
+                read_lines(input, |name, reader| {
+                    convert_jsonl_from_reader(name, reader, back.compact, out)
+                })
+            } else {
+                match read_json_text(input) {
+                    Ok(source) => convert_from_source(&source, from, back.compact, out).map(|()| None),
+                    Err(message) => Ok(Some(message)),
+                }
+            };
+            if let Some(message) = result? {
+                unreadable = Some(message);
+                return Ok(());
+            }
+        }
+        Ok(())
+    });
+    match unreadable {
+        Some(message) => {
+            eprintln!("ERROR: {}", message);
+            ExitCode::from(EXIT_USAGE)
+        }
+        None => code,
+    }
+}
+
+/// Reads one input of `jsonl-typed`, a line at a time, from a file or from the standard input if there is no path, and
+/// converts it. The result is the message that says why the input cannot be read, if it cannot, and otherwise nothing.
+fn read_lines_typed(
+    context: &ReadContext,
+    path: Option<&Path>,
+    widening: bool,
+    compact: bool,
+    out: &mut dyn Write,
+) -> Result<Option<String>, LinesError> {
+    let (name, failure) = match path {
+        Some(path) => {
+            let name = path.display().to_string();
+            match std::fs::File::open(path) {
+                Ok(file) => {
+                    let failure = convert_from_typed_lines(
+                        context,
+                        &name,
+                        &mut std::io::BufReader::new(file),
+                        widening,
+                        compact,
+                        out,
+                    )?;
+                    (name, failure)
+                }
+                Err(e) => return Ok(Some(format!("Cannot read {}: {}", name, e))),
+            }
+        }
+        None => {
+            let failure =
+                convert_from_typed_lines(context, "<stdin>", &mut std::io::stdin().lock(), widening, compact, out)?;
+            ("standard input".to_string(), failure)
+        }
+    };
+    Ok(failure.map(|e| format!("Cannot read {}: {}", name, e)))
+}
+
+/// What the first token of a file says, or why the file cannot be read. Only as much of the file as that is read.
+fn first_token_of(path: &Path) -> Result<FirstToken, String> {
+    let file = std::fs::File::open(path).map_err(|e| format!("Cannot read {}: {}", path.display(), e))?;
+    first_token(&mut std::io::BufReader::new(file)).map_err(|e| format!("Cannot read {}: {}", path.display(), e))
+}
+
+/// Reads values back from `json-typed` or `jsonl-typed`, with `--from` and `--type`, and writes them as text to the
+/// standard output. The types are those of `--project` and of the files that come first among the files, which end at
+/// the first file that does not start a declaration, or at the first `--`. Only the start of a file is read to tell
+/// which it is. The rest of the files and the standard input are JSON, and are read one at a time after the types are
+/// checked, so the values of an input are written before a later input is looked at.
+fn convert_back_typed(
+    from: FromFormat,
+    back: &Back,
+    typing: TypingArgs,
+    config: &Config,
+    cache: Option<&Path>,
+) -> ExitCode {
+    let why = "reads JSON as values of a type";
+    if let Some(message) = refused_with_from(back.matches, ["to_array", "experimental", "no_experimental"], why) {
+        eprintln!("ERROR: {}", message);
+        return ExitCode::from(EXIT_USAGE);
+    }
+    let Some(type_expr) = &back.type_expr else {
+        eprintln!("ERROR: --type is required with --from={}", back.name);
+        return ExitCode::from(EXIT_USAGE);
+    };
+    let from_file = config.check_options();
+    let options = CheckOptions {
+        type_check: true,
+        widening: setting(typing.widening, typing.no_widening, from_file.widening),
+        continue_after_error: false,
+        allow_refs: setting(typing.allow_refs, typing.no_allow_refs, from_file.allow_refs),
+        infer_limit: typing.infer_limit.unwrap_or(from_file.infer_limit),
+        default_limit: typing.default_limit.unwrap_or(from_file.default_limit),
+        experimental: from_file.experimental,
+    };
+    let load_prelude = setting(typing.prelude, typing.no_prelude, config.prelude());
+    let dev = setting(typing.dev, typing.no_dev, config.dev());
+    let set = match load_projects(typing.project.as_deref(), load_prelude, dev, cache) {
+        Ok(set) => set,
+        Err(code) => return code,
+    };
+    // The types files are the first of the files, up to the `--` or the first file that is not one.
+    let arguments: Vec<OsString> = std::env::args_os().collect();
+    let marker = files_before_marker(&arguments, back.files.len());
+    let end = match types_end(back.files.len(), marker, |index| first_token_of(&back.files[index])) {
+        Ok(end) => end,
         Err(message) => {
             eprintln!("ERROR: {}", message);
             return ExitCode::from(EXIT_USAGE);
         }
     };
-    // These are refused and not ignored, since they would otherwise do nothing without a word.
-    let refused = ["to_array", "experimental", "no_experimental"]
-        .into_iter()
-        .chain(TYPING_OPTIONS);
-    for id in refused {
-        if matches.value_source(id) == Some(clap::parser::ValueSource::CommandLine) {
-            eprintln!(
-                "ERROR: --{} does not apply with --from, which only reads JSON",
-                id.replace('_', "-")
-            );
-            return ExitCode::from(EXIT_USAGE);
+    let (types_files, json_files) = back.files.split_at(end);
+    if json_files.is_empty() && !back.stdin {
+        eprintln!("ERROR: There is no JSON to read: give a file after the types files, or --stdin");
+        return ExitCode::from(EXIT_USAGE);
+    }
+    let sources = match read_sources(&set, types_files, false, options.experimental) {
+        Ok(sources) => sources,
+        Err(code) => return code,
+    };
+    // A file before the marker is a types file, so one that holds data-values is a mistake that is better said than
+    // left to the parser of the types, which would complain of its syntax.
+    let given_from = sources.len().saturating_sub(types_files.len());
+    for source in &sources[given_from..] {
+        if source_kind(source, options.experimental) == SourceKind::Values {
+            let message = "This file comes before --, so it is a types file, but it holds data-values";
+            eprintln!("{}", Diagnostic::new(&source.name, Pos { line: 1, col: 1 }, message));
+            return ExitCode::from(EXIT_ERRORS);
         }
     }
     let mut unreadable = None;
+    let layout = layout(&set, sources.len());
     let code = stream_lines(|out| {
-        for path in files {
-            let name = path.display().to_string();
-            let failure = match from {
-                // A file of lines is converted as it is read, and a file of one document has to be read whole.
-                FromFormat::JsonlExact => match std::fs::File::open(path) {
-                    Ok(file) => convert_jsonl_from_reader(&name, &mut std::io::BufReader::new(file), compact, out)?,
-                    Err(e) => Some(e),
-                },
-                FromFormat::JsonExact => match std::fs::read_to_string(path) {
-                    Ok(text) => {
-                        convert_from_source(
-                            &Source {
-                                name: name.clone(),
-                                text,
-                            },
-                            from,
-                            compact,
-                            out,
-                        )?;
-                        None
-                    }
-                    Err(e) => Some(e),
-                },
-            };
-            if let Some(e) = failure {
-                unreadable = Some(format!("Cannot read {}: {}", name, e));
-                return Ok(());
-            }
-        }
-        if stdin {
-            let failure = match from {
-                FromFormat::JsonlExact => convert_jsonl_from_reader(
-                    "<stdin>",
-                    &mut std::io::BufReader::new(std::io::stdin().lock()),
-                    compact,
-                    out,
-                )?,
-                FromFormat::JsonExact => {
-                    let mut text = String::new();
-                    match std::io::stdin().read_to_string(&mut text) {
-                        Ok(_) => {
-                            convert_from_source(
-                                &Source {
-                                    name: "<stdin>".to_string(),
-                                    text,
-                                },
-                                from,
-                                compact,
-                                out,
-                            )?;
-                            None
+        convert_typed_back(&sources, &layout, &options, type_expr, &mut |context| {
+            let inputs = json_files
+                .iter()
+                .map(|path| Some(path.as_path()))
+                .chain(back.stdin.then_some(None));
+            for input in inputs {
+                let result = if from == FromFormat::JsonlTyped {
+                    read_lines_typed(context, input, options.widening, back.compact, out)
+                } else {
+                    match read_json_text(input) {
+                        Ok(source) => {
+                            convert_from_typed_source(context, &source, from, options.widening, back.compact, out)
+                                .map(|()| None)
                         }
-                        Err(e) => Some(e),
+                        Err(message) => Ok(Some(message)),
                     }
+                };
+                if let Some(message) = result? {
+                    unreadable = Some(message);
+                    return Ok(());
                 }
-            };
-            if let Some(e) = failure {
-                unreadable = Some(format!("Cannot read standard input: {}", e));
-                return Ok(());
             }
-        }
-        Ok(())
+            Ok(())
+        })
     });
     match unreadable {
         Some(message) => {

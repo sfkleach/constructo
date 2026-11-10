@@ -36,7 +36,7 @@ arity and so on), checks data values against those types, and loads a small
 standard prelude declaring `Bool` and `Option<T>`. `constructo convert` writes values as JSON, either
 with every kind of value explicit (`--to=json-exact`) or in the natural shapes
 of serde, using the types (`--to=json-typed`), each as one document or a line to a value, and reads the exact
-forms back with `--from`; see the [spec](docs/specs/convert-command.md).
+forms and, with `--type`, the typed ones back with `--from`; see the [spec](docs/specs/convert-command.md).
 
 Types can be organised into *projects*: a folder with a `constructo.toml` that
 names the project and lists the projects it imports, whether from a folder, from

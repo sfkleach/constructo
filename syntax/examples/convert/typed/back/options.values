@@ -1,0 +1,3 @@
+None;
+Some(Dot);
+Some(Circle { r: 2.5 });

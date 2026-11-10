@@ -72,3 +72,9 @@
   are the expected output, and `wide.json` has a value that is spread. The others, such as `number.json`,
   `wrong-kind.json`, `typed.json`, `late-error.json`, `half.jsonl` and `array-line.jsonl`, must be rejected, and the
   last three write the values before the problem first.
+- `convert/typed/back`: inputs for `constructo convert --from=json-typed` and `--from=jsonl-typed` with the types of
+  `convert/typed/schema.types`. `*.values` are the expected output, which `check` accepts with those types, and the
+  type that each is read as is `Shape`, except `config.json` (`Config`), `list.json` (`[Shape]`), `floats.jsonl`
+  (`Float`) and `options.jsonl` (`Option<Shape>`). `unknown-key.json`, `missing-field.json`,
+  `unknown-constructor.json`, `late-error.jsonl` and `not-a-nat.jsonl` (`Nat`) must be rejected, and the last two write
+  the values before the problem first.

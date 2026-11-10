@@ -83,13 +83,16 @@ the same errors have the same codes.
   error in a value. A format that writes one document writes nothing to the standard output when there is an error. A
   lines format writes the lines before an error in a value, and nothing if the error is found before the first value is
   converted, as an error in the types or in the syntax is.
-- **With `--from`, exit code 1** is JSON that is not valid, or is valid and is not `json-exact`, including an empty
-  document, and a number or a name that is not what its key says. The values before the problem have been written, as
-  for a lines format, except that a JSON document is read whole first, so an error in its syntax writes nothing.
+- **With `--from`, exit code 1** is JSON that is not valid, or is valid and is not what the format says, including an
+  empty document, and a number or a name that is not what its key says. For the typed formats it is also an error in
+  the types or in `--type`, JSON that does not fit the type, and a JSON file among the types files before a `--`. The
+  values before the problem have been written, as for a lines format, except that a JSON document is read whole first,
+  so an error in its syntax writes nothing, and that an error in the types or in `--type` writes nothing.
 - **Exit code 2:** an option or an argument that is not understood, which includes neither `--to` nor `--from` or both
   of them, a `--to` or `--from` that is not a format, `--to-array` with a lines format or with `--from`, `-x` with
   `--from`, an option for types (`--project`, `--no-prelude` and the others) with a
-  format that needs no types, and no inputs at all; `--config` given more than once or one that cannot be read, a
+  format that needs no types, `--type` missing with a typed `--from` or given with another format, and no inputs at all
+  or no JSON among them; `--config` given more than once or one that cannot be read, a
   `--cache` that is empty, an input that cannot be read, including the standard input, and an output that cannot be
   written, such as a pipe whose reader has gone. For the typed formats, the problems with a project-file or with how
   projects are found, as for `check`. As for `check`, an unreadable input ends the run at once, and a syntax error in an
