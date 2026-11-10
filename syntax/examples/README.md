@@ -68,3 +68,7 @@
   one of every kind of value and is converted with `--to-array`. `*.compact.json` is the output of `--compact`, and
   `query.values` needs `-x`. `*.jsonl` is the output of `--to=jsonl-exact`. The others, such as `types-file.types` and
   `duplicate-field.values`, must be rejected.
+- `convert/back`: inputs for `constructo convert --from`, each with the text that it must give. `*.values` and `*.out`
+  are the expected output, and `wide.json` has a value that is spread. The others, such as `number.json`,
+  `wrong-kind.json`, `typed.json`, `late-error.json`, `half.jsonl` and `array-line.jsonl`, must be rejected, and the
+  last three write the values before the problem first.

@@ -1,0 +1,13 @@
+{
+  "constructor": "Scene",
+  "record": {
+    "name": {"string": "a long enough name to push this over the limit"},
+    "items": {
+      "array": [
+        {"constructor": "Point", "tuple": [{"nat": "1"}, {"nat": "2"}]},
+        {"constructor": "Point", "tuple": [{"nat": "3"}, {"nat": "4"}]}
+      ]
+    },
+    "tags": {"array": [{"const": "a"}, {"const": "b"}]}
+  }
+}

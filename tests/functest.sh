@@ -1826,6 +1826,108 @@ rm -f "$proj/app/constructo.lock" "$proj/app/constructo.toml" "$proj/app/scene.t
 rmdir "$proj/app" "$proj/lib" "$proj"
 rm -f "$conv_dir/settings.toml"
 
+# `--from` reads the JSON that `--to` writes and writes the values as text. The examples are in `back/`.
+BACK="$CONVERT/back"
+expect_json "from json-exact: every kind of value" "$BACK/kinds.values" --from=json-exact "$CONVERT/kinds.json"
+expect_json "from json-exact: --compact is a value to a line" "$BACK/kinds.compact.values" --from=json-exact \
+    --compact "$CONVERT/kinds.json"
+expect_json "from json-exact: the compact form is read too" "$BACK/kinds.values" --from=json-exact \
+    "$CONVERT/kinds.compact.json"
+expect_json "from json-exact: an object is one value" "$BACK/nested.values" --from=json-exact "$CONVERT/nested.json"
+expect_json "from json-exact: a wide value is spread" "$BACK/wide.out" --from=json-exact "$BACK/wide.json"
+expect_json "from json-exact: an empty array is no values" /dev/null --from=json-exact "$CONVERT/empty.json"
+expect_json "from jsonl-exact: every value is a line, and blank lines are skipped" "$BACK/loose.out" \
+    --from=jsonl-exact "$BACK/loose.jsonl"
+expect_json "from jsonl-exact: an empty file is no values" /dev/null --from=jsonl-exact "$BACK/empty.jsonl"
+expect_json "from jsonl-exact: the values of several inputs are in order" "$BACK/two-two.values" \
+    --from=jsonl-exact "$BACK/two.jsonl" "$BACK/two.jsonl"
+
+# A round trip through the other direction gives the values again, compactly.
+out="$("$CONSTRUCTO" convert --to=jsonl-exact "$CONVERT/kinds.values" \
+    | "$CONSTRUCTO" convert --from=jsonl-exact --compact --stdin 2>&1)" || true
+if [[ "$out" == "$(cat "$BACK/kinds.compact.values")" ]]; then
+    pass "from jsonl-exact: a round trip through --to=jsonl-exact"
+else
+    fail "from jsonl-exact: a round trip through --to=jsonl-exact (got '$out')"
+fi
+out="$("$CONSTRUCTO" convert --to=json-exact --to-array "$CONVERT/kinds.values" \
+    | "$CONSTRUCTO" convert --from=json-exact --compact --stdin 2>&1)" || true
+if [[ "$out" == "$(cat "$BACK/kinds.compact.values")" ]]; then
+    pass "from json-exact: a round trip through --to=json-exact"
+else
+    fail "from json-exact: a round trip through --to=json-exact (got '$out')"
+fi
+
+# A JSON document is read whole before any value is written, so a problem in it leaves the standard output empty.
+expect_convert_error "from json-exact: a syntax error writes nothing" 1 "ERROR: Expected \",\" or \"]\"" \
+    --from=json-exact "$BACK/truncated.json"
+expect_convert_error "from json-exact: an empty file is an error" 1 "ERROR: Expected a JSON value" \
+    --from=json-exact "$BACK/blank.json"
+expect_convert_error "from json-exact: a number in place of a string" 1 \
+    "ERROR: Expected a string for \"nat\"; a number is written as a string" --from=json-exact "$BACK/number.json"
+expect_convert_error "from json-exact: text of the wrong kind of number" 1 "ERROR: The text \"+5\" is not a nat" \
+    --from=json-exact "$BACK/wrong-kind.json"
+expect_convert_error "from json-exact: a json-typed file is not json-exact" 1 "ERROR: Unknown key \"Circle\"" \
+    --from=json-exact "$BACK/typed.json"
+if grep -q -- "--to=json-typed" "$conv_dir/err"; then
+    pass "convert: the error for a json-typed file says what it may be"
+else
+    fail "convert: the error for a json-typed file says what it may be"
+fi
+
+# The values before the one that is wrong are written, and the run stops there.
+expect_before_error() {
+    local name="$1" written="$2" message="$3"; shift 3
+    local actual=0
+    "$CONSTRUCTO" convert "$@" >"$conv_dir/out" 2>"$conv_dir/err" || actual=$?
+    local first
+    first="$(head -n 1 "$conv_dir/err")"
+    if [[ "$actual" -eq 1 && "$(cat "$conv_dir/out")" == "$written" && "$first" == $message* ]]; then
+        pass "convert: $name"
+    else
+        fail "convert: $name (exit $actual, stdout '$(cat "$conv_dir/out")', first error '$first')"
+    fi
+}
+expect_before_error "from json-exact: the values before a bad element are written" "1;" \
+    "ERROR: The text \"x\" is not a nat (*late-error.json, line 1, col 24)" --from=json-exact "$BACK/late-error.json"
+expect_before_error "from jsonl-exact: an array on a line is an error at that line" "1;" \
+    "ERROR: Expected an object for a value (*array-line.jsonl, line 3, col 1)" --from=jsonl-exact \
+    "$BACK/array-line.jsonl"
+expect_before_error "from jsonl-exact: a line that stops half way ends the run there" "1;" \
+    "ERROR: Expected a JSON value (*half.jsonl, line 2, col 9)" --from=jsonl-exact "$BACK/half.jsonl"
+
+# An input that cannot be read ends the run with exit code 2, after the values of the inputs before it.
+actual=0
+"$CONSTRUCTO" convert --from=jsonl-exact "$BACK/two.jsonl" "$conv_dir/missing.jsonl" >"$conv_dir/out" \
+    2>"$conv_dir/err" || actual=$?
+first="$(head -n 1 "$conv_dir/err")"
+if [[ "$actual" -eq 2 && "$(cat "$conv_dir/out")" == $'1;\n2;' && "$first" == "ERROR: Cannot read"* ]]; then
+    pass "from jsonl-exact: an unreadable input ends the run with exit code 2 after the earlier values"
+else
+    fail "from jsonl-exact: an unreadable input (exit $actual, out '$(cat "$conv_dir/out")')"
+fi
+out="$(printf '{"nat": "7"}\n' \
+    | "$CONSTRUCTO" convert --from=jsonl-exact --stdin "$BACK/two.jsonl" 2>/dev/null)" || true
+if [[ "$out" == $'1;\n2;\n7;' ]]; then
+    pass "from jsonl-exact: the standard input comes after the files"
+else
+    fail "from jsonl-exact: the standard input comes after the files (got '$out')"
+fi
+
+expect_convert_error "from: --to and --from together" 2 "error: the argument '--to <FORMAT>' cannot be used with" \
+    --to=json-exact --from=json-exact "$BACK/two.jsonl"
+expect_convert_error "from: neither --to nor --from" 2 "error: the following required arguments were not provided" \
+    "$BACK/two.jsonl"
+expect_convert_error "from: json-typed cannot be read back yet" 2 "ERROR: json-typed cannot be read back yet" \
+    --from=json-typed "$BACK/two.jsonl"
+expect_convert_error "from: a bare json is not a format" 2 "ERROR: json is not a format" --from=json "$BACK/two.jsonl"
+expect_convert_error "from: --to-array does not apply" 2 "ERROR: --to-array does not apply with --from" \
+    --from=json-exact --to-array "$BACK/two.jsonl"
+expect_convert_error "from: -x does not apply" 2 "ERROR: --experimental does not apply with --from" \
+    --from=json-exact -x "$BACK/two.jsonl"
+expect_convert_error "from: the typing options do not apply" 2 "ERROR: --widening does not apply with --from" \
+    --from=json-exact --widening "$BACK/two.jsonl"
+
 # The standard input is read after the files.
 out="$(printf '7;\n' | "$CONSTRUCTO" convert --to=json-exact --compact --stdin 2>&1)" || true
 if [[ "$out" == '{"nat":"7"}' ]]; then pass "convert: --stdin"; else fail "convert: --stdin (got '$out')"; fi
