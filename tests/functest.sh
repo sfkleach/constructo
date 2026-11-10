@@ -1939,8 +1939,6 @@ expect_convert_error "from: --to and --from together" 2 "error: the argument '--
     --to=json-exact --from=json-exact "$BACK/two.jsonl"
 expect_convert_error "from: neither --to nor --from" 2 "error: the following required arguments were not provided" \
     "$BACK/two.jsonl"
-expect_convert_error "from: json-typed cannot be read back yet" 2 "ERROR: json-typed cannot be read back yet" \
-    --from=json-typed "$BACK/two.jsonl"
 expect_convert_error "from: a bare json is not a format" 2 "ERROR: json is not a format" --from=json "$BACK/two.jsonl"
 expect_convert_error "from: --to-array does not apply" 2 "ERROR: --to-array does not apply with --from" \
     --from=json-exact --to-array "$BACK/two.jsonl"
@@ -1948,6 +1946,115 @@ expect_convert_error "from: -x does not apply" 2 "ERROR: --experimental does not
     --from=json-exact -x "$BACK/two.jsonl"
 expect_convert_error "from: the typing options do not apply" 2 "ERROR: --widening does not apply with --from" \
     --from=json-exact --widening "$BACK/two.jsonl"
+
+# `--from=json-typed` and `--from=jsonl-typed` read JSON as values of the type that `--type` names. The types are those
+# of `--project` and of the files that come first, up to the first file that is not a types file, or a `--`. The
+# examples are in `typed/back/`.
+TB="$CONVERT/typed/back"
+TS="$CONVERT/typed/schema.types"
+expect_json "from jsonl-typed: a value to a line, in the shapes of the declarations" "$TB/shapes.values" \
+    --from=jsonl-typed --type=Shape "$TS" "$TB/shapes.jsonl"
+expect_json "from json-typed: one document is one value" "$TB/config.values" --from=json-typed --type=Config "$TS" \
+    "$TB/config.json"
+expect_json "from json-typed: an array type reads an array" "$TB/list.values" --from=json-typed --type='[Shape]' "$TS" \
+    "$TB/list.json"
+expect_json "from jsonl-typed: a number takes the text of its slot" "$TB/floats.values" --from=jsonl-typed \
+    --type=Float "$TB/floats.jsonl"
+expect_json "from jsonl-typed: null is None and a value is Some" "$TB/options.values" --from=jsonl-typed \
+    --type='Option<Shape>' "$TS" "$TB/options.jsonl"
+expect_json "from jsonl-typed: blank lines are skipped and a line may end in CR LF" "$TB/loose.values" \
+    --from=jsonl-typed --type=Shape "$TS" "$TB/loose.jsonl"
+expect_json "from jsonl-typed: --compact is the same, a value to a line" "$TB/shapes.values" --from=jsonl-typed \
+    --compact --type=Shape "$TS" "$TB/shapes.jsonl"
+for values in shapes config list options; do
+    expect_exit "from typed: the values of $values.values are accepted by check" 0 check "$TS" "$TB/$values.values"
+done
+
+# The files before the first JSON file are types files, and an empty one among them is left out. The `--` ends them.
+expect_json "from typed: an empty file before the types is a types file" "$TB/loose.values" --from=jsonl-typed \
+    --type=Shape /dev/null "$TS" "$TB/loose.jsonl"
+expect_json "from typed: an empty file after the JSON is JSON, and has no values" "$TB/loose.values" \
+    --from=jsonl-typed --type=Shape "$TS" "$TB/loose.jsonl" /dev/null
+expect_json "from typed: -- ends the types files, and an empty file after it is JSON" "$TB/loose.values" \
+    --from=jsonl-typed --type=Shape "$TS" -- "$TB/loose.jsonl" /dev/null
+expect_json "from typed: an empty file before -- is a types file" "$TB/loose.values" --from=jsonl-typed --type=Shape \
+    "$TS" /dev/null -- "$TB/loose.jsonl"
+expect_convert_error "from typed: an empty document after -- is an error" 1 "ERROR: Expected a JSON value" \
+    --from=json-typed --type=Shape "$TS" -- /dev/null
+expect_convert_error "from typed: a JSON file before -- is not a types file" 1 \
+    "ERROR: This file comes before --, so it is a types file, but it holds data-values" \
+    --from=jsonl-typed --type=Shape "$TS" "$TB/shapes.jsonl" -- "$TB/shapes.jsonl"
+expect_before_error "from typed: a types file among the JSON is not JSON" "[Circle { r: 1.0 }, Dot, Pair(3, 4)];" \
+    "ERROR: Expected a JSON value" --from=json-typed --type='[Shape]' "$TS" "$TB/list.json" "$TS"
+out="$(printf '"Dot"\n' | "$CONSTRUCTO" convert --from=jsonl-typed --type=Shape --stdin "$TS" 2>&1)" || true
+if [[ "$out" == 'Dot;' ]]; then pass "from typed: --stdin is JSON"; else fail "from typed: --stdin (got '$out')"; fi
+
+# Errors are placed in the JSON, and the values before one have been written.
+expect_convert_error "from typed: an unknown key" 1 \
+    "ERROR: Unknown key \"s\" for Circle; the fields are r (*unknown-key.json, line 1, col 20)" \
+    --from=json-typed --type=Shape "$TS" "$TB/unknown-key.json"
+expect_convert_error "from typed: a missing field" 1 \
+    "ERROR: Missing field \"r\" in Circle (*missing-field.json, line 1, col 11)" \
+    --from=json-typed --type=Shape "$TS" "$TB/missing-field.json"
+expect_convert_error "from typed: an unknown constructor" 1 "ERROR: \"Cube\" is not a constructor of Shape" \
+    --from=json-typed --type=Shape "$TS" "$TB/unknown-constructor.json"
+expect_before_error "from jsonl-typed: the values before a number that does not fit are written" "Dot;" \
+    "ERROR: The number 2.5 does not fit Nat (*late-error.jsonl, line 2, col 12)" --from=jsonl-typed --type=Shape "$TS" \
+    "$TB/late-error.jsonl"
+expect_before_error "from jsonl-typed: a number that does not fit a Nat" "5;" \
+    "ERROR: The number 1.5 does not fit Nat (*not-a-nat.jsonl, line 2, col 1)" --from=jsonl-typed --type=Nat \
+    "$TB/not-a-nat.jsonl"
+expect_convert_error "from typed: an error in the type is found before anything is read" 1 \
+    "ERROR: Unknown type Shap (--type, line 1, col 1)" --from=jsonl-typed --type=Shap "$TS" "$TB/shapes.jsonl"
+actual=0
+"$CONSTRUCTO" convert --from=jsonl-typed --type=Shape "$TS" "$TB/shapes.jsonl" "$conv_dir/missing.jsonl" \
+    >"$conv_dir/out" 2>"$conv_dir/err" || actual=$?
+first="$(head -n 1 "$conv_dir/err")"
+if [[ "$actual" -eq 2 && "$(head -n 1 "$conv_dir/out")" == "Dot;" && "$first" == "ERROR: Cannot read"* ]]; then
+    pass "from jsonl-typed: an unreadable JSON file ends the run with exit code 2 after the earlier values"
+else
+    fail "from jsonl-typed: an unreadable JSON file (exit $actual, first line '$(head -n 1 "$conv_dir/out")')"
+fi
+expect_convert_error "from typed: an unreadable types file is a usage error" 2 "ERROR: Cannot read " \
+    --from=jsonl-typed --type=Shape "$conv_dir/missing.types" "$TB/shapes.jsonl"
+
+# The usage errors.
+expect_convert_error "from typed: --type is required" 2 "ERROR: --type is required with --from=json-typed" \
+    --from=json-typed "$TS" "$TB/config.json"
+expect_convert_error "from json-exact: --type does not apply" 2 "ERROR: --type does not apply to json-exact" \
+    --from=json-exact --type=Shape "$CONVERT/kinds.json"
+expect_convert_error "to: --type does not apply" 2 "ERROR: --type does not apply with --to" --to=json-exact \
+    --type=Shape "$CONVERT/kinds.values"
+expect_convert_error "from typed: --to-array does not apply" 2 "ERROR: --to-array does not apply with --from" \
+    --from=json-typed --to-array --type=Shape "$TS" "$TB/config.json"
+expect_convert_error "from typed: -x does not apply" 2 "ERROR: --experimental does not apply with --from" \
+    --from=json-typed -x --type=Shape "$TS" "$TB/config.json"
+expect_convert_error "from typed: there must be JSON to read" 2 "ERROR: There is no JSON to read" \
+    --from=json-typed --type=Shape "$TS" --
+
+# The type is resolved in the project, and the names are written as the project can write them.
+proj="$conv_dir/proj"
+mkdir -p "$proj/lib" "$proj/app"
+printf '[project]\nname = "com.example.lib"\ninclude = ["*.types"]\n' >"$proj/lib/constructo.toml"
+printf 'enum Shape = Circle { r: Float }, Dot;\n' >"$proj/lib/shapes.types"
+printf '[project]\nname = "com.example.app"\ninclude = ["*.types"]\n\n[[import]]\nproject-name = "com.example.lib"\n' \
+    >"$proj/app/constructo.toml"
+printf 'group = "lib"\npath = "../lib"\n' >>"$proj/app/constructo.toml"
+printf 'enum Scene = Scene { shape: lib::Shape };\n' >"$proj/app/scene.types"
+printf '{"Scene":{"shape":{"Circle":{"r":2}}}}\n{"Scene":{"shape":"Dot"}}\n' >"$proj/v.jsonl"
+printf 'Scene { shape: com.example.lib::Circle { r: 2.0 } };\nScene { shape: com.example.lib::Dot };\n' \
+    >"$proj/expected.values"
+"$CONSTRUCTO" project update "$proj/app" >/dev/null 2>&1
+expect_json "from jsonl-typed: a type of a project, with the names of another project written in full" \
+    "$proj/expected.values" --from=jsonl-typed --type=Scene --project="$proj/app" "$proj/v.jsonl"
+expect_exit "from jsonl-typed: what is written is accepted by check in the project" 0 check --project="$proj/app" \
+    "$proj/expected.values"
+expect_convert_error "from typed: a name of the project is found as the project writes it" 1 \
+    "ERROR: Unknown type Shape (--type, line 1, col 1)" --from=jsonl-typed --type=Shape --project="$proj/app" \
+    "$proj/v.jsonl"
+rm -f "$proj/app/constructo.lock" "$proj/app/constructo.toml" "$proj/app/scene.types" "$proj/lib/constructo.toml" \
+    "$proj/lib/shapes.types" "$proj/v.jsonl" "$proj/expected.values"
+rmdir "$proj/app" "$proj/lib" "$proj"
 
 # The standard input is read after the files.
 out="$(printf '7;\n' | "$CONSTRUCTO" convert --to=json-exact --compact --stdin 2>&1)" || true

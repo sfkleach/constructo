@@ -9,8 +9,9 @@ use crate::diagnostics::{Diagnostic, Pos};
 use crate::exact::value_from_exact;
 use crate::json::{parse_document, parse_line, JsonError, Kind as JsonKind, Node};
 use crate::parser::{parse_file, Experimental, Parsed};
+use crate::typed_back::read_typed;
 use crate::values_text::render;
-use crate::{syntax_diagnostic, Source};
+use crate::{syntax_diagnostic, ReadContext, Source};
 use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Read, Write};
 
@@ -132,13 +133,17 @@ pub fn convert_lines(sources: &[Source], options: &ConvertOptions, out: &mut dyn
     Ok(())
 }
 
-/// The notations that values can be read back from. They are the two forms that need no types.
+/// The notations that values can be read back from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FromFormat {
     /// One document of `json-exact`: an object is one value, and an array is a list of values.
     JsonExact,
     /// Lines of `json-exact`, each an object that is one value.
     JsonlExact,
+    /// One document of `json-typed`, which is one value of the type that is given.
+    JsonTyped,
+    /// Lines of `json-typed`, each one value of the type that is given.
+    JsonlTyped,
 }
 
 impl FromFormat {
@@ -148,11 +153,17 @@ impl FromFormat {
         match name {
             "json-exact" => Ok(FromFormat::JsonExact),
             "jsonl-exact" => Ok(FromFormat::JsonlExact),
-            "json-typed" | "jsonl-typed" => Err(format!(
-                "{name} cannot be read back yet; choose json-exact or jsonl-exact"
+            "json-typed" => Ok(FromFormat::JsonTyped),
+            "jsonl-typed" => Ok(FromFormat::JsonlTyped),
+            _ => Err(format!(
+                "{name} is not a format; choose json-exact, jsonl-exact, json-typed or jsonl-typed"
             )),
-            _ => Err(format!("{name} is not a format; choose json-exact or jsonl-exact")),
         }
+    }
+
+    /// Whether reading needs the types, and the type of the values.
+    pub fn needs_types(self) -> bool {
+        matches!(self, FromFormat::JsonTyped | FromFormat::JsonlTyped)
     }
 }
 
@@ -184,6 +195,87 @@ pub fn convert_from_source(
             // Reading text that is already in memory cannot fail, so there is no read error to give.
             convert_jsonl_from_reader(&source.name, &mut reader, compact, out).map(|_| ())
         }
+        FromFormat::JsonTyped | FromFormat::JsonlTyped => {
+            let message = "a typed format needs the types, so it is read with convert_from_typed_source";
+            Err(LinesError::Invalid(vec![Diagnostic::new(
+                &source.name,
+                Pos { line: 1, col: 1 },
+                message,
+            )]))
+        }
+    }
+}
+
+/// Reads one input of `json-typed` or `jsonl-typed` as values of the type that the context has, and writes them as
+/// text, each as soon as it is read, to `out`. A document is one value, and each line of a lines input is one. The
+/// first problem ends the reading, and the values before it have been written. A JSON document is parsed whole first,
+/// so a syntax error in it comes before its value is written. `widening` is the option that the check is made with.
+pub fn convert_from_typed_source(
+    context: &ReadContext,
+    source: &Source,
+    from: FromFormat,
+    widening: bool,
+    compact: bool,
+    out: &mut dyn Write,
+) -> Result<(), LinesError> {
+    let invalid = |e: JsonError| LinesError::Invalid(vec![Diagnostic::new(&source.name, e.pos, e.message)]);
+    let mut write_node = |node: &Node| -> Result<(), LinesError> {
+        let value = read_typed(context, node, &source.name, widening).map_err(|d| LinesError::Invalid(vec![d]))?;
+        out.write_all(render(&value, compact).as_bytes())
+            .map_err(LinesError::Write)
+    };
+    match from {
+        FromFormat::JsonTyped => write_node(&parse_document(&source.text).map_err(invalid)?),
+        FromFormat::JsonlTyped => {
+            let reader = &mut source.text.as_bytes();
+            convert_from_typed_lines(context, &source.name, reader, widening, compact, out)
+                .map(|failure| debug_assert!(failure.is_none(), "A slice of bytes cannot fail to be read."))
+        }
+        FromFormat::JsonExact | FromFormat::JsonlExact => {
+            let message = "an exact format needs no types, so it is read with convert_from_source";
+            Err(LinesError::Invalid(vec![Diagnostic::new(
+                &source.name,
+                Pos { line: 1, col: 1 },
+                message,
+            )]))
+        }
+    }
+}
+
+/// Reads the lines of a `jsonl-typed` input from a reader as values of the type that the context has, and writes them
+/// as text, each as soon as it is read, to `out`. Only a line is held in memory at a time, so an input of any size
+/// can be read. A blank line is skipped and a line may end `\r\n`. The first problem ends the reading, and the values
+/// of the lines before it have been written. The result is `Ok(None)` when the input has been read to its end, and
+/// `Ok(Some(error))` when it could not be read, which is the failure of the reader and not a problem in the input, so
+/// it is for the caller to report. A line that is not UTF-8 is such a failure.
+pub fn convert_from_typed_lines(
+    context: &ReadContext,
+    name: &str,
+    reader: &mut dyn BufRead,
+    widening: bool,
+    compact: bool,
+    out: &mut dyn Write,
+) -> Result<Option<std::io::Error>, LinesError> {
+    let mut line = String::new();
+    let mut number = 0u32;
+    loop {
+        line.clear();
+        number += 1;
+        match reader.read_line(&mut line) {
+            Ok(0) => return Ok(None),
+            Ok(_) => {}
+            Err(e) => return Ok(Some(e)),
+        }
+        let text = line.strip_suffix('\n').unwrap_or(&line);
+        let text = text.strip_suffix('\r').unwrap_or(text);
+        if text.trim_matches([' ', '\t']).is_empty() {
+            continue;
+        }
+        let node =
+            parse_line(text, number).map_err(|e| LinesError::Invalid(vec![Diagnostic::new(name, e.pos, e.message)]))?;
+        let value = read_typed(context, &node, name, widening).map_err(|d| LinesError::Invalid(vec![d]))?;
+        out.write_all(render(&value, compact).as_bytes())
+            .map_err(LinesError::Write)?;
     }
 }
 
@@ -1150,12 +1242,8 @@ mod tests {
     fn from_names_are_matched_exactly() {
         assert_eq!(FromFormat::from_name("json-exact"), Ok(FromFormat::JsonExact));
         assert_eq!(FromFormat::from_name("jsonl-exact"), Ok(FromFormat::JsonlExact));
-        assert!(FromFormat::from_name("json-typed")
-            .unwrap_err()
-            .contains("cannot be read back yet"));
-        assert!(FromFormat::from_name("jsonl-typed")
-            .unwrap_err()
-            .contains("cannot be read back yet"));
+        assert_eq!(FromFormat::from_name("json-typed"), Ok(FromFormat::JsonTyped));
+        assert_eq!(FromFormat::from_name("jsonl-typed"), Ok(FromFormat::JsonlTyped));
         assert!(FromFormat::from_name("json")
             .unwrap_err()
             .contains("json is not a format"));

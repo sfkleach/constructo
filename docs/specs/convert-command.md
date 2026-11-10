@@ -4,13 +4,14 @@
 writes, what it prints when something is wrong, and what its exit code means. Four formats exist so far: `json-exact`,
 which writes every kind of value in an explicit form and needs no types, `jsonl-exact`, which writes the same encoding
 on a line for each value, `json-typed`, which writes natural JSON in the shapes that serde uses, and needs the types,
-and `jsonl-typed`, which writes the same encoding on a line for each value. With `--from` the exact formats are read
-back and the values are written as text. The conversions back from the typed formats will be added here.
+and `jsonl-typed`, which writes the same encoding on a line for each value. With `--from` all four are read back and
+the values are written as text. The typed ones need the type that the JSON is a value of, which `--type` gives.
 
 ```text
 constructo convert --to=json-exact|jsonl-exact [--to-array] [--compact] [-x] [--stdin] [FILES]...
 constructo convert --to=json-typed|jsonl-typed [--to-array] [--compact] [--project=FOLDER] [OPTIONS] [FILES]...
 constructo convert --from=json-exact|jsonl-exact [--compact] [--stdin] [FILES]...
+constructo convert --from=json-typed|jsonl-typed --type=TYPE [--compact] [--project=FOLDER] [OPTIONS] [FILES]...
 ```
 
 Exactly one of `--to` and `--from` is given. `--to` writes JSON, and is what most of this document is about. `--from`
@@ -301,9 +302,9 @@ then `--stdin`, as for `--to`. There is no option to name an output file, since 
   `int` and is not a `nat`. A JSON number in its place is an error that says to write it as a string. A name has to be
   one that data-values can have, a const for `const` and a constructor for `constructor`, and a field name for the
   members. The lexer and parser of data-values decide all of this, and the reader holds no second grammar.
-- **A file of `json-typed` is not read.** Its objects, such as `{"Circle": {"r": 1.5}}`, have no key that names a kind,
-  so the error is `Unknown key "Circle"` with a note that the file may have been written with `--to=json-typed`.
-  `json-typed` and `jsonl-typed` as values of `--from` say that they cannot be read back yet.
+- **A file of `json-typed` is not read by the exact formats.** Its objects, such as `{"Circle": {"r": 1.5}}`, have no
+  key that names a kind, so the error is `Unknown key "Circle"` with a note that the file may have been written with
+  `--to=json-typed`. It is read with `--from=json-typed` and a type, [as below](#reading-back-typed-json).
 - **The values are written as they are read.** Each value ends with `;` and a new line. It is on one line if that is at
   most 80 characters wide, not counting the indentation, the name of a member or the `;`. Otherwise it is spread, with
   one member, element or argument to a line, indented by four spaces, and each of those follows the same rule. A name
@@ -318,18 +319,107 @@ then `--stdin`, as for `--to`. There is no option to name an output file, since 
   at a time as well: a syntax error in an input stops the run there, and an input that cannot be read, which is exit
   code 2, is found after the values of the inputs before it.
 - **The options.** `--compact`, `--stdin`, `--config` and `--cache` are accepted. `--to-array`, `-x`,
-  `--no-experimental` and the options for types are usage errors, exit code 2, since they would have no effect.
+  `--no-experimental`, `--type` and the options for types are usage errors, exit code 2, since they would have no
+  effect.
 
 What comes back is the values and the text of their numbers. It is not the text of the file that was converted:
 comments, layout, the spelling of the escapes in a string and the order of the values in a lines file that was
 rearranged are not kept. See [decision 38](../decisions/0038-reading-json-exact-back-is-strict.md).
 
+## Reading back typed JSON
+
+`--from=json-typed` and `--from=jsonl-typed` read the natural JSON that `--to=json-typed` and `--to=jsonl-typed` write.
+Such JSON does not say what it is: `5` could be a `Nat`, an `Int` or a `Float`, and `"Dot"` could be a constructor of
+any enum. So the type is given, with `--type`, and the types are read as `--to=json-typed` reads them. Everything in
+the section above applies as well: the values are written as the run goes in the same layout, a problem ends the run
+with exit code 1, and the values before it have been written.
+
+```text
+constructo convert --from=json-typed --type=Shape --project=. shapes.json > shapes.values
+constructo convert --from=jsonl-typed --type='[Shape]' shapes.types -- shapes.jsonl > shapes.values
+```
+
+### The type
+
+`--type=TYPE` is required, and is a usage error with the exact formats and with `--to`. `TYPE` is any type of the
+grammar of the types, and not only the name of a declared type: `Shape`, `[Shape]`, `Option<Shape>`, `Pair<Nat>` and
+`{ a: Nat, b: [String] }`. It is resolved in the root project, with its imports, as the project writes types, so a name
+that an import hides or renames is found only as the project knows it. It is checked with the types, before anything is
+read, and an error in it is reported with the file `--type` and the position in what was written, as in `ERROR:
+Unknown type Shap (--type, line 1, col 1)`. A document is one value of the type: an array is read as the value only if
+the type is an array type, so many values are read with `jsonl-typed`, or as one value with `--type='[Shape]'`.
+
+### The types
+
+The types are those of `--project` and of the files that come first among the files, as `--to=json-typed` has them.
+The files that come first end at the first of two things, so that the JSON that follows is not read to find out what it
+is.
+
+- **A file that does not start a declaration.** Each file is looked at as far as its first token and no further. `enum`
+  and `const` start a types file, and the start of a JSON value starts the first JSON file, which ends the types files.
+  Everything after it is JSON, and is not looked at again. A file with no token, empty or with only white space and
+  comments, is an empty types file and is ignored before the first JSON file, and is JSON after it. As JSON an empty
+  file is no values for `jsonl-typed`, and is `Expected a JSON value` for `json-typed`.
+- **A `--`.** It ends the types files without looking at any file. The files before it are types files, even an empty
+  one, and the files after it, and `--stdin`, are JSON, even an empty one. A JSON file before it is an error, `This file
+  comes before --, so it is a types file, but it holds data-values`, exit code 1, and a types file after it is not
+  JSON, so it fails when it is read. The options come before the `--`, as nothing after it is an option.
+
+The standard input is JSON, and is read last. A run with no JSON to read, as when the files are all types files, is a
+usage error, `There is no JSON to read`, exit code 2.
+
+### The reading
+
+The shapes are those of `--to=json-typed` in reverse, which the type and the JSON decide together.
+
+- A string is a bare constructor, or a `String` where the type is one. `{"Circle": {"r": 1.5}}` is a constructor with a
+  record. An array is a tuple of the parameters, a tuple with one parameter is its one value, and `{"Ping": []}` is
+  `Ping()`. An array body, `{"Users": [...]}`, is read as the elements of the array. The key must be a constructor of
+  the enum that the type says, and the error lists them.
+- `Bool` and `Option` of the prelude are `true`, `false` and `null`, and the unwrapped value for `Some`. A `null` for
+  `Option<Option<T>>` is `None`, since `Some(None)` is never written. A const is never written, as `--to` writes its
+  value, and so is not recreated.
+- **A number** keeps its digits, which are never parsed, so one of any size is kept. Its text is made that of the
+  literal of its type: `5` in the place of an `Int` is `+5`, and in the place of a `Float` is `5.0`, and `1e3` there
+  is `1.0e3`.
+  A number that the type cannot hold is an error at the number: `The number 1.5 does not fit Nat`, and so is a `-1`
+  for a `Nat` or a `1e3` for an `Int`.
+- **Keys are strict.** A record, and a constructor with a record, has exactly the fields that the type gives, in any
+  order, and the values are written in the order of the JSON. An unknown key is an error at the key, which lists the
+  fields, a repeated key is an error at the second, and a missing field is an error at the object. Omitting a field
+  cannot be left to a default, since the types require every field of a record. A tuple that ends in named parameters
+  may be short of them, and they take their defaults as in the data-values, which the check decides. A tuple that is
+  short of the others is refused by the check, and is reported at the value.
+- **A name** is written as the root project can write it. A name that is in scope there is written bare, and any other
+  with the full name of its project, as `com.example.lib::Circle`, which `check` accepts in that project. The `Some`,
+  `None`, `true` and `false` of the prelude are always bare.
+- **Each value is checked** against the type before it is written, with the same check as `check`, so what is written
+  is accepted by `check` with the same types. A problem that the JSON alone cannot show, such as an omitted
+  argument that has no default, is found by that check and is reported at the value.
+- **Errors** are at the line and the column of the JSON that is wrong, and say what was expected and what was found:
+  `Expected a string for String, found a number`.
+
+### Inputs and memory
+
+The JSON files are read one at a time after the types are checked, so the values of a file are written before a later
+file is opened, and a file that cannot be read, which is exit code 2, is found after the values of the files before
+it. A types file or a file whose start cannot be read is found before anything is written. A `jsonl-typed` file is
+read a line at a time, and needs memory only for the line. A `json-typed` document is parsed whole, since it is one
+value, so it needs memory for the document. Large data is for `jsonl-typed`.
+
+### The options
+
+`--type`, `--compact`, `--stdin`, `--config` and `--cache` are accepted, and so are the options for types that
+`--to=json-typed` has: `--project`, `--dev`, `--no-dev`, `--prelude`, `--no-prelude`, `--allow-refs`,
+`--no-allow-refs`, `--widening`, `--no-widening`, `--infer-limit` and `--default-limit`. The settings are those that
+`--to=json-typed` reads. `--to-array`, `-x` and `--no-experimental` are usage errors. See
+[decision 39](../decisions/0039-reading-json-typed-back-is-driven-by-a-type.md).
+
 ## The options `--to` and `--from`
 
 Exactly one of them is required, and giving both or neither is a usage error, exit code 2. The value of each is matched
-exactly. `--from` takes `json-exact` and `jsonl-exact`, and a bare `json` or another name is `ERROR: NAME is not a
-format; choose json-exact or jsonl-exact`. For `--to`, `json-exact`, `jsonl-exact`, `json-typed` and `jsonl-typed` are
-the only ones that exist. Any other value is a usage error, exit code 2. A bare `json` is not a format, so that nobody
+exactly. `--from` and `--to` each take `json-exact`, `jsonl-exact`, `json-typed` and `jsonl-typed`, and these are the
+only ones that exist. Any other value is a usage error, exit code 2. A bare `json` is not a format, so that nobody
 takes the exact form for the natural one by default. The message starts `ERROR: json is not a format; choose json-exact
 (every kind kept, no types)` and goes on to name the others. Any other name, `jsonl` among them, gives `ERROR: NAME is
 not a format; choose json-exact, jsonl-exact, json-typed or jsonl-typed`. See [decision
@@ -338,8 +428,8 @@ not a format; choose json-exact, jsonl-exact, json-typed or jsonl-typed`. See [d
 ## Settings
 
 `--to-array` and `--compact` are choices for a run and are not settings. The configuration file has no table for the
-command. With `--from` no setting is used, but the file is read and has to be valid. Otherwise it reads `[global]` and
-`[experimental]`, and for the typed formats also the keys of `[check]` that are listed
+command. With `--from` an exact format uses no setting, but the file is read and has to be valid. Otherwise it reads
+`[global]` and `[experimental]`, and for the typed formats also the keys of `[check]` that are listed
 above, as [the configuration file](config-file.md) says. The global options `--config` and `--cache` are accepted. The
 file that `--config` names is read and has to be valid, and `--cache` has to be a folder that is not empty. The cache is
 used by the typed formats for a project from a repository, and otherwise neither is used.
@@ -350,13 +440,15 @@ used by the typed formats for a project from a repository, and otherwise neither
 |------|-----------------------------------------------------------------------------------------------|
 | 0    | The values were converted, with or without a warning.                                         |
 | 1    | An input has a syntax error, a name is given twice, or for a document format there is no      |
-|      | value to convert. With `--from`, JSON that is not valid or is not `json-exact`. For the exact |
-|      | formats an input that is a types file. For the typed formats an error in the types, a type    |
-|      | error, `Some(None)`, or a project that does not match its lock.                               |
+|      | value to convert. With `--from`, JSON that is not valid, or is not what the format or the    |
+|      | type says. For the exact formats an input that is a types file. For the typed formats an      |
+|      | error in the types or in `--type`, a type error, `Some(None)`, or a project that does not     |
+|      | match its lock.                                                                               |
 | 2    | An option is not understood, `--to` and `--from` are both given or neither, the format is not |
 |      | one, `--to-array` is given with a lines format or with `--from`, an option for types is given |
-|      | with a format that needs none, there are no inputs, one cannot be read, the project or the    |
-|      | settings file is bad, or the output cannot be written.                                        |
+|      | with a format that needs none, `--type` is missing or is not wanted, there are no inputs or   |
+|      | no JSON, one cannot be read, the project or the settings file is bad, or the output cannot be |
+|      | written.                                                                                      |
 
 ## Related
 
@@ -365,4 +457,4 @@ used by the typed formats for a project from a repository, and otherwise neither
 - [The exit codes](exit-codes.md) and [the configuration file](config-file.md).
 - [Validity checks](validity-checks.md), [type checking](type-checking.md) and
   [resolving identifiers](resolving-identifiers.md), for the checks that the typed formats make before they convert.
-- Decisions 18, 35, 36, 37 and 38, in `docs/decisions/`.
+- Decisions 18, 35, 36, 37, 38 and 39, in `docs/decisions/`.

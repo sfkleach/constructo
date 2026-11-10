@@ -180,6 +180,14 @@ Following the style in https://keepachangelog.com/en/1.0.0/
   line with `--compact`, and the run stops at the first problem. A file of `json-typed` gets a note saying what it may
   be. See `docs/specs/convert-command.md` and decision 38. The library has the `json`, `exact` and `values_text`
   modules and `convert_from_source`.
+- `constructo convert --from=json-typed` and `--from=jsonl-typed` read back what `--to=json-typed` and
+  `--to=jsonl-typed` write, as the values of the type that `--type=TYPE` gives, which may be any type, such as
+  `Shape`, `[Shape]` or `Option<Shape>`, in the root project. The types come from `--project` and from the files that
+  come first, up to the first file that is JSON or a `--`; only the start of a file is read to tell. A number keeps
+  its digits and takes the text of its type, a name is written as the project can write it, and each value is checked
+  as `check` checks it. A document is one value and is read whole, and the lines of `jsonl-typed` are read one at a
+  time. See `docs/specs/convert-command.md` and decision 39. The library has `convert_typed_back`, `ReadContext`,
+  `convert_from_typed_source` and the modules `typed_back` and `typed_files`.
 - The output of `convert` that cannot be written, such as to a pipe whose reader has gone, ends the run with exit code
   2, quietly for a reader that has gone, and not with a panic.
 - The pretty output of `convert` puts a container on one line if it is at most 80 characters wide, not counting the
