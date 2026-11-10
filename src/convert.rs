@@ -6,7 +6,10 @@
 
 use crate::ast::{Argument, Member, TaggedBody, Value, ValueKind};
 use crate::diagnostics::{Diagnostic, Pos};
+use crate::exact::value_from_exact;
+use crate::json::{parse_document, parse_line, JsonError, Kind as JsonKind, Node};
 use crate::parser::{parse_file, Experimental, Parsed};
+use crate::values_text::render;
 use crate::{syntax_diagnostic, Source};
 use std::collections::HashSet;
 use std::io::Write;
@@ -127,6 +130,67 @@ pub fn convert_lines(sources: &[Source], options: &ConvertOptions, out: &mut dyn
         out.write_all(line.as_bytes()).map_err(LinesError::Write)?;
     }
     Ok(())
+}
+
+/// The notations that values can be read back from. They are the two forms that need no types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FromFormat {
+    /// One document of `json-exact`: an object is one value, and an array is a list of values.
+    JsonExact,
+    /// Lines of `json-exact`, each an object that is one value.
+    JsonlExact,
+}
+
+impl FromFormat {
+    /// The format with the name that is given, which is matched exactly. The error is the message to show, with no
+    /// `ERROR:` in front.
+    pub fn from_name(name: &str) -> Result<FromFormat, String> {
+        match name {
+            "json-exact" => Ok(FromFormat::JsonExact),
+            "jsonl-exact" => Ok(FromFormat::JsonlExact),
+            "json-typed" | "jsonl-typed" => Err(format!(
+                "{name} cannot be read back yet; choose json-exact or jsonl-exact"
+            )),
+            _ => Err(format!("{name} is not a format; choose json-exact or jsonl-exact")),
+        }
+    }
+}
+
+/// Reads one input of `json-exact` or `jsonl-exact` and writes its values as text, each as soon as it is read, to
+/// `out`. The first problem ends the conversion, and the values before it have been written. A JSON document is
+/// parsed whole first, so a syntax error in it comes before any of its values are written.
+pub fn convert_from_source(
+    source: &Source,
+    from: FromFormat,
+    compact: bool,
+    out: &mut dyn Write,
+) -> Result<(), LinesError> {
+    let invalid = |e: JsonError| LinesError::Invalid(vec![Diagnostic::new(&source.name, e.pos, e.message)]);
+    let mut write_node = |node: &Node| -> Result<(), LinesError> {
+        let value = value_from_exact(node, &source.name).map_err(|d| LinesError::Invalid(vec![d]))?;
+        out.write_all(render(&value, compact).as_bytes())
+            .map_err(LinesError::Write)
+    };
+    match from {
+        FromFormat::JsonExact => {
+            let document = parse_document(&source.text).map_err(invalid)?;
+            match &document.kind {
+                JsonKind::Array(items) => items.iter().try_for_each(write_node),
+                _ => write_node(&document),
+            }
+        }
+        FromFormat::JsonlExact => {
+            for (index, line) in source.text.split('\n').enumerate() {
+                let line = line.strip_suffix('\r').unwrap_or(line);
+                if line.trim_matches([' ', '\t']).is_empty() {
+                    continue;
+                }
+                let node = parse_line(line, index as u32 + 1).map_err(invalid)?;
+                write_node(&node)?;
+            }
+            Ok(())
+        }
+    }
 }
 
 /// Converts the values of the sources, which are in the order that they were given, and gives the output as a whole.
@@ -1033,5 +1097,144 @@ mod tests {
         };
         assert_eq!(e.kind(), std::io::ErrorKind::BrokenPipe);
         assert_eq!(sink.chunks.len(), 1);
+    }
+
+    /// What reading the text gives: the output so far, and the errors if the conversion failed.
+    fn back(text: &str, from: FromFormat, compact: bool) -> (String, Vec<String>) {
+        let source = Source {
+            name: "t.json".to_string(),
+            text: text.to_string(),
+        };
+        let mut out = Vec::new();
+        let errors = match convert_from_source(&source, from, compact, &mut out) {
+            Ok(()) => Vec::new(),
+            Err(LinesError::Invalid(ds)) => ds.iter().map(|d| d.to_string()).collect(),
+            Err(LinesError::Write(e)) => panic!("{e}"),
+        };
+        (String::from_utf8(out).unwrap(), errors)
+    }
+
+    #[test]
+    fn from_names_are_matched_exactly() {
+        assert_eq!(FromFormat::from_name("json-exact"), Ok(FromFormat::JsonExact));
+        assert_eq!(FromFormat::from_name("jsonl-exact"), Ok(FromFormat::JsonlExact));
+        assert!(FromFormat::from_name("json-typed")
+            .unwrap_err()
+            .contains("cannot be read back yet"));
+        assert!(FromFormat::from_name("jsonl-typed")
+            .unwrap_err()
+            .contains("cannot be read back yet"));
+        assert!(FromFormat::from_name("json")
+            .unwrap_err()
+            .contains("json is not a format"));
+        assert!(FromFormat::from_name("JSON-Exact").is_err());
+    }
+
+    #[test]
+    fn a_document_that_is_an_object_is_one_value() {
+        let (out, errors) = back(r#"{"nat": "5"}"#, FromFormat::JsonExact, false);
+        assert_eq!((out.as_str(), errors.len()), ("5;\n", 0));
+    }
+
+    #[test]
+    fn a_document_that_is_an_array_is_a_list_of_values() {
+        let (out, errors) = back(r#"[{"nat": "1"}, {"string": "a"}]"#, FromFormat::JsonExact, false);
+        assert_eq!((out.as_str(), errors.len()), ("1;\n\"a\";\n", 0));
+        let (out, errors) = back("[]", FromFormat::JsonExact, false);
+        assert_eq!((out.as_str(), errors.len()), ("", 0));
+    }
+
+    #[test]
+    fn an_array_with_a_bad_element_gives_the_good_ones_first() {
+        let (out, errors) = back(
+            r#"[{"nat": "1"}, {"nat": "x"}, {"nat": "3"}]"#,
+            FromFormat::JsonExact,
+            false,
+        );
+        assert_eq!(out, "1;\n");
+        assert_eq!(errors.len(), 1);
+        assert!(
+            errors[0].contains("The text \"x\" is not a nat (t.json, line 1, col 24)"),
+            "{errors:?}"
+        );
+        let (out, errors) = back(r#"[{"nat": "1"}, 2]"#, FromFormat::JsonExact, false);
+        assert_eq!(out, "1;\n");
+        assert!(errors[0].contains("Expected an object for a value"));
+    }
+
+    #[test]
+    fn a_document_with_a_syntax_error_writes_nothing() {
+        let (out, errors) = back(r#"[{"nat": "1"}, {"nat": "2"}"#, FromFormat::JsonExact, false);
+        assert_eq!(out, "");
+        assert!(errors[0].contains("Expected \",\" or \"]\""), "{errors:?}");
+    }
+
+    #[test]
+    fn an_empty_document_is_an_error() {
+        for text in ["", " \n\t "] {
+            let (out, errors) = back(text, FromFormat::JsonExact, false);
+            assert_eq!(out, "");
+            assert!(errors[0].contains("Expected a JSON value"), "{errors:?}");
+        }
+    }
+
+    #[test]
+    fn something_other_than_an_object_or_array_is_an_error() {
+        let (_, errors) = back("5", FromFormat::JsonExact, false);
+        assert!(errors[0].contains("Expected an object for a value (t.json, line 1, col 1)"));
+    }
+
+    #[test]
+    fn compact_is_a_line_to_a_value() {
+        let text = format!("[{}]", [r#"{"array": [{"nat": "1"}, {"nat": "2"}]}"#; 2].join(","));
+        let (out, _) = back(&text, FromFormat::JsonExact, true);
+        assert_eq!(out, "[1, 2];\n[1, 2];\n");
+    }
+
+    #[test]
+    fn lines_are_values() {
+        let text = "{\"nat\": \"1\"}\n\n   \n{\"string\": \"a\"}\r\n\t\n{\"nat\": \"2\"}";
+        let (out, errors) = back(text, FromFormat::JsonlExact, false);
+        assert_eq!((out.as_str(), errors.len()), ("1;\n\"a\";\n2;\n", 0));
+        let (out, errors) = back("", FromFormat::JsonlExact, false);
+        assert_eq!((out.as_str(), errors.len()), ("", 0));
+        let (out, errors) = back("\n\n", FromFormat::JsonlExact, false);
+        assert_eq!((out.as_str(), errors.len()), ("", 0));
+    }
+
+    #[test]
+    fn an_array_on_a_line_is_an_error_at_its_line() {
+        let (out, errors) = back(
+            "{\"nat\": \"1\"}\n\n[{\"nat\": \"2\"}]\n{\"nat\": \"3\"}\n",
+            FromFormat::JsonlExact,
+            false,
+        );
+        assert_eq!(out, "1;\n");
+        assert!(
+            errors[0].contains("Expected an object for a value (t.json, line 3, col 1)"),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn a_line_that_stops_half_way_ends_the_run_there() {
+        let (out, errors) = back(
+            "{\"nat\": \"1\"}\n{\"nat\": \n{\"nat\": \"3\"}\n",
+            FromFormat::JsonlExact,
+            false,
+        );
+        assert_eq!(out, "1;\n");
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].contains("(t.json, line 2, col 9)"), "{errors:?}");
+    }
+
+    #[test]
+    fn an_error_in_a_value_on_a_line_is_at_the_line_of_the_file() {
+        let (_, errors) = back(
+            "\n\n{\"nat\": \"1\"}\n  {\"nat\": \"x\"}\n",
+            FromFormat::JsonlExact,
+            false,
+        );
+        assert!(errors[0].contains("(t.json, line 4, col 11)"), "{errors:?}");
     }
 }

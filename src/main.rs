@@ -1,5 +1,7 @@
-use clap::{ArgAction, ArgMatches, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
-use constructo::convert::{convert, convert_lines, values_of, ConvertOptions, Format, LinesError};
+use clap::{ArgAction, ArgGroup, ArgMatches, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
+use constructo::convert::{
+    convert, convert_from_source, convert_lines, values_of, ConvertOptions, Format, FromFormat, LinesError,
+};
 use constructo::diagnostics::{Diagnostic, Pos};
 use constructo::fetch::Cache;
 use constructo::lock::Lock;
@@ -182,18 +184,25 @@ enum Command {
     Version,
 
     /// Convert values to another notation
-    #[command(after_help = "\
-For json-exact and json-typed the first value is converted, and a warning says if more follow. Use --to-array to \
-convert every value into an array, which is written only if there is no error. For jsonl-exact and jsonl-typed every \
-value is a line, written as it is converted. The settings file is read for [global] and [experimental], and for the \
-typed formats for the keys of [check] that apply.")]
+    #[command(
+        group(ArgGroup::new("direction").required(true).args(["to", "from"])),
+        after_help = "\
+For json-exact the first value is converted, and a warning says if more follow. Use --to-array to convert every \
+value into an array. For jsonl-exact every value is a line. A format that is one document is written only if there \
+is no error, and a lines format as it goes. With --from the JSON that --to wrote is read back and the values are \
+written as text to the standard output. The settings file is read for [global] and [experimental]."
+    )]
     Convert {
-        /// The notation to write: json-exact, which keeps every kind of value and needs no types, json-typed, which is
-        /// natural JSON and needs the types, or jsonl-exact and jsonl-typed, which write each value on a line
+        /// The notation to write: json-exact, which keeps every kind of value and needs no types, jsonl-exact, which
+        /// is the same with each value on a line of its own, or json-typed, which is natural JSON and needs the types
         #[arg(long, value_name = "FORMAT")]
-        to: String,
+        to: Option<String>,
 
-        /// With json-exact or json-typed, convert every value, of every input, into an array, instead of only the first value
+        /// The notation to read, writing the values as text: json-exact or jsonl-exact, as --to writes them
+        #[arg(long, value_name = "FORMAT")]
+        from: Option<String>,
+
+        /// With json-exact, convert every value, of every input, into an array, instead of only the first value
         #[arg(long)]
         to_array: bool,
 
@@ -445,6 +454,7 @@ fn main() -> ExitCode {
         }
         Command::Convert {
             to,
+            from,
             to_array,
             compact,
             stdin,
@@ -453,6 +463,13 @@ fn main() -> ExitCode {
             no_experimental: _,
             files,
         } => {
+            if let Some(from) = from {
+                let convert_matches = matches
+                    .subcommand_matches("convert")
+                    .expect("the convert subcommand was given");
+                return convert_back(&from, compact, stdin, &files, convert_matches);
+            }
+            let to = to.expect("the argument group needs --to or --from");
             let format = match Format::from_name(&to) {
                 Ok(format) => format,
                 Err(message) => {
@@ -752,6 +769,71 @@ fn convert_files(stdin: bool, options: &ConvertOptions, files: &[PathBuf]) -> Ex
             eprintln!("{}", diagnostic);
             ExitCode::from(EXIT_ERRORS)
         }
+    }
+}
+
+/// Reads values back from JSON, with `--from`, and writes them as text to the standard output. The inputs are read and
+/// converted one at a time, so that the values of an input are written before a later input is looked at. An input
+/// that cannot be read ends the run with exit code 2, after what came before it has been written, and a problem in an
+/// input ends it with exit code 1.
+fn convert_back(name: &str, compact: bool, stdin: bool, files: &[PathBuf], matches: &ArgMatches) -> ExitCode {
+    let from = match FromFormat::from_name(name) {
+        Ok(from) => from,
+        Err(message) => {
+            eprintln!("ERROR: {}", message);
+            return ExitCode::from(EXIT_USAGE);
+        }
+    };
+    // These are refused and not ignored, since they would otherwise do nothing without a word.
+    let refused = ["to_array", "experimental", "no_experimental"]
+        .into_iter()
+        .chain(TYPING_OPTIONS);
+    for id in refused {
+        if matches.value_source(id) == Some(clap::parser::ValueSource::CommandLine) {
+            eprintln!(
+                "ERROR: --{} does not apply with --from, which only reads JSON",
+                id.replace('_', "-")
+            );
+            return ExitCode::from(EXIT_USAGE);
+        }
+    }
+    let mut unreadable = None;
+    let code = stream_lines(|out| {
+        for path in files {
+            match std::fs::read_to_string(path) {
+                Ok(text) => {
+                    let source = Source {
+                        name: path.display().to_string(),
+                        text,
+                    };
+                    convert_from_source(&source, from, compact, out)?;
+                }
+                Err(e) => {
+                    unreadable = Some(format!("Cannot read {}: {}", path.display(), e));
+                    return Ok(());
+                }
+            }
+        }
+        if stdin {
+            let mut text = String::new();
+            if let Err(e) = std::io::stdin().read_to_string(&mut text) {
+                unreadable = Some(format!("Cannot read standard input: {}", e));
+                return Ok(());
+            }
+            let source = Source {
+                name: "<stdin>".to_string(),
+                text,
+            };
+            convert_from_source(&source, from, compact, out)?;
+        }
+        Ok(())
+    });
+    match unreadable {
+        Some(message) => {
+            eprintln!("ERROR: {}", message);
+            ExitCode::from(EXIT_USAGE)
+        }
+        None => code,
     }
 }
 
