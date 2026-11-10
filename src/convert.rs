@@ -1,7 +1,9 @@
-//! Conversion of values to other notations.
+//! Conversion of values to other notations, and of JSON back to values.
 //!
-//! Two formats exist at present: `json-exact`, which writes every kind of value in an explicit form and needs no
-//! types, and `jsonl-exact`, which writes the same encoding on a line for each value. See
+//! Four formats exist at present. `json-exact` writes every kind of value in an explicit form and needs no types,
+//! and `jsonl-exact` writes the same encoding on a line for each value. `json-typed` writes natural JSON in the shapes
+//! that serde uses, and `jsonl-typed` writes the same on a line for each value; both need the types. With `--from`
+//! all four are read back and the values are written as text. See
 //! `docs/tasks/2026-11-08-convert-subcommand/convert-subcommand.md`.
 
 use crate::ast::{Argument, Member, TaggedBody, Value, ValueKind};
