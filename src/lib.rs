@@ -7,6 +7,7 @@ pub mod config;
 pub mod convert;
 pub mod diagnostics;
 pub mod digest;
+pub mod exact;
 pub mod fetch;
 pub mod json;
 pub mod lexer;

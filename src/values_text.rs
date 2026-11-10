@@ -231,6 +231,44 @@ fn quoted(text: &str) -> String {
     out
 }
 
+/// The value with every position replaced by one place, so that values can be compared.
+#[cfg(test)]
+pub(crate) fn bare(value: &Value) -> Value {
+    let pos = crate::diagnostics::Pos { line: 1, col: 1 };
+    let all = |items: &[Value]| items.iter().map(bare).collect::<Vec<_>>();
+    let members = |ms: &[Member]| {
+        ms.iter()
+            .map(|m| Member {
+                name: m.name.clone(),
+                pos,
+                value: bare(&m.value),
+            })
+            .collect::<Vec<_>>()
+    };
+    let kind = match &value.kind {
+        ValueKind::Array(items) => ValueKind::Array(all(items)),
+        ValueKind::Record(ms) => ValueKind::Record(members(ms)),
+        ValueKind::Tagged { name, body } => ValueKind::Tagged {
+            name: name.clone(),
+            body: body.as_ref().map(|b| match b {
+                TaggedBody::Record(ms) => TaggedBody::Record(members(ms)),
+                TaggedBody::Array(items) => TaggedBody::Array(all(items)),
+                TaggedBody::Tuple(args) => TaggedBody::Tuple(
+                    args.iter()
+                        .map(|a| Argument {
+                            name: a.name.clone(),
+                            pos,
+                            value: bare(&a.value),
+                        })
+                        .collect(),
+                ),
+            }),
+        },
+        other => other.clone(),
+    };
+    Value { pos, kind }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -362,42 +400,5 @@ mod tests {
             }
         }
         assert!(seen > 10);
-    }
-
-    /// The value with every position replaced by one place, so that values can be compared.
-    pub(crate) fn bare(value: &Value) -> Value {
-        let pos = Pos { line: 1, col: 1 };
-        let all = |items: &[Value]| items.iter().map(bare).collect::<Vec<_>>();
-        let members = |ms: &[Member]| {
-            ms.iter()
-                .map(|m| Member {
-                    name: m.name.clone(),
-                    pos,
-                    value: bare(&m.value),
-                })
-                .collect::<Vec<_>>()
-        };
-        let kind = match &value.kind {
-            ValueKind::Array(items) => ValueKind::Array(all(items)),
-            ValueKind::Record(ms) => ValueKind::Record(members(ms)),
-            ValueKind::Tagged { name, body } => ValueKind::Tagged {
-                name: name.clone(),
-                body: body.as_ref().map(|b| match b {
-                    TaggedBody::Record(ms) => TaggedBody::Record(members(ms)),
-                    TaggedBody::Array(items) => TaggedBody::Array(all(items)),
-                    TaggedBody::Tuple(args) => TaggedBody::Tuple(
-                        args.iter()
-                            .map(|a| Argument {
-                                name: a.name.clone(),
-                                pos,
-                                value: bare(&a.value),
-                            })
-                            .collect(),
-                    ),
-                }),
-            },
-            other => other.clone(),
-        };
-        Value { pos, kind }
     }
 }
