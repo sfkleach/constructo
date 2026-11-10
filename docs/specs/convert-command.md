@@ -1,14 +1,15 @@
 # The convert command
 
 `constructo convert` reads data-values and writes them in another notation. This document says what it reads, what it
-writes, what it prints when something is wrong, and what its exit code means. Three formats exist so far: `json-exact`,
+writes, what it prints when something is wrong, and what its exit code means. Four formats exist so far: `json-exact`,
 which writes every kind of value in an explicit form and needs no types, `jsonl-exact`, which writes the same encoding
-on a line for each value, and `json-typed`, which writes natural JSON in the shapes that serde uses, and needs the
-types. The formats that follow are the lines of the typed form and the conversions back, and each will be added here.
+on a line for each value, `json-typed`, which writes natural JSON in the shapes that serde uses, and needs the types, and
+`jsonl-typed`, which writes the same encoding on a line for each value. The formats that follow are the conversions
+back, and each will be added here.
 
 ```text
 constructo convert --to=json-exact|jsonl-exact [--to-array] [--compact] [-x] [--stdin] [FILES]...
-constructo convert --to=json-typed [--to-array] [--compact] [--project=FOLDER] [OPTIONS] [FILES]...
+constructo convert --to=json-typed|jsonl-typed [--to-array] [--compact] [--project=FOLDER] [OPTIONS] [FILES]...
 ```
 
 ## Inputs
@@ -39,8 +40,8 @@ types`, with exit code 2.
 
 ## One value, or all of them
 
-This section is about `json-exact` and `json-typed`, which each write a single document. `jsonl-exact` writes every
-value, as [its section](#the-format-jsonl-exact) says.
+This section is about `json-exact` and `json-typed`, which each write a single document. The lines formats write every
+value, as [their sections](#the-format-jsonl-exact) say.
 
 - **By default the first value is converted.** It is the first value that there is, across the inputs in order, so an
   input with no values is passed over. If any value follows it, in the same input or in a later one, there is one
@@ -252,31 +253,48 @@ Besides the errors of the check, the encoding refuses a value that is nested mor
 consts that it refers to: `The value is nested too deeply to convert`. A chain of consts is as deep as it is long, so a
 very long one is refused and not followed. Nothing else is an error: a value that has passed the check has a JSON form.
 
+## The format `jsonl-typed`
+
+`--to=jsonl-typed` writes each value of each input, in order, as the `json-typed` form of it on one line, with no white
+space in it, and a new line at the end of each line. So a line is exactly what `--compact` gives for a value with
+`json-typed`, and the lines are the elements of the array that `--to-array` gives. It behaves as `jsonl-exact` does,
+with the inputs, the options, the settings and the checking of `json-typed`:
+
+- **Every value is converted, and so every value is type-checked.** There is no first value to choose and no warning for
+  the ones that follow.
+- **The lines are streamed**, as for `jsonl-exact`. The types, and the syntax and the names of every input, are checked
+  before the first value is converted, so an error in any of them leaves the standard output empty. After that the first
+  error in a value, such as a type error or `Some(None)`, ends the run with exit code 1, and the lines before it have
+  been written.
+- **No values at all give no output**, and the exit code is 0, including where the inputs are only types files.
+- **`--compact` makes no difference**, and is accepted. **`--to-array` is a usage error**, exit code 2, for the reason
+  that it is for `jsonl-exact`.
+
 ## The option `--to`
 
-`--to` is required, and its value is matched exactly. `json-exact`, `jsonl-exact` and `json-typed` are the only ones
-that exist. Any other value is a usage error, exit code 2. A bare `json` is not a format, so that nobody takes the exact
-form for the natural one by default. The message starts `ERROR: json is not a format; choose json-exact (every kind
-kept, no types)` and goes on to name `jsonl-exact` and `json-typed` (natural, needs types). Any other name, `jsonl`
-among them, gives `ERROR: NAME is not a format; choose json-exact, jsonl-exact or json-typed`. See [decision
+`--to` is required, and its value is matched exactly. `json-exact`, `jsonl-exact`, `json-typed` and `jsonl-typed` are
+the only ones that exist. Any other value is a usage error, exit code 2. A bare `json` is not a format, so that nobody
+takes the exact form for the natural one by default. The message starts `ERROR: json is not a format; choose json-exact
+(every kind kept, no types)` and goes on to name the others. Any other name, `jsonl` among them, gives `ERROR: NAME is
+not a format; choose json-exact, jsonl-exact, json-typed or jsonl-typed`. See [decision
 36](../decisions/0036-two-kinds-of-json.md).
 
 ## Settings
 
 `--to-array` and `--compact` are choices for a run and are not settings. The configuration file has no table for the
-command. It reads `[global]` and `[experimental]`, and for `json-typed` also the keys of `[check]` that are listed
+command. It reads `[global]` and `[experimental]`, and for the typed formats also the keys of `[check]` that are listed
 above, as [the configuration file](config-file.md) says. The global options `--config` and `--cache` are accepted. The
 file that `--config` names is read and has to be valid, and `--cache` has to be a folder that is not empty. The cache is
-used by `json-typed` for a project from a repository, and otherwise neither is used.
+used by the typed formats for a project from a repository, and otherwise neither is used.
 
 ## Exit codes
 
 | Code | When                                                                                          |
 |------|-----------------------------------------------------------------------------------------------|
 | 0    | The values were converted, with or without a warning.                                         |
-| 1    | An input has a syntax error, there is no value to convert, or a name is given twice. For      |
-|      | `json-exact` an input that is a types file. For `json-typed` an error in the types, a type    |
-|      | error, `Some(None)`, or a project that does not match its lock.                               |
+| 1    | An input has a syntax error, a name is given twice, or for a document format there is no      |
+|      | value to convert. For the exact formats an input that is a types file. For the typed formats  |
+|      | an error in the types, a type error, `Some(None)`, or a project that does not match its lock. |
 | 2    | An option is not understood, `--to` is missing or is not a format, `--to-array` is given with |
 |      | a lines format, an option for types is given with a format that needs none, there are no      |
 |      | inputs, one cannot be read, the project or the settings file is bad, or the output cannot be  |
@@ -288,5 +306,5 @@ used by `json-typed` for a project from a repository, and otherwise neither is u
   apart.
 - [The exit codes](exit-codes.md) and [the configuration file](config-file.md).
 - [Validity checks](validity-checks.md), [type checking](type-checking.md) and
-  [resolving identifiers](resolving-identifiers.md), for the checks that `json-typed` makes before it converts.
+  [resolving identifiers](resolving-identifiers.md), for the checks that the typed formats make before they convert.
 - Decisions 18, 35, 36 and 37, in `docs/decisions/`.
