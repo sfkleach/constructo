@@ -173,6 +173,13 @@ Following the style in https://keepachangelog.com/en/1.0.0/
   inputs, options and settings of `json-typed`. Every value is converted and so type-checked, the lines before an error
   in a value are written, an error in the types or the syntax is found before any line, `--to-array` is refused, and no
   values give no output.
+- `constructo convert --from=json-exact` and `--from=jsonl-exact` read back what `--to` writes, and write the values as
+  text. Exactly one of `--to` and `--from` is given. The reading is strict, with positions: an object is a value, an
+  array in a `json-exact` document is a list of values, a line of `jsonl-exact` is an object, and a number is a string
+  whose text is a literal of its kind. The values are written as the run goes, in the 80-character layout, or one to a
+  line with `--compact`, and the run stops at the first problem. A file of `json-typed` gets a note saying what it may
+  be. See `docs/specs/convert-command.md` and decision 38. The library has the `json`, `exact` and `values_text`
+  modules and `convert_from_source`.
 - The output of `convert` that cannot be written, such as to a pipe whose reader has gone, ends the run with exit code
   2, quietly for a reader that has gone, and not with a panic.
 - The pretty output of `convert` puts a container on one line if it is at most 80 characters wide, not counting the

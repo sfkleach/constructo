@@ -73,8 +73,8 @@ are found.
 setup. For the typed formats (`json-typed` and `jsonl-typed`) it judges the types and the values as `check` does, and
 the same errors have the same codes.
 
-- **Exit code 0:** the values were converted. The warning that more values follow, and `--help`, are 0. A lines format
-  with no values to convert is 0 as well, and writes nothing.
+- **Exit code 0:** the values were converted, or with `--from` read back. The warning that more values follow, and
+  `--help`, are 0. A lines format with no values to convert is 0 as well, and writes nothing.
 - **Exit code 1:** a syntax error in an input, no value to convert for a format that writes one document (without
   `--to-array`), and a name that is given twice in a record or in the named arguments of a tuple. For the exact formats,
   an input that is a types file. For the typed formats, the errors of `check` in the types and in the values that are
@@ -83,8 +83,12 @@ the same errors have the same codes.
   error in a value. A format that writes one document writes nothing to the standard output when there is an error. A
   lines format writes the lines before an error in a value, and nothing if the error is found before the first value is
   converted, as an error in the types or in the syntax is.
-- **Exit code 2:** an option or an argument that is not understood, which includes no `--to`, a `--to` that is not a
-  format, `--to-array` with a lines format, an option for types (`--project`, `--no-prelude` and the others) with a
+- **With `--from`, exit code 1** is JSON that is not valid, or is valid and is not `json-exact`, including an empty
+  document, and a number or a name that is not what its key says. The values before the problem have been written, as
+  for a lines format, except that a JSON document is read whole first, so an error in its syntax writes nothing.
+- **Exit code 2:** an option or an argument that is not understood, which includes neither `--to` nor `--from` or both
+  of them, a `--to` or `--from` that is not a format, `--to-array` with a lines format or with `--from`, `-x` with
+  `--from`, an option for types (`--project`, `--no-prelude` and the others) with a
   format that needs no types, and no inputs at all; `--config` given more than once or one that cannot be read, a
   `--cache` that is empty, an input that cannot be read, including the standard input, and an output that cannot be
   written, such as a pipe whose reader has gone. For the typed formats, the problems with a project-file or with how

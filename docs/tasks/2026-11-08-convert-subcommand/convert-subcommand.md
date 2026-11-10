@@ -377,11 +377,11 @@ comments, no trailing commas, a leading `+` or zeros not allowed.
 
 ### Tasks
 
-- [ ] A JSON parser with positions, and a writer of data-values with the layout above.
-- [ ] The reader of `json-exact`, with unit tests for every kind of value and for
+- [x] A JSON parser with positions, and a writer of data-values with the layout above.
+- [x] The reader of `json-exact`, with unit tests for every kind of value and for
       every error, and a round trip over `kinds.values`.
-- [ ] `--from` in the command, with `--to` exclusive of it and the refusals above.
-- [ ] Functional tests, the spec section, and the exit codes and CHANGELOG.
+- [x] `--from` in the command, with `--to` exclusive of it and the refusals above.
+- [x] Functional tests, the spec section, and the exit codes and CHANGELOG.
 
 ## Step 6: Convert from JSONL (exact)
 
@@ -411,9 +411,9 @@ are those of Step 5. What differs is the framing:
 
 ### Tasks
 
-- [ ] The reader of `jsonl-exact`, sharing the reading of a value with Step 5, with
+- [x] The reader of `jsonl-exact`, sharing the reading of a value with Step 5, with
       unit tests for the lines, the blank lines, the line endings and the errors.
-- [ ] Functional tests with the files that `--to=jsonl-exact` writes, including a
+- [x] Functional tests with the files that `--to=jsonl-exact` writes, including a
       round trip, the spec section, and the CHANGELOG.
 
 ## Step 7: Convert from JSON (typed)

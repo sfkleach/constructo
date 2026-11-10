@@ -4,13 +4,17 @@
 writes, what it prints when something is wrong, and what its exit code means. Four formats exist so far: `json-exact`,
 which writes every kind of value in an explicit form and needs no types, `jsonl-exact`, which writes the same encoding
 on a line for each value, `json-typed`, which writes natural JSON in the shapes that serde uses, and needs the types,
-and `jsonl-typed`, which writes the same encoding on a line for each value. The formats that follow are the conversions
-back, and each will be added here.
+and `jsonl-typed`, which writes the same encoding on a line for each value. With `--from` the exact formats are read
+back and the values are written as text. The conversions back from the typed formats will be added here.
 
 ```text
 constructo convert --to=json-exact|jsonl-exact [--to-array] [--compact] [-x] [--stdin] [FILES]...
 constructo convert --to=json-typed|jsonl-typed [--to-array] [--compact] [--project=FOLDER] [OPTIONS] [FILES]...
+constructo convert --from=json-exact|jsonl-exact [--compact] [--stdin] [FILES]...
 ```
+
+Exactly one of `--to` and `--from` is given. `--to` writes JSON, and is what most of this document is about. `--from`
+is the other direction, and has [its own section](#reading-back-with---from).
 
 ## Inputs
 
@@ -273,9 +277,54 @@ with the inputs, the options, the settings and the checking of `json-typed`:
 - **`--compact` makes no difference**, and is accepted. **`--to-array` is a usage error**, exit code 2, for the reason
   that it is for `jsonl-exact`.
 
-## The option `--to`
+## Reading back with `--from`
 
-`--to` is required, and its value is matched exactly. `json-exact`, `jsonl-exact`, `json-typed` and `jsonl-typed` are
+`--from` reads the JSON that `--to=json-exact` or `--to=jsonl-exact` writes, and writes the values as text, in the
+syntax of data-values, to the standard output. `--to` and `--from` say which way the conversion goes and not which is
+the input: in both cases the files are the inputs and the standard output is the output. The inputs are `FILES` and
+then `--stdin`, as for `--to`. There is no option to name an output file, since the standard output can be redirected.
+
+- **`--from=json-exact`** reads a JSON document in each input. An object is one value. An array is a list of values,
+  which is what `--to-array` writes, and each element is read as a value. Anything else is an error. An array may be
+  empty, and gives no values. A file with no JSON in it, empty or only white space, is an error: `Expected a JSON
+  value`. That is unlike a file of data-values, which may be empty, because an empty file is not a JSON document.
+- **`--from=jsonl-exact`** reads a value from each line, as `--to=jsonl-exact` writes them. A line that is empty or
+  has only white space is skipped, and a line may end `\r\n`. Each other line is a JSON object. An array on a line is an
+  error, since a line is one value. A file with no lines gives no values and is not an error. The positions in an error
+  are those of the file, so a problem on line 5 says line 5.
+- **The reading is strict.** An object has exactly the keys that `--to` writes and no others, in any order. A key that
+  is repeated, missing or unknown is an error at that key, and so is a body that is not one of `record`, `tuple` and
+  `array`, and `named` without a `tuple`. The members of a `record` and of `named` are kept in the order written. A
+  number is a JSON string, and its text must read back as a literal of the kind that its key names, so `"+5"` is an
+  `int` and is not a `nat`. A JSON number in its place is an error that says to write it as a string. A name has to be
+  one that data-values can have, a const for `const` and a constructor for `constructor`, and a field name for the
+  members. The lexer and parser of data-values decide all of this, and the reader holds no second grammar.
+- **A file of `json-typed` is not read.** Its objects, such as `{"Circle": {"r": 1.5}}`, have no key that names a kind,
+  so the error is `Unknown key "Circle"` with a note that the file may have been written with `--to=json-typed`.
+  `json-typed` and `jsonl-typed` as values of `--from` say that they cannot be read back yet.
+- **The values are written as they are read.** Each value ends with `;` and a new line. It is on one line if that is at
+  most 80 characters wide, not counting the indentation, the name of a member or the `;`. Otherwise it is spread, with
+  one member, element or argument to a line, indented by four spaces, and each of those follows the same rule. A name
+  or a number is never broken. `--compact` puts every value on one line. A string is written with the escapes of JSON,
+  and with `\u00XX` for any other control character, which data-values cannot hold written raw.
+- **The values are written as the run goes, and it stops at the first problem.** The values before it have been
+  written, and the exit code is 1. A JSON document is read whole before any value of it is written, so a syntax error
+  in it writes nothing, but a bad element in an array comes after the elements before it. The lines of `jsonl-exact` are
+  read one at a time, so the lines before a bad one are written. The inputs are read one at a time as well: a syntax
+  error in an input stops the run there, and an input that cannot be read, which is exit code 2, is found after the
+  values of the inputs before it.
+- **The options.** `--compact`, `--stdin`, `--config` and `--cache` are accepted. `--to-array`, `-x`,
+  `--no-experimental` and the options for types are usage errors, exit code 2, since they would have no effect.
+
+What comes back is the values and the text of their numbers. It is not the text of the file that was converted:
+comments, layout, the spelling of the escapes in a string and the order of the values in a lines file that was
+rearranged are not kept. See [decision 38](../decisions/0038-reading-json-exact-back-is-strict.md).
+
+## The options `--to` and `--from`
+
+Exactly one of them is required, and giving both or neither is a usage error, exit code 2. The value of each is matched
+exactly. `--from` takes `json-exact` and `jsonl-exact`, and a bare `json` or another name is `ERROR: NAME is not a
+format; choose json-exact or jsonl-exact`. For `--to`, `json-exact`, `jsonl-exact`, `json-typed` and `jsonl-typed` are
 the only ones that exist. Any other value is a usage error, exit code 2. A bare `json` is not a format, so that nobody
 takes the exact form for the natural one by default. The message starts `ERROR: json is not a format; choose json-exact
 (every kind kept, no types)` and goes on to name the others. Any other name, `jsonl` among them, gives `ERROR: NAME is
@@ -285,7 +334,8 @@ not a format; choose json-exact, jsonl-exact, json-typed or jsonl-typed`. See [d
 ## Settings
 
 `--to-array` and `--compact` are choices for a run and are not settings. The configuration file has no table for the
-command. It reads `[global]` and `[experimental]`, and for the typed formats also the keys of `[check]` that are listed
+command. With `--from` no setting is used, but the file is read and has to be valid. Otherwise it reads `[global]` and
+`[experimental]`, and for the typed formats also the keys of `[check]` that are listed
 above, as [the configuration file](config-file.md) says. The global options `--config` and `--cache` are accepted. The
 file that `--config` names is read and has to be valid, and `--cache` has to be a folder that is not empty. The cache is
 used by the typed formats for a project from a repository, and otherwise neither is used.
@@ -296,12 +346,13 @@ used by the typed formats for a project from a repository, and otherwise neither
 |------|-----------------------------------------------------------------------------------------------|
 | 0    | The values were converted, with or without a warning.                                         |
 | 1    | An input has a syntax error, a name is given twice, or for a document format there is no      |
-|      | value to convert. For the exact formats an input that is a types file. For the typed formats  |
-|      | an error in the types, a type error, `Some(None)`, or a project that does not match its lock. |
-| 2    | An option is not understood, `--to` is missing or is not a format, `--to-array` is given with |
-|      | a lines format, an option for types is given with a format that needs none, there are no      |
-|      | inputs, one cannot be read, the project or the settings file is bad, or the output cannot be  |
-|      | written.                                                                                      |
+|      | value to convert. With `--from`, JSON that is not valid or is not `json-exact`. For the exact |
+|      | formats an input that is a types file. For the typed formats an error in the types, a type    |
+|      | error, `Some(None)`, or a project that does not match its lock.                               |
+| 2    | An option is not understood, `--to` and `--from` are both given or neither, the format is not |
+|      | one, `--to-array` is given with a lines format or with `--from`, an option for types is given |
+|      | with a format that needs none, there are no inputs, one cannot be read, the project or the    |
+|      | settings file is bad, or the output cannot be written.                                        |
 
 ## Related
 
@@ -310,4 +361,4 @@ used by the typed formats for a project from a repository, and otherwise neither
 - [The exit codes](exit-codes.md) and [the configuration file](config-file.md).
 - [Validity checks](validity-checks.md), [type checking](type-checking.md) and
   [resolving identifiers](resolving-identifiers.md), for the checks that the typed formats make before they convert.
-- Decisions 18, 35, 36 and 37, in `docs/decisions/`.
+- Decisions 18, 35, 36, 37 and 38, in `docs/decisions/`.
