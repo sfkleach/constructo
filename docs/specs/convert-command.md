@@ -3,8 +3,8 @@
 `constructo convert` reads data-values and writes them in another notation. This document says what it reads, what it
 writes, what it prints when something is wrong, and what its exit code means. Four formats exist so far: `json-exact`,
 which writes every kind of value in an explicit form and needs no types, `jsonl-exact`, which writes the same encoding
-on a line for each value, `json-typed`, which writes natural JSON in the shapes that serde uses, and needs the types, and
-`jsonl-typed`, which writes the same encoding on a line for each value. The formats that follow are the conversions
+on a line for each value, `json-typed`, which writes natural JSON in the shapes that serde uses, and needs the types,
+and `jsonl-typed`, which writes the same encoding on a line for each value. The formats that follow are the conversions
 back, and each will be added here.
 
 ```text
