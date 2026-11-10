@@ -70,23 +70,26 @@ are found.
 ## `constructo convert`
 
 [The convert command](convert-command.md) judges the inputs, so what gives 1 is the inputs, and 2 is the command and the
-setup. For `--to=json-typed` it judges the types and the values as `check` does, and the same errors have the same
-codes.
+setup. For the typed formats (`json-typed` and `jsonl-typed`) it judges the types and the values as `check` does, and
+the same errors have the same codes.
 
-- **Exit code 0:** the values were converted. The warning that more values follow, and `--help`, are 0.
-- **Exit code 1:** a syntax error in an input, no value to convert (without `--to-array`), and a name that is given
-  twice in a record or in the named arguments of a tuple. For `json-exact` and `jsonl-exact`, an input that is a types
-  file. For `json-typed`, the errors of `check` in the types and in the value that is converted (the type errors, the
-  validity errors, names that cannot be resolved, a project that does not match its lock), and a value that cannot be
-  written as JSON: `Some(None)`, or one nested too deeply. The run stops at the first, for a value, and nothing is
-  written to the standard output.
+- **Exit code 0:** the values were converted. The warning that more values follow, and `--help`, are 0. A lines format
+  with no values to convert is 0 as well, and writes nothing.
+- **Exit code 1:** a syntax error in an input, no value to convert for a format that writes one document (without
+  `--to-array`), and a name that is given twice in a record or in the named arguments of a tuple. For the exact formats,
+  an input that is a types file. For the typed formats, the errors of `check` in the types and in the values that are
+  converted (the type errors, the validity errors, names that cannot be resolved, a project that does not match its
+  lock), and a value that cannot be written as JSON: `Some(None)`, or one nested too deeply. The run stops at the first
+  error in a value. A format that writes one document writes nothing to the standard output when there is an error. A
+  lines format writes the lines before an error in a value, and nothing if the error is found before the first value is
+  converted, as an error in the types or in the syntax is.
 - **Exit code 2:** an option or an argument that is not understood, which includes no `--to`, a `--to` that is not a
   format, `--to-array` with a lines format, an option for types (`--project`, `--no-prelude` and the others) with a
   format that needs no types, and no inputs at all; `--config` given more than once or one that cannot be read, a
   `--cache` that is empty, an input that cannot be read, including the standard input, and an output that cannot be
-  written, such as a pipe whose reader has gone. For `json-typed`, the
-  problems with a project-file or with how projects are found, as for `check`. As for `check`, an unreadable input ends
-  the run at once, and a syntax error in an input that comes before it is found first.
+  written, such as a pipe whose reader has gone. For the typed formats, the problems with a project-file or with how
+  projects are found, as for `check`. As for `check`, an unreadable input ends the run at once, and a syntax error in an
+  input that comes before it is found first.
 
 ## `constructo project`
 

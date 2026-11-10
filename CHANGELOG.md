@@ -169,6 +169,10 @@ Following the style in https://keepachangelog.com/en/1.0.0/
   that are converted. `Bool` and `Option` of the prelude are `true`, `false`, `null` and the value, a bare constructor
   is a string, a number in a `Float` slot has a point, an omitted argument is written as its default, and a const is
   replaced by its value. `Some(None)` is refused. See `docs/specs/convert-command.md` and decision 37.
+- `constructo convert --to=jsonl-typed` writes each value as a line of `json-typed`, as it is converted, with the
+  inputs, options and settings of `json-typed`. Every value is converted and so type-checked, the lines before an error
+  in a value are written, an error in the types or the syntax is found before any line, `--to-array` is refused, and no
+  values give no output.
 - The output of `convert` that cannot be written, such as to a pipe whose reader has gone, ends the run with exit code
   2, quietly for a reader that has gone, and not with a panic.
 - The pretty output of `convert` puts a container on one line if it is at most 80 characters wide, not counting the

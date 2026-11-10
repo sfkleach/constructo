@@ -6,8 +6,8 @@ use constructo::lock::Lock;
 use constructo::project::{init_project, Init, ProjectError, Remotes, PROJECT_FILE};
 use constructo::verify::{read_lock, update_lock_with, verify_lock_with};
 use constructo::{
-    check_in_projects, convert_typed, source_kind, syntax_error, CheckOptions, Config, Experimental, ImportInfo,
-    InputFile, Layout, Outcome, Project, ProjectInfo, ProjectSet, Source, SourceKind,
+    check_in_projects, convert_typed, convert_typed_lines, source_kind, syntax_error, CheckOptions, Config,
+    Experimental, ImportInfo, InputFile, Layout, Outcome, Project, ProjectInfo, ProjectSet, Source, SourceKind,
 };
 use std::collections::{HashSet, VecDeque};
 use std::ffi::OsString;
@@ -523,7 +523,7 @@ fn main() -> ExitCode {
                 Ok(set) => set,
                 Err(code) => return code,
             };
-            convert_typed_files(stdin, to_array, compact, &options, &set, &files)
+            convert_typed_files(stdin, to_array, compact, format.is_lines(), &options, &set, &files)
         }
         Command::Check {
             stdin,
@@ -735,7 +735,7 @@ fn convert_files(stdin: bool, options: &ConvertOptions, files: &[PathBuf]) -> Ex
         });
     }
     if options.format.is_lines() {
-        return stream_lines(&sources, options);
+        return stream_lines(|out| convert_lines(&sources, options, out));
     }
     match convert(&sources, options) {
         Ok(done) => {
@@ -754,20 +754,23 @@ fn convert_files(stdin: bool, options: &ConvertOptions, files: &[PathBuf]) -> Ex
     }
 }
 
-/// Writes the lines of a lines format to the standard output as they are converted. The lines before an error are
-/// written, and are flushed before the error is reported, so that they come first.
-fn stream_lines(sources: &[Source], options: &ConvertOptions) -> ExitCode {
+/// Writes the lines of a lines format to the standard output as they are converted, by the conversion that is given the
+/// writer. The lines before an error are written, and are flushed before the errors are reported, so that they come
+/// first.
+fn stream_lines(convert: impl FnOnce(&mut dyn Write) -> Result<(), LinesError>) -> ExitCode {
     let mut out = std::io::BufWriter::new(std::io::stdout().lock());
-    let result = convert_lines(sources, options, &mut out);
+    let result = convert(&mut out);
     match result {
         Ok(()) => match out.flush() {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => write_failure(&e),
         },
-        Err(LinesError::Invalid(diagnostic)) => {
-            // The error is about the inputs, so a failure to write what came before it is not reported over it.
+        Err(LinesError::Invalid(diagnostics)) => {
+            // The errors are about the inputs, so a failure to write what came before them is not reported over them.
             let _ = out.flush();
-            eprintln!("{}", diagnostic);
+            for diagnostic in &diagnostics {
+                eprintln!("{}", diagnostic);
+            }
             ExitCode::from(EXIT_ERRORS)
         }
         Err(LinesError::Write(e)) => write_failure(&e),
@@ -857,6 +860,7 @@ fn convert_typed_files(
     stdin: bool,
     to_array: bool,
     compact: bool,
+    lines: bool,
     options: &CheckOptions,
     set: &ProjectSet,
     files: &[PathBuf],
@@ -865,6 +869,10 @@ fn convert_typed_files(
         Ok(sources) => sources,
         Err(code) => return code,
     };
+    if lines {
+        let layout = layout(set, sources.len());
+        return stream_lines(|out| convert_typed_lines(&sources, &layout, options, out));
+    }
     match convert_typed(&sources, &layout(set, sources.len()), options, to_array, compact) {
         Ok(done) => {
             for warning in &done.warnings {

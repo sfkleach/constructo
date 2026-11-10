@@ -1,0 +1,26 @@
+5
+5
+-5
+1.50
+"text \" with \n escapes"
+[1.0,2.5]
+{"b":1,"a":"x"}
+true
+false
+null
+1
+2
+"Fast"
+{"Circle":{"r":1.0}}
+"Dot"
+{"Pair":[1,2]}
+{"Wrapper":5}
+{"Ping":[]}
+{"Items":[1,2]}
+{"Items":[]}
+{"Tagged":["t",2.0]}
+{"Config":{"name":"n","on":false,"speed":"Slow","tags":["x"],"size":{"w":2.0,"h":1.0}}}
+{"Config":{"name":null,"on":true,"speed":"Fast","tags":[],"size":{"w":0.5,"h":1.5}}}
+{"Defaults":[0,0.0,"",[],null,false,"Fast",{"Pair2":[0,0]}]}
+5
+["a","b"]

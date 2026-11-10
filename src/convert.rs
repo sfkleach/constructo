@@ -22,6 +22,8 @@ pub enum Format {
     /// Natural JSON, in the shapes that serde writes. The types decide what is written, so the values are checked
     /// against them first.
     JsonTyped,
+    /// The same as `JsonTyped`, with each value on a line of its own.
+    JsonlTyped,
 }
 
 impl Format {
@@ -33,9 +35,10 @@ impl Format {
             "json-exact" => Ok(Format::JsonExact),
             "jsonl-exact" => Ok(Format::JsonlExact),
             "json-typed" => Ok(Format::JsonTyped),
+            "jsonl-typed" => Ok(Format::JsonlTyped),
             "json" => Err(
-                "json is not a format; choose json-exact (every kind kept, no types), jsonl-exact (the same, a value \
-                 to a line) or json-typed (natural, needs types)"
+                "json is not a format; choose json-exact (every kind kept, no types), json-typed (natural, needs \
+                 types), or jsonl-exact or jsonl-typed (the same, a value to a line)"
                     .to_string(),
             ),
             _ => Err(format!(
@@ -47,12 +50,12 @@ impl Format {
 
     /// Whether the values are checked against types, which are then among the inputs, before they are converted.
     pub fn needs_types(self) -> bool {
-        matches!(self, Format::JsonTyped)
+        matches!(self, Format::JsonTyped | Format::JsonlTyped)
     }
 
     /// Whether the format is one value to a line, in which case there is no array and no layout to choose.
     pub fn is_lines(self) -> bool {
-        matches!(self, Format::JsonlExact)
+        matches!(self, Format::JsonlExact | Format::JsonlTyped)
     }
 }
 
@@ -106,7 +109,7 @@ fn all_values(sources: &[Source], experimental: Experimental) -> Result<Vec<(&st
 #[derive(Debug)]
 pub enum LinesError {
     /// The inputs have an error. Lines that were converted before it have been written.
-    Invalid(Diagnostic),
+    Invalid(Vec<Diagnostic>),
     /// The output could not be written, such as when the reader of a pipe has gone.
     Write(std::io::Error),
 }
@@ -116,9 +119,11 @@ pub enum LinesError {
 /// found before anything is written. After that the first error in a value ends the run, and the lines before it have
 /// been written. A line that is written is complete. No values give no output.
 pub fn convert_lines(sources: &[Source], options: &ConvertOptions, out: &mut dyn Write) -> Result<(), LinesError> {
-    let values = all_values(sources, options.experimental).map_err(LinesError::Invalid)?;
+    let values = all_values(sources, options.experimental).map_err(|d| LinesError::Invalid(vec![d]))?;
     for (name, value) in &values {
-        let line = encode_exact(name, value).map_err(LinesError::Invalid)?.write(true);
+        let line = encode_exact(name, value)
+            .map_err(|d| LinesError::Invalid(vec![d]))?
+            .write(true);
         out.write_all(line.as_bytes()).map_err(LinesError::Write)?;
     }
     Ok(())
@@ -131,7 +136,7 @@ pub fn convert_lines(sources: &[Source], options: &ConvertOptions, out: &mut dyn
 pub fn convert(sources: &[Source], options: &ConvertOptions) -> Result<Converted, Diagnostic> {
     if options.format.needs_types() {
         // The conversion that needs the types is `convert_typed`, which is given the layout of the projects as well.
-        let message = "json-typed needs the types, so it is converted with convert_typed";
+        let message = "a typed format needs the types, so it is converted with convert_typed or convert_typed_lines";
         return Err(Diagnostic::new("", Pos { line: 1, col: 1 }, message));
     }
     if options.format.is_lines() {
@@ -141,7 +146,7 @@ pub fn convert(sources: &[Source], options: &ConvertOptions) -> Result<Converted
                 output: String::from_utf8(output).expect("JSON is UTF-8"),
                 warnings: Vec::new(),
             }),
-            Err(LinesError::Invalid(diagnostic)) => Err(diagnostic),
+            Err(LinesError::Invalid(mut diagnostics)) => Err(diagnostics.remove(0)),
             // Writing to a vector cannot fail, and this is only a defensive check.
             Err(LinesError::Write(e)) => Err(Diagnostic::new("", Pos { line: 1, col: 1 }, e.to_string())),
         };
@@ -998,10 +1003,10 @@ mod tests {
     fn the_lines_before_an_error_in_a_value_have_been_written() {
         let mut sink = Sink::default();
         let result = stream(&[source("a.values", "1; { a: 1, a: 2 }; 3")], &mut sink);
-        let Err(LinesError::Invalid(diagnostic)) = result else {
+        let Err(LinesError::Invalid(diagnostics)) = result else {
             panic!("an error in a value was expected");
         };
-        assert!(diagnostic.to_string().contains("Duplicate field a"));
+        assert!(diagnostics[0].to_string().contains("Duplicate field a"));
         assert_eq!(sink.chunks, ["{\"nat\":\"1\"}\n"]);
     }
 

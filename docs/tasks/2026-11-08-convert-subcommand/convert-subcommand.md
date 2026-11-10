@@ -263,12 +263,12 @@ is changed to stream as well, so that the two lines formats behave alike.
 
 ### Tasks
 
-- [ ] Add the format, sharing the typed encoder, with unit tests.
-- [ ] Stream the lines of both lines formats, so that the library writes to a sink
+- [x] Add the format, sharing the typed encoder, with unit tests.
+- [x] Stream the lines of both lines formats, so that the library writes to a sink
       and not to a string, and change `jsonl-exact` and its spec text and functest
       to match.
-- [ ] Functional tests with the examples of Step 3, and the spec section.
-- [ ] Update `docs/specs/convert-command.md`, `exit-codes.md` and the CHANGELOG.
+- [x] Functional tests with the examples of Step 3, and the spec section.
+- [x] Update `docs/specs/convert-command.md`, `exit-codes.md` and the CHANGELOG.
 
 
 ## Step 5: Convert from JSON (exact)

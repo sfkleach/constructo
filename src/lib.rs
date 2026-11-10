@@ -215,6 +215,8 @@ pub fn convert_typed(
         to_array,
         converted: Vec::new(),
         left_out: None,
+        sink: None,
+        failure: None,
     };
     let report = check_with_layout(
         sources,
@@ -257,6 +259,44 @@ pub fn convert_typed(
     })
 }
 
+/// Converts every value of the values files among the sources to a line of natural JSON, with no white space, and
+/// writes each to `out` as soon as it is converted, as `convert::convert_lines` does for the exact form. The sources are
+/// checked as for `convert_typed`, and every value is converted and so every value is type-checked. An error in the
+/// types, or in the syntax or the names of any source, is found before anything is written, and the first error in a
+/// value ends the run with the lines before it written. No values give no output.
+pub fn convert_typed_lines(
+    sources: &[Source],
+    layout: &Layout,
+    options: &CheckOptions,
+    out: &mut dyn std::io::Write,
+) -> Result<(), convert::LinesError> {
+    let options = CheckOptions {
+        type_check: true,
+        continue_after_error: false,
+        ..*options
+    };
+    let mut conversion = Conversion {
+        to_array: true,
+        converted: Vec::new(),
+        left_out: None,
+        sink: Some(out),
+        failure: None,
+    };
+    let report = check_with_layout(
+        sources,
+        Some(layout),
+        &options,
+        &mut ValueMode::Convert(&mut conversion),
+    );
+    if let Some(e) = conversion.failure {
+        return Err(convert::LinesError::Write(e));
+    }
+    if !report.diagnostics.is_empty() {
+        return Err(convert::LinesError::Invalid(report.diagnostics));
+    }
+    Ok(())
+}
+
 /// The layout of sources that were given without a project: they make one project that has no name, which imports the
 /// prelude into `local` if the prelude is among the sources. The prelude is known by its name.
 pub(crate) fn plain_layout(sources: &[Source]) -> Layout {
@@ -292,21 +332,25 @@ pub(crate) fn plain_layout(sources: &[Source]) -> Layout {
 }
 
 /// What a run does with the values once the types have been checked.
-enum ValueMode<'m> {
+enum ValueMode<'m, 'w> {
     /// Check every value.
     Check,
     /// Check only the values that are converted, and write them as JSON.
-    Convert(&'m mut Conversion),
+    Convert(&'m mut Conversion<'w>),
 }
 
 /// The state of a conversion to typed JSON, as the values are met.
-struct Conversion {
+struct Conversion<'w> {
     /// Convert every value, and not only the first.
     to_array: bool,
-    /// The JSON of each value that has been converted, in order.
+    /// The JSON of each value that has been converted, in order, if they are being kept.
     converted: Vec<Json>,
     /// The first value that was not converted, with the index of its source, which is where the warning is.
     left_out: Option<(usize, Pos)>,
+    /// Where each value is written, as a line, as soon as it is converted, instead of being kept in `converted`.
+    sink: Option<&'w mut dyn std::io::Write>,
+    /// The failure to write to the sink, which ends the run.
+    failure: Option<std::io::Error>,
 }
 
 fn check_with_layout(
@@ -526,13 +570,27 @@ fn type_check_values(
                                 .and_then(|typed| encode_typed(&typed, options.widening, options.infer_limit, value));
                             match json {
                                 Ok(json) => {
-                                    conversion.converted.push(json);
+                                    match conversion.sink.as_mut() {
+                                        // The value is written as a line now, and not kept.
+                                        Some(sink) => {
+                                            if let Err(e) = sink.write_all(json.write(true).as_bytes()) {
+                                                conversion.failure = Some(e);
+                                            }
+                                        }
+                                        None => conversion.converted.push(json),
+                                    }
                                     None
                                 }
                                 Err(e) => Some(Diagnostic::new(&sources[index].name, e.pos, e.message)),
                             }
                         }
                     };
+                    // A failure to write is not an error in the inputs, so there is nothing to report here, and the
+                    // run is over.
+                    if matches!(mode, ValueMode::Convert(conversion) if conversion.failure.is_some()) {
+                        stopped = true;
+                        break;
+                    }
                     if let Some(diagnostic) = failure {
                         diagnostics.push((index, diagnostic));
                         outcomes[index] = Outcome::Failed;
@@ -1301,5 +1359,104 @@ mod tests {
             report.outcomes,
             vec![Outcome::Failed, Outcome::Ok, Outcome::Failed, Outcome::Ok]
         );
+    }
+
+    /// A writer that keeps what it is given in the chunks that it was given, and can be made to fail.
+    #[derive(Default)]
+    struct Sink {
+        chunks: Vec<String>,
+        fail_after: Option<usize>,
+    }
+
+    impl std::io::Write for Sink {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if self.fail_after == Some(self.chunks.len()) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "the reader has gone",
+                ));
+            }
+            self.chunks.push(String::from_utf8(bytes.to_vec()).unwrap());
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// Converts the values to typed lines, with the prelude, giving what was written and the result.
+    fn typed_lines(
+        types: &str,
+        values: &str,
+        fail_after: Option<usize>,
+    ) -> (Vec<String>, Result<(), convert::LinesError>) {
+        let sources = vec![
+            prelude_source(),
+            Source {
+                name: "types".to_string(),
+                text: types.to_string(),
+            },
+            Source {
+                name: "values".to_string(),
+                text: values.to_string(),
+            },
+        ];
+        let mut sink = Sink {
+            fail_after,
+            ..Sink::default()
+        };
+        let layout = plain_layout(&sources);
+        let result = convert_typed_lines(&sources, &layout, &CheckOptions::default(), &mut sink);
+        (sink.chunks, result)
+    }
+
+    const LINE_SHAPES: &str = "enum Shape = Circle { r: Float }, Dot;";
+
+    #[test]
+    fn typed_lines_are_written_one_at_a_time_in_the_form_of_json_typed() {
+        let (chunks, result) = typed_lines(LINE_SHAPES, "Circle { r: 1 }; Dot; [1, 2.5]; true", None);
+        assert!(result.is_ok());
+        assert_eq!(
+            chunks,
+            ["{\"Circle\":{\"r\":1.0}}\n", "\"Dot\"\n", "[1.0,2.5]\n", "true\n"]
+        );
+    }
+
+    #[test]
+    fn typed_lines_before_an_error_in_a_value_have_been_written() {
+        let (chunks, result) = typed_lines(LINE_SHAPES, "Dot; Circle { r: \"x\" }; Dot", None);
+        let Err(convert::LinesError::Invalid(diagnostics)) = result else {
+            panic!("a type error was expected");
+        };
+        assert_eq!(diagnostics.len(), 1);
+        assert!(diagnostics[0]
+            .to_string()
+            .starts_with("ERROR: Expected Float but found String"));
+        assert_eq!(chunks, ["\"Dot\"\n"]);
+    }
+
+    #[test]
+    fn an_error_in_the_types_is_found_before_anything_is_written() {
+        let (chunks, result) = typed_lines("enum Bad = Bad(Missing);", "5; 6", None);
+        assert!(matches!(result, Err(convert::LinesError::Invalid(_))));
+        assert!(chunks.is_empty());
+    }
+
+    #[test]
+    fn typed_lines_with_no_values_are_no_output() {
+        let (chunks, result) = typed_lines(LINE_SHAPES, "", None);
+        assert!(result.is_ok());
+        assert!(chunks.is_empty());
+    }
+
+    #[test]
+    fn a_failure_to_write_a_typed_line_ends_the_run_and_is_reported_as_one() {
+        let (chunks, result) = typed_lines(LINE_SHAPES, "Dot; Dot; Dot", Some(1));
+        let Err(convert::LinesError::Write(e)) = result else {
+            panic!("a failure to write was expected");
+        };
+        assert_eq!(e.kind(), std::io::ErrorKind::BrokenPipe);
+        assert_eq!(chunks.len(), 1);
     }
 }

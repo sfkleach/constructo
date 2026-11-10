@@ -1729,6 +1729,48 @@ fi
 expect_convert_error "json-typed: the same error is found with --to-array" 1 "ERROR: Expected Float but found String" \
     --to=json-typed --to-array "$TYPED/schema.types" "$TYPED/late-error.values"
 
+# `jsonl-typed` writes each value as a line of `json-typed`, as it is converted. Every value is converted, so every
+# value is type-checked.
+expect_json "jsonl-typed: every kind of value is a line" "$TYPED/kinds.jsonl" --to=jsonl-typed "$TYPED/schema.types" \
+    "$TYPED/kinds.values"
+expect_json "jsonl-typed: every value is converted, with no warning" "$TYPED/two.jsonl" --to=jsonl-typed \
+    "$TYPED/schema.types" "$TYPED/two.values"
+expect_json "jsonl-typed: --compact makes no difference" "$TYPED/two.jsonl" --to=jsonl-typed --compact \
+    "$TYPED/schema.types" "$TYPED/two.values"
+expect_json "jsonl-typed: no values is no output" /dev/null --to=jsonl-typed "$TYPED/schema.types"
+expect_json "jsonl-typed: a Nat is written for the Float that it fills" "$TYPED/widen.jsonl" --to=jsonl-typed \
+    --widening "$TYPED/schema.types" "$TYPED/widen.values"
+expect_convert_error "jsonl-typed: --no-widening needs the exact type" 1 "ERROR: Expected Float but found Nat" \
+    --to=jsonl-typed --no-widening "$TYPED/schema.types" "$TYPED/widen.values"
+actual=0
+"$CONSTRUCTO" convert --to=jsonl-typed "$TYPED/schema.types" "$TYPED/late-error.values" >"$conv_dir/out" \
+    2>"$conv_dir/err" || actual=$?
+first="$(head -n 1 "$conv_dir/err")"
+if [[ "$actual" -eq 1 && "$(cat "$conv_dir/out")" == '{"Circle":{"r":1.0}}' \
+    && "$first" == "ERROR: Expected Float but found String"* ]]; then
+    pass "jsonl-typed: the lines before a type error are written"
+else
+    fail "jsonl-typed: the lines before a type error (exit $actual, out '$(cat "$conv_dir/out")', err '$first')"
+fi
+expect_convert_error "jsonl-typed: an error in the types is found before anything is written" 1 \
+    "ERROR: Unknown type Missing" --to=jsonl-typed "$TYPED/bad-types.types" "$TYPED/two.values"
+expect_convert_error "jsonl-typed: an unknown constructor is an error" 1 "ERROR: Unknown constructor Nope" \
+    --to=jsonl-typed "$TYPED/schema.types" "$TYPED/unknown-constructor.values"
+expect_convert_error "jsonl-typed: Some(None) cannot be written" 1 "ERROR: Some(None) cannot be written as JSON" \
+    --to=jsonl-typed "$TYPED/schema.types" "$TYPED/some-none.values"
+expect_convert_error "jsonl-typed: --to-array does not apply" 2 "ERROR: --to-array does not apply to jsonl-typed" \
+    --to=jsonl-typed --to-array "$TYPED/schema.types" "$TYPED/two.values"
+code_file="$conv_dir/code"
+seq 1 20000 | sed 's/$/;/' >"$conv_dir/long.values"
+( "$CONSTRUCTO" convert --to=jsonl-typed "$conv_dir/long.values" 2>"$conv_dir/err"; echo $? >"$code_file" ) \
+    | head -n 1 >"$conv_dir/out" || true
+if [[ "$(cat "$code_file")" -eq 2 && "$(cat "$conv_dir/out")" == '1' && ! -s "$conv_dir/err" ]]; then
+    pass "jsonl-typed: a reader that has gone ends the run quietly with exit code 2"
+else
+    fail "jsonl-typed: a reader that has gone (exit $(cat "$code_file"), err '$(head -c 200 "$conv_dir/err")')"
+fi
+rm -f "$conv_dir/long.values" "$code_file"
+
 # The options for the types are for json-typed, and are refused for the formats that need no types.
 expect_convert_error "json-exact: --no-prelude does not apply" 2 "ERROR: --no-prelude does not apply to json-exact" \
     --to=json-exact --no-prelude "$CONVERT/leaf.values"
