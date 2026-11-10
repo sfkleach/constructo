@@ -1966,6 +1966,17 @@ expect_json "from jsonl-typed: blank lines are skipped and a line may end in CR 
     --from=jsonl-typed --type=Shape "$TS" "$TB/loose.jsonl"
 expect_json "from jsonl-typed: --compact is the same, a value to a line" "$TB/shapes.values" --from=jsonl-typed \
     --compact --type=Shape "$TS" "$TB/shapes.jsonl"
+# What `--to=jsonl-typed` and `--to=json-typed` write is read back to the same values.
+for pair in "shapes:Shape" "options:Option<Shape>"; do
+    values="${pair%%:*}"
+    "$CONSTRUCTO" convert --to=jsonl-typed "$TS" "$TB/$values.values" >"$conv_dir/round.jsonl" 2>/dev/null
+    expect_json "from jsonl-typed: $values.values, written by --to=jsonl-typed, is read back" "$TB/$values.values" \
+        --from=jsonl-typed --type="${pair#*:}" "$TS" "$conv_dir/round.jsonl"
+done
+"$CONSTRUCTO" convert --to=json-typed "$TS" "$TB/config.values" >"$conv_dir/round.json" 2>/dev/null
+expect_json "from json-typed: config.values, written by --to=json-typed, is read back" "$TB/config.values" \
+    --from=json-typed --type=Config "$TS" "$conv_dir/round.json"
+rm -f "$conv_dir/round.jsonl" "$conv_dir/round.json"
 for values in shapes config list options; do
     expect_exit "from typed: the values of $values.values are accepted by check" 0 check "$TS" "$TB/$values.values"
 done
