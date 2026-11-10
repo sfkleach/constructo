@@ -341,6 +341,18 @@ fn config_occurrences(args: impl IntoIterator<Item = OsString>) -> usize {
         .count()
 }
 
+/// How many of the `total` files come before the first `--` of the arguments, or `None` if there is no `--`. Every
+/// argument after the marker is a file, since nothing after it is an option, so the files after it are counted from the
+/// arguments and the others are what is left. Clap's own indices cannot be used, since they count the options and
+/// their values and not the places in the arguments, and they do not count the marker. If more arguments follow
+/// the marker than there are files, which is when the marker is the value of an option, there is no marker.
+// It is used by the reading of typed JSON, which is added in a later step.
+#[cfg_attr(not(test), allow(dead_code))]
+fn files_before_marker(args: &[OsString], total: usize) -> Option<usize> {
+    let marker = args.iter().position(|arg| arg == "--")?;
+    total.checked_sub(args.len() - marker - 1)
+}
+
 /// Reads the configuration file named by `--config`, if there is one. A `cache` in it that is relative is made relative
 /// to the folder of the file, so that the file means the same wherever it is used from.
 fn load_config(path: Option<&PathBuf>) -> Result<Config, ExitCode> {
@@ -1173,5 +1185,42 @@ mod tests {
         assert!(!setting(false, true, true));
         assert!(setting(false, false, true));
         assert!(!setting(false, false, false));
+    }
+
+    #[test]
+    fn the_files_before_the_marker_are_those_that_are_not_counted_after_it() {
+        let before = |args: &[&str]| {
+            let args: Vec<OsString> = args.iter().map(OsString::from).collect();
+            let matches = Cli::command().try_get_matches_from(&args).unwrap();
+            let convert = matches.subcommand_matches("convert").unwrap();
+            let total = convert.get_many::<PathBuf>("files").map_or(0, |files| files.len());
+            files_before_marker(&args, total)
+        };
+        let c = ["constructo", "convert", "--from=json-typed"];
+        assert_eq!(before(&[&c[..], &["a", "b"]].concat()), None);
+        assert_eq!(before(&[&c[..], &["a", "b", "--", "c"]].concat()), Some(2));
+        assert_eq!(before(&[&c[..], &["--", "a", "b"]].concat()), Some(0));
+        assert_eq!(before(&[&c[..], &["a", "b", "--"]].concat()), Some(2));
+        assert_eq!(before(&[&c[..], &["a", "--compact", "b", "--", "c"]].concat()), Some(2));
+        assert_eq!(before(&[&c[..], &["a", "--", "--compact", "c"]].concat()), Some(1));
+        let separate = [
+            "constructo",
+            "--config=x.toml",
+            "convert",
+            "--from",
+            "json-typed",
+            "a",
+            "--",
+            "b",
+        ];
+        assert_eq!(before(&separate), Some(1));
+        assert_eq!(
+            before(&["constructo", "convert", "--from=json-typed", "--stdin", "a", "--"]),
+            Some(1)
+        );
+        assert_eq!(
+            files_before_marker(&["x".into(), "--".into(), "a".into(), "b".into()], 1),
+            None
+        );
     }
 }
