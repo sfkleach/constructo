@@ -19,6 +19,7 @@ pub mod resolve;
 mod test_support;
 pub mod typecheck;
 pub mod typed;
+pub mod typed_back;
 pub mod typed_files;
 pub mod validate;
 pub mod values_text;
