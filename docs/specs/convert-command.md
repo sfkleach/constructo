@@ -2,9 +2,9 @@
 
 `constructo convert` reads data-values and writes them in another notation. This document says what it reads, what it
 writes, what it prints when something is wrong, and what its exit code means. Two formats exist so far: `json-exact`,
-which writes every kind of value in an explicit form and needs no types, and `jsonl-exact`, which writes the same on a
-line to each value. The formats that follow are the natural JSON that needs types (`json-typed`) and its lines, and the
-conversions back, and each will be added here.
+which writes every kind of value in an explicit form and needs no types, and `jsonl-exact`, which writes the same
+encoding on a line for each value. The formats that follow are the natural JSON that needs types (`json-typed`) and
+its lines, and the conversions back, and each will be added here.
 
 ```text
 constructo convert --to=FORMAT [--to-array] [--compact] [-x] [--stdin] [FILES]...
