@@ -19,6 +19,7 @@ mod test_support;
 pub mod typecheck;
 pub mod typed;
 pub mod validate;
+pub mod values_text;
 pub mod verify;
 
 use ast::{ConstDecl, TypesFile};
