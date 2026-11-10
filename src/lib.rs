@@ -27,7 +27,7 @@ use ast::{ConstDecl, TypesFile};
 use convert::Json;
 use diagnostics::{Diagnostic, Pos};
 use parser::{parse_file, Parsed};
-use typecheck::{check_consts, check_value, check_value_typed, Env};
+use typecheck::{check_consts, check_value, check_value_typed, Env, Ty};
 use typed::encode_typed;
 use validate::{validate, ParsedFile};
 
@@ -57,6 +57,7 @@ pub fn prelude_source() -> Source {
 }
 
 /// The name and text of one input to be checked.
+#[derive(Clone)]
 pub struct Source {
     pub name: String,
     pub text: String,
@@ -300,6 +301,83 @@ pub fn convert_typed_lines(
     Ok(())
 }
 
+/// The name that the source of a type given with `--type` has. It is not a file, and it is the name in a message.
+pub const TARGET_SOURCE: &str = "--type";
+
+/// Checks the sources and a type expression in the root project, and then calls `run` with the declarations and the
+/// type, which is the place where JSON is read as values of that type. The expression is put into a declaration, so
+/// that it is parsed and resolved by the code that does it for a types file, with the imports of the root project:
+///
+/// ```text
+/// enum ConstructoTarget = ConstructoTarget(
+/// TYPE
+/// );
+/// ```
+///
+/// The sources are checked as for `convert_typed`, and an error in them or in the expression is reported before `run`
+/// is called, and so before anything is written. A message about the expression names the source `--type`, and counts
+/// its lines from the expression. `run` is not called if the types have errors. The sources must be types files only.
+pub fn convert_typed_back(
+    sources: &[Source],
+    layout: &Layout,
+    options: &CheckOptions,
+    type_text: &str,
+    run: &mut dyn FnMut(&ReadContext) -> Result<(), convert::LinesError>,
+) -> Result<(), convert::LinesError> {
+    let options = CheckOptions {
+        type_check: true,
+        continue_after_error: false,
+        ..*options
+    };
+    // The name is not one that any source mentions, so that it cannot be taken for a declaration of the project.
+    let mut name = String::from("ConstructoTarget");
+    while sources.iter().any(|source| source.text.contains(&name)) || type_text.contains(&name) {
+        name.push('_');
+    }
+    let mut all = sources.to_vec();
+    all.push(Source {
+        name: TARGET_SOURCE.to_string(),
+        text: format!("enum {name} = {name}(\n{type_text}\n);\n"),
+    });
+    let target_source = all.len() - 1;
+    let mut layout = layout.clone();
+    layout.owners.push(layout.root);
+    let mut reading = Reading {
+        run,
+        failure: None,
+        target_source,
+    };
+    let report = check_with_layout(&all, Some(&layout), &options, &mut ValueMode::Read(&mut reading));
+    if let Some(e) = reading.failure {
+        return Err(e);
+    }
+    if !report.diagnostics.is_empty() {
+        let diagnostics = report
+            .diagnostics
+            .into_iter()
+            .map(|mut diagnostic| {
+                // The expression is on the second line of its source, which the user never sees.
+                if diagnostic.file == TARGET_SOURCE {
+                    diagnostic.pos.line = diagnostic.pos.line.saturating_sub(1).max(1);
+                }
+                diagnostic
+            })
+            .collect();
+        return Err(convert::LinesError::Invalid(diagnostics));
+    }
+    Ok(())
+}
+
+/// The type that a source of the form that `convert_typed_back` makes asks for: the one parameter of its one variant.
+fn target_of(parsed: &Parsed) -> Option<Ty> {
+    let Parsed::Types(file) = parsed else { return None };
+    let variant = file.enums.first()?.variants.first()?;
+    let ast::VariantBody::Tuple(parameters) = &variant.body else {
+        return None;
+    };
+    Some(typecheck::instantiate(&parameters.first()?.ty, &[], &[]))
+}
+
 /// The layout of sources that were given without a project: they make one project that has no name, which imports the
 /// prelude into `local` if the prelude is among the sources. The prelude is known by its name.
 pub(crate) fn plain_layout(sources: &[Source]) -> Layout {
@@ -340,6 +418,25 @@ enum ValueMode<'m, 'w> {
     Check,
     /// Check only the values that are converted, and write them as JSON.
     Convert(&'m mut Conversion<'w>),
+    /// Hand the checked declarations to a function that reads the values from somewhere else, and check no value.
+    Read(&'m mut Reading<'w>),
+}
+
+/// What the reader of typed JSON is given, once the types have been checked: the declarations, the type to read as, and
+/// how to write a name so that it reads as it would in a types file of the root project.
+pub struct ReadContext<'a, 'e> {
+    pub env: &'e Env<'a>,
+    pub target: Ty,
+    /// Rewrites the canonical names in a text as they would be written in the root project.
+    pub show: &'e dyn Fn(&str) -> String,
+}
+
+/// The function of the caller that reads the values, and the way that it ended if it did not end well.
+struct Reading<'w> {
+    run: &'w mut dyn FnMut(&ReadContext) -> Result<(), convert::LinesError>,
+    failure: Option<convert::LinesError>,
+    /// The index of the source that holds the declaration of the target.
+    target_source: usize,
 }
 
 /// The state of a conversion to typed JSON, as the values are met.
@@ -433,6 +530,8 @@ fn check_with_layout(
         }
     }
     let type_checked = found.is_empty() && !unresolved && options.type_check;
+    let file_names: Vec<&str> = sources.iter().map(|source| source.name.as_str()).collect();
+    let show = |index: usize, text: &str| resolution.show(index, text, &file_names);
     let mut consts = Vec::new();
     if type_checked {
         consts = type_check_values(
@@ -441,12 +540,11 @@ fn check_with_layout(
             &resolution.value_errors,
             options,
             mode,
+            &show,
             &mut outcomes,
             &mut found,
         );
     }
-    let file_names: Vec<&str> = sources.iter().map(|source| source.name.as_str()).collect();
-    let show = |index: usize, text: &str| resolution.show(index, text, &file_names);
     for info in &mut consts {
         info.name = show(info.source, &info.name);
         info.ty = show(info.source, &info.ty);
@@ -495,12 +593,15 @@ fn types_after_values(sources: &[Source], parsed_sources: &[Parsed]) -> Vec<(usi
 }
 
 /// Type-checks the consts and then the values, and describes the type of each const.
+// The parts of one run are kept apart on purpose, since each is borrowed differently by the caller.
+#[allow(clippy::too_many_arguments)]
 fn type_check_values(
     sources: &[Source],
     parsed_sources: &[Parsed],
     value_errors: &[(usize, usize, Diagnostic)],
     options: &CheckOptions,
     mode: &mut ValueMode,
+    show: &dyn Fn(usize, &str) -> String,
     outcomes: &mut [Outcome],
     diagnostics: &mut Vec<(usize, Diagnostic)>,
 ) -> Vec<ConstInfo> {
@@ -543,6 +644,24 @@ fn type_check_values(
         types_files.iter().flat_map(|(_, file)| &file.consts),
     )
     .with_inferred_from(&everything);
+    if let ValueMode::Read(reading) = mode {
+        // The values are somewhere else, and so are read by the caller, if the consts were all right.
+        if !stopped {
+            let target_source = reading.target_source;
+            if let Some(target) = target_of(&parsed_sources[target_source]) {
+                let root_show = |text: &str| show(target_source, text);
+                let context = ReadContext {
+                    env: &env,
+                    target,
+                    show: &root_show,
+                };
+                if let Err(e) = (reading.run)(&context) {
+                    reading.failure = Some(e);
+                }
+            }
+        }
+        return infos;
+    }
     for (index, parsed) in parsed_sources.iter().enumerate() {
         match parsed {
             Parsed::Types(_) => {}
@@ -565,6 +684,7 @@ fn type_check_values(
                         .map(|(_, _, diagnostic)| diagnostic.clone());
                     let failure = match (unresolved, &mut *mode) {
                         (Some(diagnostic), _) => Some(diagnostic),
+                        (None, ValueMode::Read(_)) => unreachable!("a reading returns before the values are met"),
                         (None, ValueMode::Check) => check_value(&env, options.widening, value)
                             .err()
                             .map(|e| Diagnostic::new(&sources[index].name, e.pos, e.message)),
@@ -1461,5 +1581,73 @@ mod tests {
         };
         assert_eq!(e.kind(), std::io::ErrorKind::BrokenPipe);
         assert_eq!(chunks.len(), 1);
+    }
+
+    /// What `convert_typed_back` makes of a type: the target as a text, or the messages with their positions.
+    fn target_of_type(types: &[&str], expression: &str) -> Result<String, Vec<String>> {
+        let mut texts = types.to_vec();
+        let prelude = prelude_source();
+        let mut all = vec![Source {
+            name: prelude.name,
+            text: prelude.text,
+        }];
+        all.extend(sources(&texts));
+        texts.clear();
+        let layout = plain_layout(&all);
+        let mut seen = None;
+        let result = convert_typed_back(&all, &layout, &CheckOptions::default(), expression, &mut |context| {
+            seen = Some(format!("{:?} {}", context.target, (context.show)("Shape@x")));
+            Ok(())
+        });
+        match result {
+            Ok(()) => Ok(seen.expect("the reader was called")),
+            Err(convert::LinesError::Invalid(diagnostics)) => {
+                assert!(seen.is_none(), "the reader must not be called when there are errors");
+                Err(diagnostics
+                    .iter()
+                    .map(|d| format!("{}:{}:{} {}", d.file, d.pos.line, d.pos.col, d.message))
+                    .collect())
+            }
+            Err(convert::LinesError::Write(e)) => panic!("{e}"),
+        }
+    }
+
+    #[test]
+    fn a_type_expression_is_resolved_as_a_type() {
+        let types = ["enum Shape = Circle { r: Float }, Dot;"];
+        let target = target_of_type(&types, "Shape").unwrap();
+        assert!(target.starts_with("Enum(\"Shape"), "{target}");
+        let target = target_of_type(&types, "[Shape]").unwrap();
+        assert!(target.starts_with("Array(Enum(\"Shape"), "{target}");
+        let target = target_of_type(&types, "Option<Shape>").unwrap();
+        assert!(target.starts_with("Enum(\"Option"), "{target}");
+        let target = target_of_type(&types, "{ a: Nat, b: [String] }").unwrap();
+        assert!(target.starts_with("Record("), "{target}");
+        assert_eq!(target_of_type(&types, "Nat").unwrap().split(' ').next(), Some("Nat"));
+    }
+
+    #[test]
+    fn a_problem_in_a_type_expression_is_placed_in_the_expression() {
+        let types = ["enum Shape = Dot;"];
+        let errors = target_of_type(&types, "[Shap]").unwrap_err();
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].starts_with("--type:1:2 "), "{errors:?}");
+        let errors = target_of_type(&types, "Option<Shape").unwrap_err();
+        assert!(errors[0].starts_with("--type:"), "{errors:?}");
+        let errors = target_of_type(&types, "Option<Shape, Shape>").unwrap_err();
+        assert!(errors[0].starts_with("--type:1:"), "{errors:?}");
+    }
+
+    #[test]
+    fn the_reader_is_not_called_when_the_types_have_errors() {
+        let errors = target_of_type(&["enum A = X(B);"], "A").unwrap_err();
+        assert!(errors[0].starts_with("f0:"), "{errors:?}");
+    }
+
+    #[test]
+    fn the_name_of_the_declaration_does_not_clash_with_a_source() {
+        let types = ["enum ConstructoTarget = Dot;"];
+        let target = target_of_type(&types, "ConstructoTarget").unwrap();
+        assert!(target.starts_with("Enum(\"ConstructoTarget"), "{target}");
     }
 }
