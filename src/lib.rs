@@ -8,6 +8,7 @@ pub mod convert;
 pub mod diagnostics;
 pub mod digest;
 pub mod fetch;
+pub mod json;
 pub mod lexer;
 pub mod lock;
 pub mod parser;
