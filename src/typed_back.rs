@@ -802,4 +802,80 @@ mod tests {
         }
         assert_eq!(String::from_utf8(out).unwrap(), "Dot;\nDot;\n");
     }
+
+    /// Reads the text as the lines of `jsonl-typed` with the type, and gives what was written and the error if the
+    /// reading ended with one.
+    fn lines(ty: &str, text: &str) -> (String, Option<String>) {
+        let mut sources = vec![prelude_source()];
+        sources.push(Source {
+            name: "types".to_string(),
+            text: SHAPES.to_string(),
+        });
+        let layout = plain_layout(&sources);
+        let mut out = Vec::new();
+        let mut error = None;
+        convert_typed_back(&sources, &layout, &CheckOptions::default(), ty, &mut |context| {
+            let mut reader = text.as_bytes();
+            match convert::convert_from_typed_lines(context, "in.jsonl", &mut reader, true, true, &mut out) {
+                Ok(None) => {}
+                Ok(Some(e)) => error = Some(e.to_string()),
+                Err(convert::LinesError::Invalid(diagnostics)) => error = Some(diagnostics[0].to_string()),
+                Err(convert::LinesError::Write(e)) => panic!("{e}"),
+            }
+            Ok(())
+        })
+        .unwrap();
+        (String::from_utf8(out).unwrap(), error)
+    }
+
+    #[test]
+    fn a_line_is_a_value_and_the_last_line_needs_no_new_line() {
+        assert_eq!(
+            lines("Shape", "\"Dot\"\n{\"Square\": 2}"),
+            ("Dot;\nSquare(2.0);\n".to_string(), None)
+        );
+        assert_eq!(lines("Shape", "\"Dot\"\n"), ("Dot;\n".to_string(), None));
+    }
+
+    #[test]
+    fn blank_lines_are_skipped_and_a_line_may_end_in_carriage_return_and_new_line() {
+        let (out, error) = lines("Shape", "\n  \t\n\"Dot\"\r\n\r\n\"Dot\"\r\n");
+        assert_eq!((out.as_str(), error), ("Dot;\nDot;\n", None));
+    }
+
+    #[test]
+    fn a_file_with_no_lines_or_only_blank_ones_has_no_values() {
+        for text in ["", "\n", "  \n\t\r\n\n"] {
+            assert_eq!(lines("Shape", text), (String::new(), None), "{text:?}");
+        }
+    }
+
+    #[test]
+    fn an_array_on_a_line_is_a_value_only_if_the_type_is_an_array_type() {
+        assert_eq!(lines("[Nat]", "[1, 2]\n[]\n"), ("[1, 2];\n[];\n".to_string(), None));
+        let (out, error) = lines("Shape", "\"Dot\"\n[1, 2]\n");
+        assert_eq!(out, "Dot;\n");
+        let error = error.expect("an array is not a Shape");
+        assert!(
+            error.contains("Expected a constructor name or an object for Shape, found an array"),
+            "{error}"
+        );
+        assert!(error.contains("in.jsonl, line 2, col 1"), "{error}");
+    }
+
+    #[test]
+    fn a_problem_is_at_the_line_of_the_file_and_the_lines_before_it_are_written() {
+        let (out, error) = lines("Shape", "\"Dot\"\n\n  \"Cube\"\n\"Dot\"\n");
+        assert_eq!(out, "Dot;\n");
+        let error = error.expect("Cube is not a constructor");
+        assert!(error.contains("in.jsonl, line 3, col 3"), "{error}");
+        let (out, error) = lines("Shape", "\"Dot\"\n{\"Square\": \n");
+        assert_eq!(out, "Dot;\n");
+        assert!(
+            error
+                .expect("the line stops half way")
+                .contains("in.jsonl, line 2, col"),
+            "half way"
+        );
+    }
 }
