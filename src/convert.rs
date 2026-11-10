@@ -1,7 +1,8 @@
 //! Conversion of values to other notations.
 //!
-//! The only format at present is `json-exact`, which writes every kind of value in an explicit form and needs no
-//! types. See `docs/tasks/2026-11-08-convert-subcommand/convert-subcommand.md`.
+//! Two formats exist at present: `json-exact`, which writes every kind of value in an explicit form and needs no
+//! types, and `jsonl-exact`, which writes the same encoding on a line for each value. See
+//! `docs/tasks/2026-11-08-convert-subcommand/convert-subcommand.md`.
 
 use crate::ast::{Argument, Member, TaggedBody, Value, ValueKind};
 use crate::diagnostics::{Diagnostic, Pos};
