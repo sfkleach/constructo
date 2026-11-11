@@ -79,7 +79,7 @@ the same errors have the same codes.
   `--to-array`), and a name that is given twice in a record or in the named arguments of a tuple. For the exact formats,
   an input that is a types file. For the typed formats, the errors of `check` in the types and in the values that are
   converted (the type errors, the validity errors, names that cannot be resolved, a project that does not match its
-  lock), and a value that cannot be written as JSON: `Some(None)`, or one nested too deeply. The run stops at the first
+  lock), and a value that cannot be written as JSON: `Some(None)`, or one nested too deeply or too large. The run stops at the first
   error in a value. A format that writes one document writes nothing to the standard output when there is an error. A
   lines format writes the lines before an error in a value, and nothing if the error is found before the first value is
   converted, as an error in the types or in the syntax is.

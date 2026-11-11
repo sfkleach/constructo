@@ -1695,6 +1695,9 @@ expect_convert_error "json-typed: a type error is an error, and nothing is writt
     "ERROR: Expected Float but found String" --to=json-typed "$TYPED/schema.types" "$TYPED/type-error.values"
 expect_convert_error "json-typed: an unknown constructor is an error" 1 "ERROR: Unknown constructor Nope" \
     --to=json-typed "$TYPED/schema.types" "$TYPED/unknown-constructor.values"
+expect_convert_error "json-typed: a value too large to write is an error, and not a hang" 1 \
+    "ERROR: The value is too large to convert" --to=json-typed --allow-refs "$TYPED/explosion.types" \
+    "$TYPED/explosion.values"
 expect_convert_error "json-typed: Some(None) cannot be written" 1 \
     "ERROR: Some(None) cannot be written as JSON, since it would read back as None" --to=json-typed \
     "$TYPED/schema.types" "$TYPED/some-none.values"

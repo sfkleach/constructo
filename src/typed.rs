@@ -10,12 +10,17 @@ use crate::convert::Json;
 use crate::diagnostics::Pos;
 use crate::project::PRELUDE_PROJECT;
 use crate::typecheck::{bind_arguments, check_value_as, instantiate, instantiate_fields, Env, Ty, TypeError, Typed};
+use std::cell::Cell;
 
 /// The most levels of values, and of the consts that they refer to, that are encoded. The parser limits the nesting of
 /// a value to 200, but a const can refer to another, and a long chain of them would otherwise be as deep as it is long.
 /// Each level takes a few kilobytes of stack in a debug build, so the limit is chosen to stay well inside the stack of
 /// a test thread, which is the smallest that the encoder runs on.
 const MAX_NESTING: usize = 300;
+
+/// The most nodes that the encoding of one value may have. Depth is limited by `MAX_NESTING`, but a const that is
+/// referred to twice by another const is written out in full each time, so the size can double at every level.
+const MAX_NODES: usize = 1_000_000;
 
 /// The names of the types of the prelude that are written specially, which are told by the project that declares them
 /// and so are not mistaken for the types of a user that happen to have the same names.
@@ -78,12 +83,19 @@ pub fn number_text(text: &str, float: bool) -> String {
 /// Encodes a value that has been checked. `widening` and `infer_limit` are the options that it was checked with, which
 /// are used again to check the value of a const where it is used.
 pub fn encode_typed(typed: &Typed, widening: bool, infer_limit: usize, value: &Value) -> Result<Json, TypeError> {
-    Encoder { widening, infer_limit }.encode(typed, value, 0)
+    Encoder {
+        widening,
+        infer_limit,
+        budget: Cell::new(MAX_NODES),
+    }
+    .encode(typed, value, 0)
 }
 
 struct Encoder {
     widening: bool,
     infer_limit: usize,
+    /// The nodes that may still be encoded, which every reference to a const is charged against.
+    budget: Cell<usize>,
 }
 
 impl Encoder {
@@ -91,6 +103,10 @@ impl Encoder {
         if depth > MAX_NESTING {
             return error(node.pos, "The value is nested too deeply to convert");
         }
+        let Some(left) = self.budget.get().checked_sub(1) else {
+            return error(node.pos, "The value is too large to convert");
+        };
+        self.budget.set(left);
         let ty = typed.ty(node);
         Ok(match &node.kind {
             ValueKind::Nat(text) | ValueKind::Int(text) | ValueKind::Float(text) => {
