@@ -1889,6 +1889,64 @@ rm -f "$proj/constructo.toml" "$proj/speed.types" "$proj/v.json" "$proj/expected
 rmdir "$proj"
 rm -f "$conv_dir/settings.toml"
 
+# `xml` writes every value, of every input, into one document whose root is `values`. The examples are in the folder of
+# the other exact formats, with the XML that each must give.
+expect_json "xml: every kind of value, pretty" "$CONVERT/kinds.xml" --to=xml "$CONVERT/kinds.values"
+expect_json "xml: every kind of value, compact" "$CONVERT/kinds.compact.xml" --to=xml --compact "$CONVERT/kinds.values"
+expect_json "xml: strings that need escapes" "$CONVERT/strings.xml" --to=xml "$CONVERT/strings.values"
+expect_json "xml: no values is an empty list" "$CONVERT/empty.xml" --to=xml "$CONVERT/empty.values"
+expect_json "xml: -x writes the postfix ? as Some" "$CONVERT/kinds.xml" --to=xml -x "$CONVERT/kinds.values"
+actual=0
+"$CONSTRUCTO" convert --to=xml "$CONVERT/leaf-1.values" "$CONVERT/leaf-23.values" >"$conv_dir/two" 2>"$conv_dir/err" \
+    || actual=$?
+"$CONSTRUCTO" convert --to=xml "$CONVERT/three.values" >"$conv_dir/three" 2>>"$conv_dir/err" || actual=$?
+if [[ "$actual" -eq 0 && ! -s "$conv_dir/err" ]] && cmp -s "$conv_dir/two" "$conv_dir/three" \
+    && [[ "$(grep -c '<nat ' "$conv_dir/two")" -eq 3 ]]; then
+    pass "xml: every value is written, with no warning, in one document"
+else
+    fail "xml: the values of several inputs are in order, in one document (exit $actual)"
+fi
+actual=0
+"$CONSTRUCTO" convert --to=xml --stdin <"$CONVERT/leaf.values" >"$conv_dir/out" 2>"$conv_dir/err" || actual=$?
+if [[ "$actual" -eq 0 && "$(grep -c '<nat value="5"/>' "$conv_dir/out")" -eq 1 && ! -s "$conv_dir/err" ]]; then
+    pass "xml: the standard input is read"
+else
+    fail "xml: the standard input is read (exit $actual)"
+fi
+expect_convert_error "xml: --to-array is refused" 2 "ERROR: --to-array does not apply to xml, which always writes a list" \
+    --to=xml --to-array "$CONVERT/leaf.values"
+expect_convert_error "xml: the options for types are refused" 2 "ERROR: --no-prelude does not apply to xml, which needs no" \
+    --to=xml --no-prelude "$CONVERT/leaf.values"
+expect_convert_error "xml: a types file is an error" 1 "ERROR: $CONVERT/types-file.types is a types file" --to=xml \
+    "$CONVERT/types-file.types"
+expect_convert_error "xml: a name given twice is an error, as for json-exact" 1 "ERROR: Duplicate field a" --to=xml \
+    "$CONVERT/duplicate-field.values"
+expect_convert_error "xml: an argument given twice is an error" 1 "ERROR: Argument" --to=xml \
+    "$CONVERT/duplicate-argument.values"
+expect_convert_error "xml: a string that XML 1.0 cannot hold names the character" 1 \
+    "ERROR: The string holds U+0007, which XML 1.0 cannot write ($CONVERT/control-character.values, line 2, col 1)" \
+    --to=xml "$CONVERT/control-character.values"
+expect_convert_error "xml: an error gives no output at all, even after a value that could be written" 1 \
+    "ERROR: The string holds U+0007" --to=xml "$CONVERT/leaf.values" "$CONVERT/control-character.values"
+expect_convert_error "xml: a syntax error gives no output" 1 "ERROR:" --to=xml "$CONVERT/syntax-error.values"
+expect_exit "xml: an input that cannot be read is exit code 2" 2 convert --to=xml "$conv_dir/missing.values"
+expect_convert_error "xml: a name that is not a format lists xml" 2 \
+    "ERROR: bogus is not a format; choose json-exact, jsonl-exact, json-typed, jsonl-typed or xml" --to=bogus \
+    "$CONVERT/leaf.values"
+# What XML says a string is must agree with what was written, and not only with our own reader. This reads the output with
+# the XML parser of Python, if there is one, and compares each string with the one that the values file holds.
+if command -v python3 >/dev/null 2>&1; then
+    "$CONSTRUCTO" convert --to=xml "$CONVERT/strings.values" >"$conv_dir/strings.xml" 2>/dev/null
+    got="$(python3 -I -c 'import sys, xml.etree.ElementTree as E; print(len(E.parse(sys.argv[1]).getroot()), \
+        E.parse(sys.argv[1]).getroot()[5].get("value") == "tab \t newline \n carriage return \r")' \
+        "$conv_dir/strings.xml" 2>&1)"
+    if [[ "$got" == "7 True" ]]; then
+        pass "xml: an XML parser reads the strings back as they were written"
+    else
+        fail "xml: an XML parser reads the strings back as they were written ($got)"
+    fi
+fi
+
 # `--from` reads the JSON that `--to` writes and writes the values as text. The examples are in `back/`.
 BACK="$CONVERT/back"
 expect_json "from json-exact: every kind of value" "$BACK/kinds.values" --from=json-exact "$CONVERT/kinds.json"
@@ -2156,8 +2214,8 @@ if [[ "$out" == '{"nat":"5"}' ]]; then
 else
     fail "convert: the files come before the standard input (got '$out')"
 fi
-rm -f "$conv_dir/out" "$conv_dir/err" "$conv_dir/not-utf8.jsonl" \
-    "$conv_dir/blank.types" "$conv_dir/blank.json" "$conv_dir/blank.values"
+rm -f "$conv_dir/out" "$conv_dir/err" "$conv_dir/not-utf8.jsonl" "$conv_dir/two" "$conv_dir/three" \
+    "$conv_dir/strings.xml" "$conv_dir/blank.types" "$conv_dir/blank.json" "$conv_dir/blank.values"
 rmdir "$conv_dir"
 echo ""
 

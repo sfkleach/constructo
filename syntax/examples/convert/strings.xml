@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<values>
+  <string value=""/>
+  <string value=" padded "/>
+  <string value="a &amp; b"/>
+  <string value="&lt;tag&gt; and &quot;quoted&quot;"/>
+  <string value="it's"/>
+  <string value="tab &#9; newline &#10; carriage return &#13;"/>
+  <string value="café ☕ 😀"/>
+</values>

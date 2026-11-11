@@ -79,7 +79,8 @@ the same errors have the same codes.
   `--to-array`), and a name that is given twice in a record or in the named arguments of a tuple. For the exact formats,
   an input that is a types file. For the typed formats, the errors of `check` in the types and in the values that are
   converted (the type errors, the validity errors, names that cannot be resolved, a project that does not match its
-  lock), and a value that cannot be written as JSON: `Some(None)`, or one nested too deeply or too large. The run stops at the first
+  lock), and a value that cannot be written as JSON: `Some(None)`, or one nested too deeply or too large. For `xml`, a
+  string that holds a character that XML 1.0 cannot write, such as U+0001. The run stops at the first
   error in a value. A format that writes one document writes nothing to the standard output when there is an error. A
   lines format writes the lines before an error in a value, and nothing if the error is found before the first value is
   converted, as an error in the types or in the syntax is.
@@ -89,8 +90,8 @@ the same errors have the same codes.
   values before the problem have been written, as for a lines format, except that a JSON document is read whole first,
   so an error in its syntax writes nothing, and that an error in the types or in `--type` writes nothing.
 - **Exit code 2:** an option or an argument that is not understood, which includes neither `--to` nor `--from` or both
-  of them, a `--to` or `--from` that is not a format, `--to-array` with a lines format or with `--from`, `-x` with
-  `--from`, an option for types (`--project`, `--no-prelude` and the others) with a
+  of them, a `--to` or `--from` that is not a format, `--to-array` with a lines format, with `xml` or with `--from`,
+  `-x` with `--from`, an option for types (`--project`, `--no-prelude` and the others) with a
   format that needs no types, `--type` missing with a typed `--from` or given with another format, and no inputs at all
   or no JSON among them; `--config` given more than once or one that cannot be read, a
   `--cache` that is empty, an input that cannot be read, including the standard input, and an output that cannot be
