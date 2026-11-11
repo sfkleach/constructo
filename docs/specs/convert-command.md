@@ -18,8 +18,8 @@ The inputs are the `FILES`, in the order that they are written, and then the sta
 which is processed as one more file, named `<stdin>`, after the others. A run needs at least one of them, and without
 one the command line is refused as a usage error (exit code 2).
 
-For `json-exact` and `jsonl-exact` an input is read as a values file. For `json-typed` the inputs are those of [the
-check command](check-command.md), as [its section](#the-format-json-typed) says. The inputs are read one at a time. An
+For `json-exact` and `jsonl-exact` an input is read as a values file. For `json-typed` and `jsonl-typed` the inputs are those of
+[the check command](check-command.md), as [its section](#the-format-json-typed) says. The inputs are read one at a time. An
 input that cannot be read ends the run at once with exit code 2. An input that has a syntax error, or for `json-exact`
 and `jsonl-exact` is a types file, ends the reading with exit code 1, so that an unreadable input after it is never
 reached, as for [the check command](check-command.md). The standard input is only read if none of the files has failed.
