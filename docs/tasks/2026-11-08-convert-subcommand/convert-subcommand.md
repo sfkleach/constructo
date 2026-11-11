@@ -371,9 +371,10 @@ else is an error at the place that is wrong, in the usual form, for example
 
 A JSON parser of our own, in a new module. It records the line and column of every
 node, so that an error in a value is reported where it is, which a parser that does
-not keep positions cannot do. It keeps a number as its text, refuses a repeated key,
-limits the nesting as the other parsers do, and accepts exactly RFC 8259: no
-comments, no trailing commas, a leading `+` or zeros not allowed.
+not keep positions cannot do. It keeps a number as its text, keeps a repeated key
+(the reader of `json-exact` is what refuses it, at the key), limits the nesting as
+the other parsers do, and accepts exactly RFC 8259: no comments, no trailing
+commas, a leading `+` or zeros not allowed.
 
 ### Tasks
 
