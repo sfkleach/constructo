@@ -13,6 +13,7 @@ use crate::json::{parse_document, parse_line, JsonError, Kind as JsonKind, Node}
 use crate::parser::{parse_file, Experimental, Parsed};
 use crate::typed_back::read_typed;
 use crate::values_text::render;
+use crate::xml::{encode_xml, write_document};
 use crate::{syntax_diagnostic, ReadContext, Source};
 use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -30,6 +31,9 @@ pub enum Format {
     JsonTyped,
     /// The same as `JsonTyped`, with each value on a line of its own.
     JsonlTyped,
+    /// XML in which every kind of value is written explicitly, as `JsonExact` does, and no types are needed. The
+    /// document is always a list of values, so there is no choice between one value and an array.
+    Xml,
 }
 
 impl Format {
@@ -42,13 +46,14 @@ impl Format {
             "jsonl-exact" => Ok(Format::JsonlExact),
             "json-typed" => Ok(Format::JsonTyped),
             "jsonl-typed" => Ok(Format::JsonlTyped),
+            "xml" => Ok(Format::Xml),
             "json" => Err(
                 "json is not a format; choose json-exact (every kind kept, no types), json-typed (natural, needs \
                  types), or jsonl-exact or jsonl-typed (the same, a value to a line)"
                     .to_string(),
             ),
             _ => Err(format!(
-                "{} is not a format; choose json-exact, jsonl-exact, json-typed or jsonl-typed",
+                "{} is not a format; choose json-exact, jsonl-exact, json-typed, jsonl-typed or xml",
                 name
             )),
         }
@@ -337,6 +342,17 @@ pub fn convert(sources: &[Source], options: &ConvertOptions) -> Result<Converted
         };
     }
     let values = all_values(sources, options.experimental)?;
+    if options.format == Format::Xml {
+        // The document is a list of all the values, and it is written whole, so an error gives no output.
+        let mut elements = Vec::new();
+        for (name, value) in &values {
+            elements.push(encode_xml(name, value)?);
+        }
+        return Ok(Converted {
+            output: write_document(&elements, options.compact),
+            warnings: Vec::new(),
+        });
+    }
     let mut warnings = Vec::new();
     let json = if options.to_array {
         let mut items = Vec::new();
@@ -606,11 +622,7 @@ pub fn encode_exact(file: &str, value: &Value) -> Result<Json, Diagnostic> {
         ValueKind::Array(items) => object(vec![("array", encode_all(file, items)?)]),
         ValueKind::Record(members) => object(vec![("record", encode_members(file, members)?)]),
         ValueKind::Tagged { name, body } => {
-            // A name whose last segment starts with a lower-case letter or `_` is a const, and any other is a
-            // constructor. The qualifier, as in `a.b::red`, does not count.
-            let last = name.rsplit("::").next().unwrap_or(name);
-            let is_const = last.chars().next().is_some_and(|c| c.is_lowercase() || c == '_');
-            if is_const {
+            if is_const_name(name) {
                 return Ok(object(vec![("const", string(name))]));
             }
             let mut members = vec![("constructor".to_string(), string(name))];
@@ -623,6 +635,13 @@ pub fn encode_exact(file: &str, value: &Value) -> Result<Json, Diagnostic> {
             Json::Object(members)
         }
     })
+}
+
+/// Whether a name is a const and not a constructor. A name whose last segment starts with a lower-case letter or `_` is
+/// a const, and any other is a constructor. The qualifier, as in `a.b::red`, does not count.
+pub(crate) fn is_const_name(name: &str) -> bool {
+    let last = name.rsplit("::").next().unwrap_or(name);
+    last.chars().next().is_some_and(|c| c.is_lowercase() || c == '_')
 }
 
 fn encode_all(file: &str, values: &[Value]) -> Result<Json, Diagnostic> {

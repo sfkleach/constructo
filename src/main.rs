@@ -191,13 +191,14 @@ enum Command {
         group(ArgGroup::new("direction").required(true).args(["to", "from"])),
         after_help = "\
 For json-exact the first value is converted, and a warning says if more follow. Use --to-array to convert every \
-value into an array. For jsonl-exact every value is a line. A format that is one document is written only if there \
-is no error, and a lines format as it goes. With --from the JSON that --to wrote is read back and the values are \
+value into an array. For jsonl-exact every value is a line. For xml the document is always a list of all the \
+values. A format that is one document is written only if there is no error, and a lines format as it goes. With --from the JSON that --to wrote is read back and the values are \
 written as text to the standard output. The settings file is read for [global] and [experimental]."
     )]
     Convert {
         /// The notation to write: json-exact, which keeps every kind of value and needs no types, jsonl-exact, which
-        /// is the same with each value on a line of its own, or json-typed, which is natural JSON and needs the types
+        /// is the same with each value on a line of its own, json-typed, which is natural JSON and needs the types, or
+        /// xml, which keeps every kind of value as json-exact does and always writes a list of all the values
         #[arg(long, value_name = "FORMAT")]
         to: Option<String>,
 
@@ -528,6 +529,11 @@ fn main() -> ExitCode {
                     "ERROR: --to-array does not apply to {}, which writes each value on a line of its own",
                     to
                 );
+                return ExitCode::from(EXIT_USAGE);
+            }
+            // The document of xml is always a list of the values, so asking for an array as well is a mistake.
+            if to_array && format == Format::Xml {
+                eprintln!("ERROR: --to-array does not apply to xml, which always writes a list of values");
                 return ExitCode::from(EXIT_USAGE);
             }
             let convert_matches = matches

@@ -143,20 +143,20 @@ For example, `Move { x: 1, y: 2 };` and `red;` are written as:
 
 ### Tasks
 
-- [ ] A writer of XML in a new module, with the escaping above and the two layouts, and unit tests for every kind of
+- [x] A writer of XML in a new module, with the escaping above and the two layouts, and unit tests for every kind of
       value, for the empty containers, for the escapes (each of `&`, `<`, `>`, `"`, tab, newline and carriage return)
       and for the characters that cannot be written.
-- [ ] `--to=xml` in the command, with `--to-array` refused, and the message for a format that does not exist updated
+- [x] `--to=xml` in the command, with `--to-array` refused, and the message for a format that does not exist updated
       in the code, the spec and the tests.
-- [ ] Examples in `syntax/examples/convert/`: `kinds.xml` and `kinds.compact.xml` from `kinds.values`, one with
+- [x] Examples in `syntax/examples/convert/`: `kinds.xml` and `kinds.compact.xml` from `kinds.values`, one with
       strings that need escapes, and one that holds a character that XML cannot hold.
-- [ ] Functional tests in `tests/functest.sh`: the output, the compact form, no values, several inputs and `--stdin`,
+- [x] Functional tests in `tests/functest.sh`: the output, the compact form, no values, several inputs and `--stdin`,
       the options that are refused, a types file, a duplicate name, and the string that XML cannot hold.
-- [ ] The spec: a section for `xml` in `docs/specs/convert-command.md`, the options and exit-code tables, and
+- [x] The spec: a section for `xml` in `docs/specs/convert-command.md`, the options and exit-code tables, and
       `docs/specs/exit-codes.md` and `docs/specs/config-file.md` where they list the formats.
-- [ ] A decision, `docs/decisions/0040-xml-is-written-with-attributes-and-a-values-root.md`, that records the choices
+- [x] A decision, `docs/decisions/0040-xml-is-written-with-attributes-and-a-values-root.md`, that records the choices
       above and why.
-- [ ] `CHANGELOG.md`, `README.md` and `syntax/examples/README.md`.
+- [x] `CHANGELOG.md`, `README.md` and `syntax/examples/README.md`.
 
 ## Step 2: Convert from XML
 
