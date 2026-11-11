@@ -251,7 +251,10 @@ for the check command.
 
 Besides the errors of the check, the encoding refuses a value that is nested more than 300 levels deep, counting the
 consts that it refers to: `The value is nested too deeply to convert`. A chain of consts is as deep as it is long, so a
-very long one is refused and not followed. Nothing else is an error: a value that has passed the check has a JSON form.
+very long one is refused and not followed. It also refuses a value of more than 1,000,000 nodes in all, counting
+every reference to a const as the whole of the value of the const: `The value is too large to convert`. Without this, a
+const that refers twice to another, and so on for a few dozen levels, would be written out as billions of nodes.
+Nothing else is an error: a value that has passed the check has a JSON form.
 
 ## The format `jsonl-typed`
 
