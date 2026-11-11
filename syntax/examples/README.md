@@ -70,6 +70,10 @@
   `kinds.compact.xml` for `--compact`, `strings.values` for the strings that need escapes and `empty.xml` for no values.
   The others, such as `types-file.types`, `duplicate-field.values` and `control-character.values` (a string that XML
   cannot write, which only `--to=xml` rejects), must be rejected.
+- `convert/back/xml`: inputs for `constructo convert --from=xml`. `handwritten.xml` is read as `handwritten.values`, and
+  the `*.xml` files in `convert/` are read as `convert/back/kinds.values`, `kinds.compact.values` and
+  `xml/strings.values`. The others, such as `root-value.xml`, `doctype.xml`, `newline-in-value.xml` and `entity.xml`,
+  must be rejected, and `late-error.xml` writes the value before the problem first.
 - `convert/back`: inputs for `constructo convert --from`, each with the text that it must give. `*.values` and `*.out`
   are the expected output, and `wide.json` has a value that is spread. The others, such as `number.json`,
   `wrong-kind.json`, `typed.json`, `late-error.json`, `half.jsonl` and `array-line.jsonl`, must be rejected, and the

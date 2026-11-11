@@ -8,6 +8,7 @@
 use crate::ast::{Argument, Member, TaggedBody, Value, ValueKind};
 use crate::convert::is_const_name;
 use crate::diagnostics::Diagnostic;
+use crate::xml_tree::xml_allows;
 use std::collections::HashSet;
 
 /// The declaration that starts every document.
@@ -120,12 +121,6 @@ pub fn write_document(values: &[Element], compact: bool) -> String {
         out.push('\n');
     }
     out
-}
-
-/// Whether XML 1.0 can hold the character at all. It cannot hold the control characters other than tab, newline and
-/// carriage return, nor U+FFFE and U+FFFF, and a reference to one is no better than the character itself.
-fn xml_allows(c: char) -> bool {
-    matches!(c, '\t' | '\n' | '\r' | '\u{20}'..='\u{d7ff}' | '\u{e000}'..='\u{fffd}' | '\u{10000}'..='\u{10ffff}')
 }
 
 /// Encodes a value as an element. The `file` is only used to name the source in an error.

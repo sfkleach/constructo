@@ -192,8 +192,9 @@ enum Command {
         after_help = "\
 For json-exact the first value is converted, and a warning says if more follow. Use --to-array to convert every \
 value into an array. For jsonl-exact every value is a line. For xml the document is always a list of all the \
-values. A format that is one document is written only if there is no error, and a lines format as it goes. With --from the JSON that --to wrote is read back and the values are \
-written as text to the standard output. The settings file is read for [global] and [experimental]."
+values. A format that is one document is written only if there is no error, and a lines format as it goes. With \
+--from the JSON or XML that --to wrote is read back and the values are written as text to the standard output. The \
+settings file is read for [global] and [experimental]."
     )]
     Convert {
         /// The notation to write: json-exact, which keeps every kind of value and needs no types, jsonl-exact, which
@@ -202,8 +203,8 @@ written as text to the standard output. The settings file is read for [global] a
         #[arg(long, value_name = "FORMAT")]
         to: Option<String>,
 
-        /// The notation to read, writing the values as text: json-exact, jsonl-exact, json-typed or jsonl-typed, as
-        /// --to writes them
+        /// The notation to read, writing the values as text: json-exact, jsonl-exact, json-typed, jsonl-typed or xml,
+        /// as --to writes them
         #[arg(long, value_name = "FORMAT")]
         from: Option<String>,
 
@@ -897,7 +898,12 @@ fn convert_back(from: FromFormat, back: &Back) -> ExitCode {
     let refused = ["to_array", "experimental", "no_experimental"]
         .into_iter()
         .chain(TYPING_OPTIONS);
-    if let Some(message) = refused_with_from(back.matches, refused, "only reads JSON") {
+    let why = if from == FromFormat::Xml {
+        "only reads XML"
+    } else {
+        "only reads JSON"
+    };
+    if let Some(message) = refused_with_from(back.matches, refused, why) {
         eprintln!("ERROR: {}", message);
         return ExitCode::from(EXIT_USAGE);
     }

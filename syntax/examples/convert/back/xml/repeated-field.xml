@@ -1,0 +1,6 @@
+<values>
+  <record>
+    <field name="a"><nat value="1"/></field>
+    <field name="a"><nat value="2"/></field>
+  </record>
+</values>

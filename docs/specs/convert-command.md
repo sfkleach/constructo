@@ -5,14 +5,14 @@ writes, what it prints when something is wrong, and what its exit code means. Fi
 which writes every kind of value in an explicit form and needs no types, `jsonl-exact`, which writes the same encoding
 on a line for each value, `json-typed`, which writes natural JSON in the shapes that serde uses, and needs the types,
 `jsonl-typed`, which writes the same encoding on a line for each value, and `xml`, which writes the explicit form of
-`json-exact` as XML. With `--from` the four JSON formats are read back and the values are written as text. The typed
-ones need the type that the JSON is a value of, which `--type` gives.
+`json-exact` as XML. With `--from` all five are read back and the values are written as text. The typed ones need the
+type that the JSON is a value of, which `--type` gives.
 
 ```text
 constructo convert --to=json-exact|jsonl-exact [--to-array] [--compact] [-x] [--stdin] [FILES]...
 constructo convert --to=xml [--compact] [-x] [--stdin] [FILES]...
 constructo convert --to=json-typed|jsonl-typed [--to-array] [--compact] [--project=FOLDER] [OPTIONS] [FILES]...
-constructo convert --from=json-exact|jsonl-exact [--compact] [--stdin] [FILES]...
+constructo convert --from=json-exact|jsonl-exact|xml [--compact] [--stdin] [FILES]...
 constructo convert --from=json-typed|jsonl-typed --type=TYPE [--compact] [--project=FOLDER] [OPTIONS] [FILES]...
 ```
 
@@ -499,15 +499,58 @@ value, so it needs memory for the document. Large data is for `jsonl-typed`.
 `--to=json-typed` reads. `--to-array`, `-x` and `--no-experimental` are usage errors. See
 [decision 39](../decisions/0039-reading-json-typed-back-is-driven-by-a-type.md).
 
+## Reading back `xml`
+
+`--from=xml` reads the XML that `--to=xml` writes, and writes the values as text, as `--from=json-exact` does. The
+inputs are `FILES` and then `--stdin`. Each is one document, and the values of all of them are written in order. See
+[decision 41](../decisions/0041-reading-xml-back-is-strict-with-a-parser-of-our-own.md).
+
+- **The root is `values`.** Each element in it is a value, in the shape that [`--to=xml` writes](#the-format-xml). A
+  document whose root is a value, such as `<nat value="5"/>`, is an error at the root with a note that says to wrap it
+  in `<values>`, and so is any other root. `<values/>` is a document with no values, which writes nothing, and exit
+  code 0. A file with no document in it, empty or with only white space or comments, is an error: `Expected an element,
+  but the document is empty`.
+- **The reading is strict.** An element has exactly the attribute that its kind has, `value` for a `nat`, `int`,
+  `float` or `string` and `name` for a `const`, a `constructor` and a `field`, and a missing, an unknown or a repeated
+  attribute is an error. A leaf has no content. An `array` and a `tuple` hold values, a `record` and a `named` hold
+  `field` elements with one value each, and a constructor holds at most one of `record`, `tuple` and `array`, in that
+  place, and then a `named` after a `tuple`. A name that is given twice among the fields of a `record` or of a `named`
+  is an error at the second, as a repeated key is for JSON. The text of a number must read back as a literal of the kind
+  that its element names, so `<int value="5"/>` is an error, with a note that says that it reads as a `nat`, and a name
+  has to be one that data-values can have. The lexer and parser of data-values decide all of this, as they do for
+  `json-exact`.
+- **Only a small subset of XML 1.0 is read,** by a parser of our own, and the rest is refused. It accepts a byte order
+  mark, a declaration `<?xml version="1.0" encoding="UTF-8"?>` in which the encoding may be left out, comments, white
+  space between elements, and attributes in single or double quotes. It refuses a DOCTYPE, so nothing is declared, and
+  every entity other than the five that XML defines, `&amp;`, `&lt;`, `&gt;`, `&quot;` and `&apos;`, which is named in
+  the message. It refuses CDATA sections, processing instructions, text between elements, namespaces (a name with a
+  colon, and `xmlns`), a declaration that is not version 1.0 or not UTF-8, and `standalone`. Numeric references such as
+  `&#10;` and `&#xA;` are read, if they name a character that XML 1.0 can hold. The nesting is limited to 200 levels,
+  as it is for JSON.
+- **A literal tab, newline or carriage return in an attribute value is refused.** An XML parser reads one as a space,
+  and `--to=xml` never writes one, since it writes `&#9;`, `&#10;` and `&#13;`. So it comes from another tool or from a
+  hand edit, and reading it as a space would change a string without a word. The error is at the character, with a note
+  that says to write the reference. The white space inside a value, at its ends too, is otherwise kept as it is.
+- **The values are written as for `--from=json-exact`:** each ends with `;` and a new line, in the 80-character layout,
+  or one to a line with `--compact`.
+- **A document is read whole.** A syntax error in it, such as a refused entity or an element that is not closed, writes
+  nothing from that document, and an error in a value comes after the values before it, which have been written. The
+  run stops at the first problem with exit code 1. An input that cannot be read is exit code 2.
+- **The options** are those of `--from=json-exact`: `--compact`, `--stdin`, `--config` and `--cache` are accepted, and
+  `--to-array`, `-x`, `--no-experimental`, `--type` and the options for types are usage errors, exit code 2.
+
+What comes back is the values and the text of their numbers, as it is for `json-exact`, and what is not kept is the
+text of the file: comments, layout and the spelling of the entities.
+
 ## The options `--to` and `--from`
 
 Exactly one of them is required, and giving both or neither is a usage error, exit code 2. The value of each is matched
-exactly. `--to` takes `json-exact`, `jsonl-exact`, `json-typed`, `jsonl-typed` and `xml`, and `--from` takes the first
-four, and these are the only ones that exist. Any other value is a usage error, exit code 2. A bare `json` is not a
-format, so that nobody takes the exact form for the natural one by default. The message starts `ERROR: json is not a
-format; choose json-exact (every kind kept, no types)` and goes on to name the others. Any other name, `jsonl` among
-them, gives `ERROR: NAME is not a format; choose json-exact, jsonl-exact, json-typed, jsonl-typed or xml` for `--to`,
-and for `--from` a message that lists the four that it reads. See [decision 36](../decisions/0036-two-kinds-of-json.md).
+exactly. `--to` and `--from` each take `json-exact`, `jsonl-exact`, `json-typed`, `jsonl-typed` and `xml`, and these
+are the only ones that exist. Any other value is a usage error, exit code 2. A bare `json` is not a format, so that
+nobody takes the exact form for the natural one by default. The message starts `ERROR: json is not a format; choose
+json-exact (every kind kept, no types)` and goes on to name the others. Any other name, `jsonl` among them, gives
+`ERROR: NAME is not a format; choose json-exact, jsonl-exact, json-typed, jsonl-typed or xml`. See
+[decision 36](../decisions/0036-two-kinds-of-json.md).
 
 ## Settings
 
@@ -524,8 +567,8 @@ used by the typed formats for a project from a repository, and otherwise neither
 |------|-----------------------------------------------------------------------------------------------|
 | 0    | The values were converted, with or without a warning.                                         |
 | 1    | An input has a syntax error, a name is given twice, a string that `xml` cannot write, or for  |
-|      | a document format there is no value to convert. With `--from`, JSON that is not valid, or is  |
-|      | not what the format or the type says. For the exact formats and `xml` an input that is a      |
+|      | a document format there is no value to convert. With `--from`, JSON or XML that is not valid, |
+|      | or is not what the format or the type says. For the exact formats and `xml` an input that is a      |
 |      | types file. For the typed formats an error in the types or in `--type`, a type error,         |
 |      | `Some(None)`, or a project that does not match its lock.                                      |
 | 2    | An option is not understood, `--to` and `--from` are both given or neither, the format is not |
