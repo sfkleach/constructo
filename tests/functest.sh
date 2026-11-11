@@ -1913,10 +1913,10 @@ if [[ "$actual" -eq 0 && "$(grep -c '<nat value="5"/>' "$conv_dir/out")" -eq 1 &
 else
     fail "xml: the standard input is read (exit $actual)"
 fi
-expect_convert_error "xml: --to-array is refused" 2 "ERROR: --to-array does not apply to xml, which always writes a list" \
-    --to=xml --to-array "$CONVERT/leaf.values"
-expect_convert_error "xml: the options for types are refused" 2 "ERROR: --no-prelude does not apply to xml, which needs no" \
-    --to=xml --no-prelude "$CONVERT/leaf.values"
+expect_convert_error "xml: --to-array is refused" 2 \
+    "ERROR: --to-array does not apply to xml, which always writes a list" --to=xml --to-array "$CONVERT/leaf.values"
+expect_convert_error "xml: the options for types are refused" 2 \
+    "ERROR: --no-prelude does not apply to xml, which needs no" --to=xml --no-prelude "$CONVERT/leaf.values"
 expect_convert_error "xml: a types file is an error" 1 "ERROR: $CONVERT/types-file.types is a types file" --to=xml \
     "$CONVERT/types-file.types"
 expect_convert_error "xml: a name given twice is an error, as for json-exact" 1 "ERROR: Duplicate field a" --to=xml \
@@ -2064,6 +2064,113 @@ expect_convert_error "from: -x does not apply" 2 "ERROR: --experimental does not
     --from=json-exact -x "$BACK/two.jsonl"
 expect_convert_error "from: the typing options do not apply" 2 "ERROR: --widening does not apply with --from" \
     --from=json-exact --widening "$BACK/two.jsonl"
+
+# `--from=xml` reads the XML that `--to=xml` writes, and writes the values as text. The examples are in `back/xml/`, and
+# the XML that `--to=xml` writes is read from the folder above.
+BX="$BACK/xml"
+expect_json "from xml: every kind of value" "$BACK/kinds.values" --from=xml "$CONVERT/kinds.xml"
+expect_json "from xml: --compact is a value to a line" "$BACK/kinds.compact.values" --from=xml --compact \
+    "$CONVERT/kinds.xml"
+expect_json "from xml: the compact form is read too" "$BACK/kinds.values" --from=xml "$CONVERT/kinds.compact.xml"
+expect_json "from xml: strings with escapes" "$BX/strings.values" --from=xml "$CONVERT/strings.xml"
+expect_json "from xml: an empty list is no values" /dev/null --from=xml "$CONVERT/empty.xml"
+expect_json "from xml: single quotes, comments, entities and references are read" "$BX/handwritten.values" \
+    --from=xml "$BX/handwritten.xml"
+actual=0
+"$CONSTRUCTO" convert --from=xml "$BX/handwritten.xml" "$BX/handwritten.xml" >"$conv_dir/out" 2>"$conv_dir/err" \
+    || actual=$?
+if [[ "$actual" -eq 0 && "$(cat "$conv_dir/out")" == "$(cat "$BX/handwritten.values" "$BX/handwritten.values")" ]]; then
+    pass "from xml: the values of several inputs are in order"
+else
+    fail "from xml: the values of several inputs are in order (exit $actual)"
+fi
+actual=0
+"$CONSTRUCTO" convert --from=xml "$BX/handwritten.xml" --stdin <"$CONVERT/kinds.xml" >"$conv_dir/out" \
+    2>"$conv_dir/err" || actual=$?
+if [[ "$actual" -eq 0 && "$(cat "$conv_dir/out")" == "$(cat "$BX/handwritten.values" "$BACK/kinds.values")" ]]; then
+    pass "from xml: the files come before the standard input"
+else
+    fail "from xml: the files come before the standard input (exit $actual)"
+fi
+
+# What --to=xml writes is read back to the same values, and the same as the values that the JSON route gives, so the
+# two exact formats agree on what a value is.
+out="$("$CONSTRUCTO" convert --to=xml "$CONVERT/kinds.values" \
+    | "$CONSTRUCTO" convert --from=xml --compact --stdin 2>&1)" || true
+if [[ "$out" == "$(cat "$BACK/kinds.compact.values")" ]]; then
+    pass "from xml: a round trip through --to=xml"
+else
+    fail "from xml: a round trip through --to=xml (got '$out')"
+fi
+for source in strings kinds; do
+    via_xml="$("$CONSTRUCTO" convert --to=xml "$CONVERT/$source.values" \
+        | "$CONSTRUCTO" convert --from=xml --compact --stdin 2>&1)" || true
+    via_json="$("$CONSTRUCTO" convert --to=jsonl-exact "$CONVERT/$source.values" \
+        | "$CONSTRUCTO" convert --from=jsonl-exact --compact --stdin 2>&1)" || true
+    if [[ -n "$via_xml" && "$via_xml" == "$via_json" ]]; then
+        pass "from xml: $source.values gives the same values through xml and through jsonl-exact"
+    else
+        fail "from xml: $source.values gives the same values through xml and through jsonl-exact"
+    fi
+done
+
+# The reader is strict, and every problem is placed in the XML. Nothing is written for a problem that is found while
+# the document is read, since a document is read whole.
+expect_convert_error "from xml: the root must be values" 1 "ERROR: Expected the root element values, not nat" \
+    --from=xml "$BX/root-value.xml"
+expect_convert_error "from xml: a DOCTYPE is refused" 1 "ERROR: A DOCTYPE is not accepted" --from=xml "$BX/doctype.xml"
+expect_convert_error "from xml: CDATA is refused" 1 "ERROR: A CDATA section is not accepted" --from=xml "$BX/cdata.xml"
+expect_convert_error "from xml: text between elements is refused" 1 "ERROR: Text between elements is not accepted" \
+    --from=xml "$BX/text.xml"
+expect_convert_error "from xml: a literal newline in a value is refused, with a note" 1 \
+    "ERROR: A new line in an attribute value is not accepted" --from=xml "$BX/newline-in-value.xml"
+expect_convert_error "from xml: an entity that is not defined by XML is refused" 1 \
+    "ERROR: The entity &nbsp; is not accepted" --from=xml "$BX/entity.xml"
+expect_convert_error "from xml: a reference to a character that XML cannot hold is refused" 1 \
+    "ERROR: &#1; is not a character that XML 1.0 can hold" --from=xml "$BX/control-reference.xml"
+expect_convert_error "from xml: namespaces are refused" 1 "ERROR: xmlns is not accepted" --from=xml "$BX/namespace.xml"
+expect_convert_error "from xml: a number of the wrong kind" 1 "ERROR: The text \"5\" is not an int" --from=xml \
+    "$BX/wrong-kind.xml"
+expect_convert_error "from xml: an attribute that is not there is an error" 1 \
+    "ERROR: Unexpected attribute extra on nat" --from=xml "$BX/unknown-attribute.xml"
+expect_convert_error "from xml: a missing attribute" 1 "ERROR: Expected a value attribute on nat" --from=xml \
+    "$BX/missing-attribute.xml"
+expect_convert_error "from xml: the body of a constructor is in its place" 1 "ERROR: A named needs a tuple" \
+    --from=xml "$BX/constructor-order.xml"
+expect_convert_error "from xml: a field given twice" 1 \
+    "ERROR: Repeated field \"a\" ($BX/repeated-field.xml, line 4, col 12)" --from=xml "$BX/repeated-field.xml"
+expect_convert_error "from xml: a document that is cut off writes nothing" 1 "ERROR: The element values is not closed" \
+    --from=xml "$BX/cut-off.xml"
+: >"$conv_dir/blank.xml"
+expect_convert_error "from xml: an empty file is not a document" 1 \
+    "ERROR: Expected an element, but the document is empty" --from=xml "$conv_dir/blank.xml"
+printf ' \n\n' >"$conv_dir/blank.xml"
+expect_convert_error "from xml: a file with only white space is not a document" 1 \
+    "ERROR: Expected an element, but the document is empty" --from=xml "$conv_dir/blank.xml"
+rm -f "$conv_dir/blank.xml"
+# The values before the one that is wrong are written, and the run stops there.
+actual=0
+"$CONSTRUCTO" convert --from=xml "$BX/late-error.xml" >"$conv_dir/out" 2>"$conv_dir/err" || actual=$?
+first="$(head -n 1 "$conv_dir/err")"
+if [[ "$actual" -eq 1 && "$(cat "$conv_dir/out")" == "1;" && "$first" == "ERROR: The text \"x\" is not an int"* ]]; then
+    pass "from xml: the values before a problem in a value are written"
+else
+    fail "from xml: the values before a problem in a value are written (exit $actual, out '$(cat "$conv_dir/out")')"
+fi
+expect_exit "from xml: an input that cannot be read is exit code 2" 2 convert --from=xml "$conv_dir/missing.xml"
+
+# The options that do not apply are refused, and the name of a format is matched exactly.
+expect_convert_error "from xml: --to-array is refused" 2 \
+    "ERROR: --to-array does not apply with --from, which only reads" --from=xml --to-array "$CONVERT/kinds.xml"
+expect_convert_error "from xml: -x is refused" 2 "ERROR: --experimental does not apply with --from" --from=xml -x \
+    "$CONVERT/kinds.xml"
+expect_convert_error "from xml: the options for types are refused" 2 "ERROR: --no-prelude does not apply with --from" \
+    --from=xml --no-prelude "$CONVERT/kinds.xml"
+expect_convert_error "from xml: --type is refused" 2 "ERROR: --type does not apply to xml, which needs no types" \
+    --from=xml --type=Nat "$CONVERT/kinds.xml"
+expect_convert_error "from: a name that is not a format lists xml" 2 \
+    "ERROR: bogus is not a format; choose json-exact, jsonl-exact, json-typed, jsonl-typed or xml" --from=bogus \
+    "$CONVERT/kinds.xml"
 
 # `--from=json-typed` and `--from=jsonl-typed` read JSON as values of the type that `--type` names. The types are those
 # of `--project` and of the files that come first, up to the first file that is not a types file, or a `--`. The

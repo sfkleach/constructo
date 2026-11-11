@@ -232,29 +232,28 @@ declared, expanded or fetched.
 ### The parser
 
 A parser of XML of our own, in a new module next to `json.rs`, for the subset above only, with positions. It is a
-choice that was made with care. A general crate would give us a byte offset, not a line and column, and would read
-what we want to refuse, and above all it would do the processing of entities. We would be left to configure it to stop
-what it does by default. The cost is that we own the rules for attribute values, which are the subtle part, and the
-tests for them are listed below.
+choice that was made with care. A general crate would read what we want to refuse, and above all it would do the
+processing of entities, and we would be left to configure it to stop what it does by default. The cost is that we own
+the rules for attribute values, which are the subtle part, and the tests for them are listed below.
 
 ### Tasks
 
-- [ ] A parser of the subset, with positions, and unit tests for each thing accepted and for each thing refused,
+- [x] A parser of the subset, with positions, and unit tests for each thing accepted and for each thing refused,
       including the entities, a literal newline in a value, a numeric reference to a forbidden character, a DOCTYPE
       with an entity, the nesting limit, and a document that is cut off.
-- [ ] The reader of `xml`, with unit tests for every kind of value and for every error, and round trips: every file in
+- [x] The reader of `xml`, with unit tests for every kind of value and for every error, and round trips: every file in
       `syntax/examples/convert/` that `--to=xml` writes reads back as the same values, and a string made of every
       character that XML 1.0 can hold survives the round trip.
-- [ ] `--from=xml` in the command, with the refusals above, the format name added to the message for one that is not
+- [x] `--from=xml` in the command, with the refusals above, the format name added to the message for one that is not
       a format, and `--from` and `--to` exclusive as before.
-- [ ] Functional tests: the round trip from `--to=xml`, no values, several inputs and `--stdin`, an empty file, a
+- [x] Functional tests: the round trip from `--to=xml`, no values, several inputs and `--stdin`, an empty file, a
       root that is a value, the refused XML (a DOCTYPE, CDATA, a literal newline in a value), an unknown and a
       missing attribute, a number of the wrong kind, an error position, and an unreadable input.
-- [ ] The spec section for reading back `xml`, the tables, and the exit codes, `docs/specs/exit-codes.md` and
+- [x] The spec section for reading back `xml`, the tables, and the exit codes, `docs/specs/exit-codes.md` and
       `docs/specs/config-file.md`.
-- [ ] A decision, `docs/decisions/0041-reading-xml-back-is-strict-with-a-parser-of-our-own.md`: the strict subset, the
+- [x] A decision, `docs/decisions/0041-reading-xml-back-is-strict-with-a-parser-of-our-own.md`: the strict subset, the
       refusal of a literal newline, and why the parser is our own.
-- [ ] `CHANGELOG.md`, `README.md` and `syntax/examples/README.md`.
+- [x] `CHANGELOG.md`, `README.md` and `syntax/examples/README.md`.
 
 ## Defaults that were chosen without a question
 

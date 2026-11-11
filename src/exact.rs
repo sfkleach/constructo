@@ -201,15 +201,7 @@ impl Reader<'_> {
             return Err(self.fail(node.pos, message));
         }
         let text = self.string(node, kind)?;
-        let read = parse_values_with(&format!("{text};"), Experimental::default());
-        let same = match read.as_deref() {
-            Ok([Value { kind: found, .. }]) => match (kind, found) {
-                ("nat", ValueKind::Nat(t)) | ("int", ValueKind::Int(t)) | ("float", ValueKind::Float(t)) => *t == text,
-                _ => false,
-            },
-            _ => false,
-        };
-        if same {
+        if number_kind(&text) == Some(kind) {
             Ok(text)
         } else {
             Err(self.fail(
@@ -225,28 +217,7 @@ impl Reader<'_> {
 
     /// Checks that the text is a name of the kind, by giving it to the parser.
     fn name(&self, node: &Node, text: &str, names: Names) -> Result<(), Diagnostic> {
-        let ok = match names {
-            Names::Field => matches!(
-                parse_values_with(&format!("{{ {text}: 0 }};"), Experimental::default()).as_deref(),
-                Ok([Value { kind: ValueKind::Record(ms), .. }]) if ms.len() == 1 && ms[0].name == text
-            ),
-            Names::Const | Names::Constructor => {
-                match parse_values_with(&format!("{text};"), Experimental::default()).as_deref() {
-                    Ok(
-                        [Value {
-                            kind: ValueKind::Tagged { name, body: None },
-                            ..
-                        }],
-                    ) if name == text => {
-                        let last = name.rsplit("::").next().unwrap_or(name);
-                        let lower = last.chars().next().is_some_and(|c| c.is_lowercase() || c == '_');
-                        lower == (names == Names::Const)
-                    }
-                    _ => false,
-                }
-            }
-        };
-        if ok {
+        if is_name(text, names) {
             Ok(())
         } else {
             let what = match names {
@@ -259,8 +230,60 @@ impl Reader<'_> {
     }
 }
 
+/// The kind of number that the text is, which is `nat`, `int` or `float`, if the text is exactly one literal of the
+/// kind and nothing else. The text is given to the real parser, so the lexer decides what a number is.
+pub(crate) fn number_kind(text: &str) -> Option<&'static str> {
+    match parse_values_with(&format!("{text};"), Experimental::default()).as_deref() {
+        Ok(
+            [Value {
+                kind: ValueKind::Nat(t),
+                ..
+            }],
+        ) if t == text => Some("nat"),
+        Ok(
+            [Value {
+                kind: ValueKind::Int(t),
+                ..
+            }],
+        ) if t == text => Some("int"),
+        Ok(
+            [Value {
+                kind: ValueKind::Float(t),
+                ..
+            }],
+        ) if t == text => Some("float"),
+        _ => None,
+    }
+}
+
+/// Whether the text is a name of the kind, by giving it to the real parser, so that the grammar decides.
+pub(crate) fn is_name(text: &str, names: Names) -> bool {
+    match names {
+        Names::Field => matches!(
+            parse_values_with(&format!("{{ {text}: 0 }};"), Experimental::default()).as_deref(),
+            Ok([Value { kind: ValueKind::Record(ms), .. }]) if ms.len() == 1 && ms[0].name == text
+        ),
+        Names::Const | Names::Constructor => {
+            match parse_values_with(&format!("{text};"), Experimental::default()).as_deref() {
+                Ok(
+                    [Value {
+                        kind: ValueKind::Tagged { name, body: None },
+                        ..
+                    }],
+                ) if name == text => {
+                    let last = name.rsplit("::").next().unwrap_or(name);
+                    let lower = last.chars().next().is_some_and(|c| c.is_lowercase() || c == '_');
+                    lower == (names == Names::Const)
+                }
+                _ => false,
+            }
+        }
+    }
+}
+
+/// What a name is read as.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Names {
+pub(crate) enum Names {
     Field,
     Const,
     Constructor,

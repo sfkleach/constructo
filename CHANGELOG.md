@@ -180,6 +180,13 @@ Following the style in https://keepachangelog.com/en/1.0.0/
   written as `&#9;`, `&#10;` and `&#13;`. A string with a character that XML 1.0 cannot hold, such as U+0001, is an
   error. No values give `<values/>`. See `docs/specs/convert-command.md` and decision 40. The library has the `xml`
   module.
+- `constructo convert --from=xml` reads back what `--to=xml` writes, and writes the values as text. The root must be
+  `values`, and each element is a value with exactly the attribute and the children of its kind, in strict form and with
+  positions. The reader is a parser of our own for a small subset of XML 1.0: it refuses a DOCTYPE, CDATA, processing
+  instructions, text between elements, namespaces, and any entity but the five that XML defines, so nothing is declared
+  or expanded. A literal tab, newline or carriage return in an attribute value is refused, since an XML parser would
+  read it as a space and change the string. `<values/>` is no values. See `docs/specs/convert-command.md` and decision
+  41. The library has the `xml_tree` and `xml_back` modules.
 - `constructo convert --from=json-exact` and `--from=jsonl-exact` read back what `--to` writes, and write the values as
   text. Exactly one of `--to` and `--from` is given. The reading is strict, with positions: an object is a value, an
   array in a `json-exact` document is a list of values, a line of `jsonl-exact` is an object, and a number is a string

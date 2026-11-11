@@ -14,6 +14,8 @@ use crate::parser::{parse_file, Experimental, Parsed};
 use crate::typed_back::read_typed;
 use crate::values_text::render;
 use crate::xml::{encode_xml, write_document};
+use crate::xml_back::{values_from_xml, ReadError};
+use crate::xml_tree::parse_document as parse_xml;
 use crate::{syntax_diagnostic, ReadContext, Source};
 use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -151,6 +153,8 @@ pub enum FromFormat {
     JsonTyped,
     /// Lines of `json-typed`, each one value of the type that is given.
     JsonlTyped,
+    /// One document of `xml`, whose root is `values` and which holds a list of values.
+    Xml,
 }
 
 impl FromFormat {
@@ -162,8 +166,9 @@ impl FromFormat {
             "jsonl-exact" => Ok(FromFormat::JsonlExact),
             "json-typed" => Ok(FromFormat::JsonTyped),
             "jsonl-typed" => Ok(FromFormat::JsonlTyped),
+            "xml" => Ok(FromFormat::Xml),
             _ => Err(format!(
-                "{name} is not a format; choose json-exact, jsonl-exact, json-typed or jsonl-typed"
+                "{name} is not a format; choose json-exact, jsonl-exact, json-typed, jsonl-typed or xml"
             )),
         }
     }
@@ -174,9 +179,9 @@ impl FromFormat {
     }
 }
 
-/// Reads one input of `json-exact` or `jsonl-exact` and writes its values as text, each as soon as it is read, to
-/// `out`. The first problem ends the conversion, and the values before it have been written. A JSON document is
-/// parsed whole first, so a syntax error in it comes before any of its values are written.
+/// Reads one input of `json-exact`, `jsonl-exact` or `xml` and writes its values as text, each as soon as it is read,
+/// to `out`. The first problem ends the conversion, and the values before it have been written. A JSON or XML document
+/// is parsed whole first, so a syntax error in it comes before any of its values are written.
 pub fn convert_from_source(
     source: &Source,
     from: FromFormat,
@@ -201,6 +206,22 @@ pub fn convert_from_source(
             let mut reader = BufReader::new(source.text.as_bytes());
             // Reading text that is already in memory cannot fail, so there is no read error to give.
             convert_jsonl_from_reader(&source.name, &mut reader, compact, out).map(|_| ())
+        }
+        FromFormat::Xml => {
+            let root = parse_xml(&source.text).map_err(|e| {
+                let mut diagnostic = Diagnostic::new(&source.name, e.pos, e.message);
+                if let Some(note) = e.note {
+                    diagnostic = diagnostic.with_note(note);
+                }
+                LinesError::Invalid(vec![diagnostic])
+            })?;
+            values_from_xml(&root, &source.name, |value| {
+                out.write_all(render(&value, compact).as_bytes())
+            })
+            .map_err(|e| match e {
+                ReadError::Invalid(diagnostic) => LinesError::Invalid(vec![diagnostic]),
+                ReadError::Caller(e) => LinesError::Write(e),
+            })
         }
         FromFormat::JsonTyped | FromFormat::JsonlTyped => {
             let message = "a typed format needs the types, so it is read with convert_from_typed_source";
@@ -238,7 +259,7 @@ pub fn convert_from_typed_source(
             convert_from_typed_lines(context, &source.name, &mut reader, widening, compact, out)
                 .map(|failure| debug_assert!(failure.is_none(), "A slice of bytes cannot fail to be read."))
         }
-        FromFormat::JsonExact | FromFormat::JsonlExact => {
+        FromFormat::JsonExact | FromFormat::JsonlExact | FromFormat::Xml => {
             let message = "an exact format needs no types, so it is read with convert_from_source";
             Err(LinesError::Invalid(vec![Diagnostic::new(
                 &source.name,
