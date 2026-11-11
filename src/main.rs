@@ -183,16 +183,17 @@ enum Command {
 
     /// Convert values to another notation
     #[command(after_help = "\
-For json-exact the first value is converted, and a warning says if more follow. Use --to-array to convert every \
-value into an array. For jsonl-exact every value is a line. The output is written only if there is no error. The \
-settings file is read for [global] and [experimental].")]
+For json-exact and json-typed the first value is converted, and a warning says if more follow. Use --to-array to \
+convert every value into an array, which is written only if there is no error. For jsonl-exact and jsonl-typed every \
+value is a line, written as it is converted. The settings file is read for [global] and [experimental], and for the \
+typed formats for the keys of [check] that apply.")]
     Convert {
-        /// The notation to write: json-exact, which keeps every kind of value and needs no types, jsonl-exact, which
-        /// is the same with each value on a line of its own, or json-typed, which is natural JSON and needs the types
+        /// The notation to write: json-exact, which keeps every kind of value and needs no types, json-typed, which is
+        /// natural JSON and needs the types, or jsonl-exact and jsonl-typed, which write each value on a line
         #[arg(long, value_name = "FORMAT")]
         to: String,
 
-        /// With json-exact, convert every value, of every input, into an array, instead of only the first value
+        /// With json-exact or json-typed, convert every value, of every input, into an array, instead of only the first value
         #[arg(long)]
         to_array: bool,
 

@@ -42,7 +42,7 @@ impl Format {
                     .to_string(),
             ),
             _ => Err(format!(
-                "{} is not a format; choose json-exact, jsonl-exact or json-typed",
+                "{} is not a format; choose json-exact, jsonl-exact, json-typed or jsonl-typed",
                 name
             )),
         }
