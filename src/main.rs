@@ -125,7 +125,8 @@ const TYPING_OPTIONS: [&str; 11] = [
     "project",
 ];
 
-/// The options that decide how the types are found and used, which `check` and `convert --to=json-typed` share.
+/// The options that decide how the types are found and used, which `check` and `convert` share when `--to` is
+/// `json-typed` or `jsonl-typed`.
 #[derive(clap::Args, Debug)]
 struct TypingArgs {
     /// Load the standard prelude (Bool and Option) [default]
