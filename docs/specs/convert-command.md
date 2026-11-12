@@ -310,9 +310,11 @@ then `--stdin`, as for `--to`. There is no option to name an output file, since 
 - **The values are written as the run goes, and it stops at the first problem.** The values before it have been
   written, and the exit code is 1. A JSON document is read whole before any value of it is written, so a syntax error
   in it writes nothing, but a bad element in an array comes after the elements before it. The lines of `jsonl-exact` are
-  read one at a time, so the lines before a bad one are written. The inputs are read one at a time as well: a syntax
-  error in an input stops the run there, and an input that cannot be read, which is exit code 2, is found after the
-  values of the inputs before it.
+  read as they come, one at a time, so a line from standard input is converted and written without waiting for the end
+  of the input, which is not held in memory, and the lines before a bad one are written. An input that cannot be read
+  part way, as when it is not valid UTF-8, is exit code 2 after the lines before that point. The inputs are read one
+  at a time as well: a syntax error in an input stops the run there, and an input that cannot be read, which is exit
+  code 2, is found after the values of the inputs before it.
 - **The options.** `--compact`, `--stdin`, `--config` and `--cache` are accepted. `--to-array`, `-x`,
   `--no-experimental` and the options for types are usage errors, exit code 2, since they would have no effect.
 
