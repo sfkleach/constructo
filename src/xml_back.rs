@@ -7,7 +7,7 @@
 //! See `docs/tasks/2026-11-08-convert-subcommand/to_xml.md`.
 
 use crate::ast::{Argument, Member, TaggedBody, Value, ValueKind};
-use crate::diagnostics::{Diagnostic, Pos};
+use crate::diagnostics::{shown, Diagnostic, Pos};
 use crate::exact::{is_name, number_kind, Names};
 use crate::xml_tree::Element;
 
@@ -165,7 +165,7 @@ impl Reader<'_> {
             return Ok(());
         }
         let article = if kind == "int" { "an" } else { "a" };
-        let mut e = self.fail(pos, format!("The text \"{text}\" is not {article} {kind}"));
+        let mut e = self.fail(pos, format!("The text \"{}\" is not {article} {kind}", shown(text)));
         if let Some(found) = found {
             e = e.with_note(format!(
                 "it reads as a {found}, so the element is <{found} value=\"{text}\"/>"
@@ -183,7 +183,7 @@ impl Reader<'_> {
             Names::Const => "the name of a const",
             Names::Constructor => "the name of a constructor",
         };
-        Err(self.fail(pos, format!("\"{text}\" is not {what}")))
+        Err(self.fail(pos, format!("\"{}\" is not {what}", shown(text))))
     }
 
     /// The name and the one value of a `field` element.
@@ -193,8 +193,12 @@ impl Reader<'_> {
             return Err(self.fail(element.pos, message));
         }
         let (name, name_pos) = self.attribute(element, "name")?;
-        self.name(name, name_pos, Names::Field)
-            .map_err(|_| self.fail(name_pos, format!("\"{name}\" is not a name that a field can have")))?;
+        self.name(name, name_pos, Names::Field).map_err(|_| {
+            self.fail(
+                name_pos,
+                format!("\"{}\" is not a name that a field can have", shown(name)),
+            )
+        })?;
         match element.children.as_slice() {
             [value] => Ok((name, value)),
             _ => Err(self.fail(element.pos, "A field holds exactly one value")),
@@ -338,6 +342,24 @@ mod tests {
         read(&values_in(body))
             .expect_err("The document should not be read.")
             .to_string()
+    }
+
+    #[test]
+    fn text_from_the_document_is_shown_without_control_characters() {
+        // DEL, a C1 control and a character reference to a new line are all allowed by XML, so they reach the messages.
+        for body in [
+            "<nat value=\"1\u{9b}2J\"/>",
+            "<nat value=\"1&#10;\"/>",
+            "<float value=\"1.5\u{7f}\"/>",
+            "<const name=\"a&#10;b\"/>",
+            "<constructor name=\"A\u{9b}\"/>",
+            "<constructor name=\"A\"><record><field name=\"f\u{9b}\"><nat value=\"1\"/></field></record></constructor>",
+        ] {
+            let message = fails(body);
+            assert!(!message.chars().any(|c| c.is_control()), "{body}: {message:?}");
+        }
+        assert!(fails("<nat value=\"1&#10;\"/>").contains("The text \"1\\n\" is not a nat"));
+        assert!(fails("<const name=\"a&#10;b\"/>").contains("\"a\\nb\" is not the name of a const"));
     }
 
     #[test]
