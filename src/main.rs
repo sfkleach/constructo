@@ -11,8 +11,7 @@ use constructo::typed_files::{first_token, types_end, FirstToken};
 use constructo::verify::{read_lock, update_lock_with, verify_lock_with};
 use constructo::{
     check_in_projects, convert_typed, convert_typed_back, convert_typed_lines, source_kind, syntax_error, CheckOptions,
-    Config, Experimental, ImportInfo, InputFile, Layout, Outcome, Project, ProjectInfo, ProjectSet, ReadContext,
-    Source, SourceKind,
+    Config, Experimental, ImportInfo, InputFile, Layout, Outcome, Project, ProjectInfo, ProjectSet, Source, SourceKind,
 };
 use std::collections::{HashSet, VecDeque};
 use std::ffi::OsString;
@@ -935,42 +934,6 @@ fn convert_back(from: FromFormat, back: &Back) -> ExitCode {
     }
 }
 
-/// Reads one input of `jsonl-typed`, a line at a time, from a file or from the standard input if there is no path, and
-/// converts it. The result is the message that says why the input cannot be read, if it cannot, and otherwise nothing.
-fn read_lines_typed(
-    context: &ReadContext,
-    path: Option<&Path>,
-    widening: bool,
-    compact: bool,
-    out: &mut dyn Write,
-) -> Result<Option<String>, LinesError> {
-    let (name, failure) = match path {
-        Some(path) => {
-            let name = path.display().to_string();
-            match std::fs::File::open(path) {
-                Ok(file) => {
-                    let failure = convert_from_typed_lines(
-                        context,
-                        &name,
-                        &mut std::io::BufReader::new(file),
-                        widening,
-                        compact,
-                        out,
-                    )?;
-                    (name, failure)
-                }
-                Err(e) => return Ok(Some(format!("Cannot read {}: {}", name, e))),
-            }
-        }
-        None => {
-            let failure =
-                convert_from_typed_lines(context, "<stdin>", &mut std::io::stdin().lock(), widening, compact, out)?;
-            ("standard input".to_string(), failure)
-        }
-    };
-    Ok(failure.map(|e| format!("Cannot read {}: {}", name, e)))
-}
-
 /// What the first token of a file says, or why the file cannot be read. Only as much of the file as that is read.
 fn first_token_of(path: &Path) -> Result<FirstToken, String> {
     let file = std::fs::File::open(path).map_err(|e| format!("Cannot read {}: {}", path.display(), e))?;
@@ -1053,7 +1016,9 @@ fn convert_back_typed(
                 .chain(back.stdin.then_some(None));
             for input in inputs {
                 let result = if from == FromFormat::JsonlTyped {
-                    read_lines_typed(context, input, options.widening, back.compact, out)
+                    read_lines(input, |name, reader| {
+                        convert_from_typed_lines(context, name, reader, options.widening, back.compact, out)
+                    })
                 } else {
                     match read_json_text(input) {
                         Ok(source) => {

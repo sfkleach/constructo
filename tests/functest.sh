@@ -1954,6 +1954,14 @@ TB="$CONVERT/typed/back"
 TS="$CONVERT/typed/schema.types"
 expect_json "from jsonl-typed: a value to a line, in the shapes of the declarations" "$TB/shapes.values" \
     --from=jsonl-typed --type=Shape "$TS" "$TB/shapes.jsonl"
+# As for jsonl-exact, a line is written while the writer of the pipe is still open.
+out="$( (printf '"Dot"\n'; sleep 3) \
+    | timeout 1 "$CONSTRUCTO" convert --from=jsonl-typed --type=Shape --stdin "$TS" 2>/dev/null )" || true
+if [[ "$out" == "Dot;" ]]; then
+    pass "from jsonl-typed: a line from the standard input is written before the end of the input"
+else
+    fail "from jsonl-typed: a line from the standard input is written before the end of the input (got '$out')"
+fi
 expect_json "from json-typed: one document is one value" "$TB/config.values" --from=json-typed --type=Config "$TS" \
     "$TB/config.json"
 expect_json "from json-typed: an array type reads an array" "$TB/list.values" --from=json-typed --type='[Shape]' "$TS" \

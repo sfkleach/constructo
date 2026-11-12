@@ -369,6 +369,7 @@ mod tests {
     use super::*;
     use crate::json::parse_document;
     use crate::{convert, convert_typed_back, plain_layout, prelude_source, CheckOptions, Source};
+    use std::io::Write;
 
     /// Reads the JSON as a value of the type, in a project of the one types file, and gives the text of the value, or
     /// the position and the message of the problem.
@@ -783,6 +784,40 @@ mod tests {
     }
 
     #[test]
+    fn a_line_is_written_before_the_next_is_waited_for() {
+        // A reader that gives one line and then blocks, as an open pipe does, is told by what the output has seen: the
+        // output is flushed when the reader has nothing in hand, which is where the next read would wait.
+        struct Flushes(Vec<u8>, usize);
+        impl Write for Flushes {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0.extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                self.1 += 1;
+                Ok(())
+            }
+        }
+        let mut sources = vec![prelude_source()];
+        sources.push(Source {
+            name: "types".to_string(),
+            text: SHAPES.to_string(),
+        });
+        let layout = plain_layout(&sources);
+        let mut out = Flushes(Vec::new(), 0);
+        convert_typed_back(&sources, &layout, &CheckOptions::default(), "Shape", &mut |context| {
+            let mut reader = std::io::BufReader::new("\"Dot\"\n\"Dot\"\n".as_bytes());
+            convert::convert_from_typed_lines(context, "in.jsonl", &mut reader, true, true, &mut out).unwrap();
+            Ok(())
+        })
+        .unwrap();
+        // It is flushed before the first line is read, and again once the second has been used up and the reader has
+        // nothing in hand, and the flushes are not one for each value.
+        assert_eq!(String::from_utf8(out.0.clone()).unwrap(), "Dot;\nDot;\n");
+        assert_eq!(out.1, 2);
+    }
+
+    #[test]
     fn a_lines_input_is_read_a_line_at_a_time() {
         let mut sources = vec![prelude_source()];
         sources.push(Source {
@@ -830,7 +865,7 @@ mod tests {
         let mut out = Vec::new();
         let mut error = None;
         convert_typed_back(&sources, &layout, &CheckOptions::default(), ty, &mut |context| {
-            let mut reader = text.as_bytes();
+            let mut reader = std::io::BufReader::new(text.as_bytes());
             match convert::convert_from_typed_lines(context, "in.jsonl", &mut reader, true, true, &mut out) {
                 Ok(None) => {}
                 Ok(Some(e)) => error = Some(e.to_string()),
