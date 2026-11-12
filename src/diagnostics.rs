@@ -44,6 +44,22 @@ impl Severity {
     }
 }
 
+/// The text with every control character written as an escape, so that text from a document that is being read cannot
+/// move the cursor, clear the screen or end the line of a diagnostic. Other characters are kept as they are.
+pub fn shown(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 /// A problem found in a source, with the name of the file it was found in. It is an error unless it is made as a
 /// warning.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,6 +116,13 @@ impl fmt::Display for Diagnostic {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn shown_escapes_control_characters_only() {
+        assert_eq!(shown("a\u{1b}[2J\nb\r\t\u{7}"), "a\\u001b[2J\\nb\\r\\t\\u0007");
+        assert_eq!(shown("DEL\u{7f} C1\u{85}"), "DEL\\u007f C1\\u0085");
+        assert_eq!(shown("plain \"quoted\" \\ é"), "plain \"quoted\" \\ é");
+    }
+
     use super::*;
 
     const AT: Pos = Pos { line: 3, col: 9 };
