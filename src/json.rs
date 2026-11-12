@@ -3,7 +3,7 @@
 //! It is used to read back what `convert` writes. It is a plain parser of JSON: what the values mean is for the
 //! reader in `exact.rs`. Numbers are kept as the text that was written, and a repeated key in an object is kept.
 
-use crate::diagnostics::Pos;
+use crate::diagnostics::{shown, Pos};
 
 /// The deepest nesting of arrays and objects that is accepted, which keeps the stack of the recursive parser bounded.
 const MAX_DEPTH: u32 = 200;
@@ -352,7 +352,7 @@ impl Parser {
             _ => {
                 return Err(JsonError {
                     pos: here,
-                    message: format!("Unknown escape \\{c}"),
+                    message: format!("Unknown escape \\{}", shown(&c.to_string())),
                 })
             }
         })
@@ -374,6 +374,12 @@ mod tests {
     fn err(text: &str) -> (Pos, String) {
         let e = parse_document(text).unwrap_err();
         (e.pos, e.message)
+    }
+
+    #[test]
+    fn an_unknown_escape_is_shown_without_a_control_character() {
+        assert_eq!(err("\"\\\u{1b}\"").1, "Unknown escape \\\\u001b");
+        assert_eq!(err("\"\\q\"").1, "Unknown escape \\q");
     }
 
     #[test]

@@ -5,7 +5,7 @@
 //! here: the text is given to the real parser, so a change to the grammar changes the reader too.
 
 use crate::ast::{Argument, Member, TaggedBody, Value, ValueKind};
-use crate::diagnostics::{Diagnostic, Pos};
+use crate::diagnostics::{shown, Diagnostic, Pos};
 use crate::json::{Kind, Member as JsonMember, Node};
 use crate::parser::{parse_values_with, Experimental};
 
@@ -43,7 +43,7 @@ impl Reader<'_> {
             ));
         };
         if !KINDS.contains(&first.key.as_str()) {
-            let mut e = self.fail(first.key_pos, format!("Unknown key \"{}\"", first.key));
+            let mut e = self.fail(first.key_pos, format!("Unknown key \"{}\"", shown(&first.key)));
             if members.iter().all(|m| !KINDS.contains(&m.key.as_str())) {
                 e = e.with_note(
                     "a json-exact value has a key such as nat, string or constructor; was this written with \
@@ -55,7 +55,7 @@ impl Reader<'_> {
         if let Some(extra) = members.get(1) {
             let message = format!(
                 "Unexpected key \"{}\"; a value has one key, which says its kind",
-                extra.key
+                shown(&extra.key)
             );
             return Err(self.fail(extra.key_pos, message));
         }
@@ -78,7 +78,7 @@ impl Reader<'_> {
     fn no_repeats(&self, members: &[JsonMember]) -> Result<(), Diagnostic> {
         for (i, member) in members.iter().enumerate() {
             if members[..i].iter().any(|earlier| earlier.key == member.key) {
-                return Err(self.fail(member.key_pos, format!("Repeated key \"{}\"", member.key)));
+                return Err(self.fail(member.key_pos, format!("Repeated key \"{}\"", shown(&member.key))));
             }
         }
         Ok(())
@@ -102,7 +102,12 @@ impl Reader<'_> {
                     body = Some(TaggedBody::Tuple(Vec::new()));
                 }
                 "named" => named = Some(member),
-                other => return Err(self.fail(member.key_pos, format!("Unknown key \"{other}\" in a constructor"))),
+                other => {
+                    return Err(self.fail(
+                        member.key_pos,
+                        format!("Unknown key \"{}\" in a constructor", shown(other)),
+                    ))
+                }
             }
         }
         if let Some(named) = named {
@@ -142,7 +147,7 @@ impl Reader<'_> {
     fn bad_field(&self, member: &JsonMember) -> Diagnostic {
         self.fail(
             member.key_pos,
-            format!("\"{}\" is not a name that a field can have", member.key),
+            format!("\"{}\" is not a name that a field can have", shown(&member.key)),
         )
     }
 
@@ -210,7 +215,8 @@ impl Reader<'_> {
             Err(self.fail(
                 node.pos,
                 format!(
-                    "The text \"{text}\" is not {} {kind}",
+                    "The text \"{}\" is not {} {kind}",
+                    shown(&text),
                     if kind == "int" { "an" } else { "a" }
                 ),
             ))
@@ -248,7 +254,7 @@ impl Reader<'_> {
                 Names::Const => "the name of a const",
                 Names::Constructor => "the name of a constructor",
             };
-            Err(self.fail(node.pos, format!("\"{text}\" is not {what}")))
+            Err(self.fail(node.pos, format!("\"{}\" is not {what}", shown(text))))
         }
     }
 }
@@ -347,6 +353,26 @@ mod tests {
         assert_eq!(args[0].pos, Pos { line: 3, col: 13 });
         assert_eq!(args[1].pos, Pos { line: 4, col: 13 });
         assert_eq!(args[1].value.pos, Pos { line: 4, col: 18 });
+    }
+
+    #[test]
+    fn text_from_the_document_is_shown_without_control_characters() {
+        // Each of these puts text from the document into the message, and none may carry a raw control character.
+        let cases = [
+            r#"{"a\u001b[2J\nb": 1}"#,
+            r#"{"nat": "5", "q\u001b": 1}"#,
+            r#"{"nat": "5", "nat\u0007": 1}"#,
+            r#"{"constructor": "A", "x\u001b": []}"#,
+            r#"{"constructor": "A", "record": {"f\u001b": {"nat": "1"}}}"#,
+            r#"{"nat": "1\u001b[2J\nZ"}"#,
+            r#"{"const": "a\u0007b"}"#,
+        ];
+        for json in cases {
+            let message = fails(json);
+            assert!(!message.chars().any(|c| c.is_control()), "{json}: {message:?}");
+        }
+        assert!(fails(r#"{"nat": "1\u001b[2J\nZ"}"#).contains(r#"The text "1\u001b[2J\nZ" is not a nat"#));
+        assert!(fails(r#"{"a\nb": 1}"#).contains(r#"Unknown key "a\nb""#));
     }
 
     #[test]
