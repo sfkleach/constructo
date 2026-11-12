@@ -1698,6 +1698,9 @@ expect_convert_error "json-typed: an unknown constructor is an error" 1 "ERROR: 
 expect_convert_error "json-typed: a value too large to write is an error, and not a hang" 1 \
     "ERROR: The value is too large to convert" --to=json-typed --allow-refs "$TYPED/explosion.types" \
     "$TYPED/explosion.values"
+expect_convert_error "json-typed: the defaults of omitted arguments count against the size of a value" 1 \
+    "ERROR: The value is too large to convert" --to=json-typed --allow-refs "$TYPED/default-explosion.types" \
+    "$TYPED/default-explosion.values"
 expect_convert_error "json-typed: Some(None) cannot be written" 1 \
     "ERROR: Some(None) cannot be written as JSON, since it would read back as None" --to=json-typed \
     "$TYPED/schema.types" "$TYPED/some-none.values"
