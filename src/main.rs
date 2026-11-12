@@ -1,6 +1,7 @@
 use clap::{ArgAction, ArgGroup, ArgMatches, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use constructo::convert::{
-    convert, convert_from_source, convert_lines, values_of, ConvertOptions, Format, FromFormat, LinesError,
+    convert, convert_from_source, convert_jsonl_from_reader, convert_lines, values_of, ConvertOptions, Format,
+    FromFormat, LinesError,
 };
 use constructo::diagnostics::{Diagnostic, Pos};
 use constructo::fetch::Cache;
@@ -801,31 +802,65 @@ fn convert_back(name: &str, compact: bool, stdin: bool, files: &[PathBuf], match
     let mut unreadable = None;
     let code = stream_lines(|out| {
         for path in files {
-            match std::fs::read_to_string(path) {
-                Ok(text) => {
-                    let source = Source {
-                        name: path.display().to_string(),
-                        text,
-                    };
-                    convert_from_source(&source, from, compact, out)?;
-                }
-                Err(e) => {
-                    unreadable = Some(format!("Cannot read {}: {}", path.display(), e));
-                    return Ok(());
-                }
+            let name = path.display().to_string();
+            let failure = match from {
+                // A file of lines is converted as it is read, and a file of one document has to be read whole.
+                FromFormat::JsonlExact => match std::fs::File::open(path) {
+                    Ok(file) => convert_jsonl_from_reader(&name, &mut std::io::BufReader::new(file), compact, out)?,
+                    Err(e) => Some(e),
+                },
+                FromFormat::JsonExact => match std::fs::read_to_string(path) {
+                    Ok(text) => {
+                        convert_from_source(
+                            &Source {
+                                name: name.clone(),
+                                text,
+                            },
+                            from,
+                            compact,
+                            out,
+                        )?;
+                        None
+                    }
+                    Err(e) => Some(e),
+                },
+            };
+            if let Some(e) = failure {
+                unreadable = Some(format!("Cannot read {}: {}", name, e));
+                return Ok(());
             }
         }
         if stdin {
-            let mut text = String::new();
-            if let Err(e) = std::io::stdin().read_to_string(&mut text) {
+            let failure = match from {
+                FromFormat::JsonlExact => convert_jsonl_from_reader(
+                    "<stdin>",
+                    &mut std::io::BufReader::new(std::io::stdin().lock()),
+                    compact,
+                    out,
+                )?,
+                FromFormat::JsonExact => {
+                    let mut text = String::new();
+                    match std::io::stdin().read_to_string(&mut text) {
+                        Ok(_) => {
+                            convert_from_source(
+                                &Source {
+                                    name: "<stdin>".to_string(),
+                                    text,
+                                },
+                                from,
+                                compact,
+                                out,
+                            )?;
+                            None
+                        }
+                        Err(e) => Some(e),
+                    }
+                }
+            };
+            if let Some(e) = failure {
                 unreadable = Some(format!("Cannot read standard input: {}", e));
                 return Ok(());
             }
-            let source = Source {
-                name: "<stdin>".to_string(),
-                text,
-            };
-            convert_from_source(&source, from, compact, out)?;
         }
         Ok(())
     });

@@ -12,7 +12,7 @@ use crate::parser::{parse_file, Experimental, Parsed};
 use crate::values_text::render;
 use crate::{syntax_diagnostic, Source};
 use std::collections::HashSet;
-use std::io::Write;
+use std::io::{BufRead, BufReader, Read, Write};
 
 /// The notations that values can be converted to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -180,16 +180,48 @@ pub fn convert_from_source(
             }
         }
         FromFormat::JsonlExact => {
-            for (index, line) in source.text.split('\n').enumerate() {
-                let line = line.strip_suffix('\r').unwrap_or(line);
-                if line.trim_matches([' ', '\t']).is_empty() {
-                    continue;
-                }
-                let node = parse_line(line, index as u32 + 1).map_err(invalid)?;
-                write_node(&node)?;
-            }
-            Ok(())
+            let mut reader = BufReader::new(source.text.as_bytes());
+            // Reading text that is already in memory cannot fail, so there is no read error to give.
+            convert_jsonl_from_reader(&source.name, &mut reader, compact, out).map(|_| ())
         }
+    }
+}
+
+/// Reads the lines of one input of `jsonl-exact` as they come, and writes the values of them as text to `out`. A line
+/// is converted as soon as it is complete, so a value is written without waiting for the end of the input, and the
+/// input is not held in memory. The output is flushed whenever the reader has nothing more in hand, so that a value is
+/// not kept back while the next line is waited for. The first problem ends the conversion, and the lines before it have
+/// been written. An input that cannot be read, as when it is not UTF-8, is not a problem in the data, and its error is
+/// given as the result, after the lines before it have been written.
+pub fn convert_jsonl_from_reader<R: Read>(
+    name: &str,
+    reader: &mut BufReader<R>,
+    compact: bool,
+    out: &mut dyn Write,
+) -> Result<Option<std::io::Error>, LinesError> {
+    let mut line = String::new();
+    let mut number = 0u32;
+    loop {
+        if reader.buffer().is_empty() {
+            out.flush().map_err(LinesError::Write)?;
+        }
+        line.clear();
+        match reader.read_line(&mut line) {
+            Ok(0) => return Ok(None),
+            Ok(_) => {}
+            Err(e) => return Ok(Some(e)),
+        }
+        number += 1;
+        let text = line.strip_suffix('\n').unwrap_or(&line);
+        let text = text.strip_suffix('\r').unwrap_or(text);
+        if text.trim_matches([' ', '\t']).is_empty() {
+            continue;
+        }
+        let node =
+            parse_line(text, number).map_err(|e| LinesError::Invalid(vec![Diagnostic::new(name, e.pos, e.message)]))?;
+        let value = value_from_exact(&node, name).map_err(|d| LinesError::Invalid(vec![d]))?;
+        out.write_all(render(&value, compact).as_bytes())
+            .map_err(LinesError::Write)?;
     }
 }
 
@@ -1236,5 +1268,46 @@ mod tests {
             false,
         );
         assert!(errors[0].contains("(t.json, line 4, col 11)"), "{errors:?}");
+    }
+
+    /// A reader that gives the bytes it has and then fails, as a pipe does when it breaks.
+    struct Breaks {
+        bytes: &'static [u8],
+    }
+
+    impl Read for Breaks {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            if self.bytes.is_empty() {
+                return Err(std::io::Error::other("the pipe broke"));
+            }
+            let n = self.bytes.len().min(buf.len());
+            buf[..n].copy_from_slice(&self.bytes[..n]);
+            self.bytes = &self.bytes[n..];
+            Ok(n)
+        }
+    }
+
+    #[test]
+    fn jsonl_is_converted_as_it_is_read() {
+        // The first line is complete and the rest of the input never arrives, so its value has to be written before
+        // the failure is met, and the failure is a problem of reading and not of the data.
+        let mut out = Vec::new();
+        let mut reader = BufReader::new(Breaks {
+            bytes: b"{\"nat\": \"1\"}\n{\"nat\"",
+        });
+        let result = convert_jsonl_from_reader("t.jsonl", &mut reader, true, &mut out);
+        assert!(matches!(result, Ok(Some(_))));
+        assert_eq!(String::from_utf8(out).unwrap(), "1;\n");
+    }
+
+    #[test]
+    fn jsonl_numbers_its_lines_as_the_file_does() {
+        let mut out = Vec::new();
+        let mut reader = BufReader::new("{\"nat\": \"1\"}\r\n\n  \n{\"nat\": 5}\n".as_bytes());
+        let Err(LinesError::Invalid(ds)) = convert_jsonl_from_reader("t.jsonl", &mut reader, true, &mut out) else {
+            panic!("The fourth line should not be accepted.");
+        };
+        assert!(ds[0].to_string().contains("t.jsonl, line 4, col 9"), "{}", ds[0]);
+        assert_eq!(String::from_utf8(out).unwrap(), "1;\n");
     }
 }

@@ -1906,6 +1906,24 @@ if [[ "$actual" -eq 2 && "$(cat "$conv_dir/out")" == $'1;\n2;' && "$first" == "E
 else
     fail "from jsonl-exact: an unreadable input (exit $actual, out '$(cat "$conv_dir/out")')"
 fi
+# A line is converted as it comes, so a file that stops being readable part way gives the lines before that point.
+printf '{"nat": "1"}\n\xff\n' >"$conv_dir/not-utf8.jsonl"
+actual=0
+"$CONSTRUCTO" convert --from=jsonl-exact "$conv_dir/not-utf8.jsonl" >"$conv_dir/out" 2>"$conv_dir/err" || actual=$?
+first="$(head -n 1 "$conv_dir/err")"
+if [[ "$actual" -eq 2 && "$(cat "$conv_dir/out")" == "1;" && "$first" == "ERROR: Cannot read"* ]]; then
+    pass "from jsonl-exact: an input that stops being readable part way gives the lines before that point"
+else
+    fail "from jsonl-exact: an input that stops being readable part way (exit $actual, out '$(cat "$conv_dir/out")')"
+fi
+# The first value arrives while the writer of the pipe is still open, so nothing waits for the end of the input.
+out="$( (printf '{"nat": "1"}\n'; sleep 3) \
+    | timeout 1 "$CONSTRUCTO" convert --from=jsonl-exact --stdin 2>/dev/null )" || true
+if [[ "$out" == "1;" ]]; then
+    pass "from jsonl-exact: a line from the standard input is written before the end of the input"
+else
+    fail "from jsonl-exact: a line from the standard input is written before the end of the input (got '$out')"
+fi
 out="$(printf '{"nat": "7"}\n' \
     | "$CONSTRUCTO" convert --from=jsonl-exact --stdin "$BACK/two.jsonl" 2>/dev/null)" || true
 if [[ "$out" == $'1;\n2;\n7;' ]]; then
@@ -1938,7 +1956,7 @@ if [[ "$out" == '{"nat":"5"}' ]]; then
 else
     fail "convert: the files come before the standard input (got '$out')"
 fi
-rm -f "$conv_dir/out" "$conv_dir/err"
+rm -f "$conv_dir/out" "$conv_dir/err" "$conv_dir/not-utf8.jsonl"
 rmdir "$conv_dir"
 echo ""
 

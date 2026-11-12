@@ -35,8 +35,9 @@ These are in the task, and are listed here because the design leans on them.
 4. The output is written as values are converted, and the run stops at the first problem with exit code 1.
 5. The JSON parser is our own, with positions. The reader is strict.
 6. JSONL: blank lines are skipped, `\r\n` is accepted, a line is an object, an empty file is valid with no values, and
-   each input is read in full (standard input until end of file) before any of its lines is parsed. A problem on a
-   line stops the run there, and the values of the lines before it have been written.
+   a problem on a line stops the run there, and the values of the lines before it have been written. The lines are
+   read as they come, so there is no reading of the whole input first, and a line from standard input is converted
+   before the end of the input.
 
 ## Design
 

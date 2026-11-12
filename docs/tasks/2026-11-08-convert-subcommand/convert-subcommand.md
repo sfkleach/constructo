@@ -406,10 +406,11 @@ are those of Step 5. What differs is the framing:
   empty `json-exact` file.
 - A position is in the file: the line is the line of the file, and the column is
   within the line.
-- Each input is read in full before any of its lines is parsed, and standard input
-  gives no values until end of file. The lines are then converted one at a time. A
-  problem on a line ends the run with exit code 1 at that line, and the values of
-  the lines before it have been written.
+- The lines are converted one at a time, as they are read. A problem on a line ends
+  the run with exit code 1 at that line, and the values of the lines before it have
+  been written. There is no reading of the whole input first, so a line that is
+  read from standard input is converted before the end of the input, and the input
+  is not held in memory.
 
 ### Tasks
 
