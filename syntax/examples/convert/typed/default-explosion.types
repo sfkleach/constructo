@@ -1,0 +1,21 @@
+// An omitted argument has a default of 421 nodes, which is under the limit for a default. The consts use it 2^12 times
+// between them, which is more nodes than a value may have, though each use is small.
+enum Leaf = Leaf(Nat, Nat, Nat, Nat, Nat, Nat, Nat, Nat, Nat, Nat, Nat, Nat, Nat, Nat, Nat, Nat, Nat, Nat, Nat, Nat);
+enum Mid = Mid(
+    Leaf, Leaf, Leaf, Leaf, Leaf, Leaf, Leaf, Leaf, Leaf, Leaf,
+    Leaf, Leaf, Leaf, Leaf, Leaf, Leaf, Leaf, Leaf, Leaf, Leaf
+);
+enum Item = Item(id: Nat, rest: Mid);
+const c0 = Item(id: 1);
+const c1 = [c0, c0];
+const c2 = [c1, c1];
+const c3 = [c2, c2];
+const c4 = [c3, c3];
+const c5 = [c4, c4];
+const c6 = [c5, c5];
+const c7 = [c6, c6];
+const c8 = [c7, c7];
+const c9 = [c8, c8];
+const c10 = [c9, c9];
+const c11 = [c10, c10];
+const c12 = [c11, c11];

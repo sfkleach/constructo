@@ -240,7 +240,8 @@ impl Encoder {
     /// and the empty array, the record of the defaults of its fields, and the first constructor of an enum with
     /// the defaults of its fields. It is built with a stack of its own, since a chain of enums that each start
     /// with the next can be as deep as the number of declarations. The check has counted the nodes against the
-    /// same limit, so this does not fail for that reason, and the limit is only a defensive check here.
+    /// same limit, so this does not fail for that reason, and the limit is only a defensive check here. Each node is
+    /// also charged to the budget of the whole value, since a const that is used many times is written out each time.
     fn default(&self, typed: &Typed, ty: &Ty, pos: Pos) -> Result<Json, TypeError> {
         enum Step {
             Visit(Ty),
@@ -261,6 +262,13 @@ impl Encoder {
                         return error(pos, "The default value of an omitted argument is too large");
                     }
                     remaining -= 1;
+                    // The nodes of a default count against the budget of the whole value, as the nodes that are written
+                    // out do. Otherwise a const that is used many times, each time with an omitted argument whose
+                    // default is large, would be written out as more nodes than the budget allows.
+                    let Some(left) = self.budget.get().checked_sub(1) else {
+                        return error(pos, "The value is too large to convert");
+                    };
+                    self.budget.set(left);
                     match &ty {
                         Ty::Nat | Ty::Int => results.push(Json::Number("0".to_string())),
                         Ty::Float => results.push(Json::Number("0.0".to_string())),
