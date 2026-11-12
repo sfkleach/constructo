@@ -6,7 +6,7 @@ use crate::ast::{
     Argument, ConstDecl, EnumDecl, Field, Member, Parameter, TaggedBody, Type, TypeParam, TypesFile, Value, ValueKind,
     Variant, VariantBody,
 };
-use crate::diagnostics::Pos;
+use crate::diagnostics::{shown, Pos};
 use crate::lexer::{lex, Tok, Token};
 
 /// The first syntax error found in a text.
@@ -182,7 +182,7 @@ impl Parser {
 
     fn error<T>(&self, expected: &str) -> Result<T> {
         let message = match self.peek() {
-            Tok::Invalid(c) => format!("Unexpected character '{}'", c),
+            Tok::Invalid(c) => format!("Unexpected character '{}'", shown(&c.to_string())),
             Tok::Error(message) => message.clone(),
             _ => format!("Expected {}", expected),
         };
@@ -1020,6 +1020,8 @@ mod tests {
         assert_eq!(err("enum A = X; B").2, "Expected 'enum' or 'const'");
         assert_eq!(err("enum A = X(Int").2, "Expected comma or ')'");
         assert_eq!(err("enum A = X #").2, "Unexpected character '#'");
+        assert_eq!(err("enum A = X \u{1b}").2, "Unexpected character '\\u001b'");
+        assert_eq!(err("enum A = X \u{7f}").2, "Unexpected character '\\u007f'");
     }
 
     fn value_err(text: &str) -> (u32, u32, String) {
