@@ -229,8 +229,8 @@ pub fn convert_from_typed_source(
     match from {
         FromFormat::JsonTyped => write_node(&parse_document(&source.text).map_err(invalid)?),
         FromFormat::JsonlTyped => {
-            let reader = &mut source.text.as_bytes();
-            convert_from_typed_lines(context, &source.name, reader, widening, compact, out)
+            let mut reader = BufReader::new(source.text.as_bytes());
+            convert_from_typed_lines(context, &source.name, &mut reader, widening, compact, out)
                 .map(|failure| debug_assert!(failure.is_none(), "A slice of bytes cannot fail to be read."))
         }
         FromFormat::JsonExact | FromFormat::JsonlExact => {
@@ -249,36 +249,19 @@ pub fn convert_from_typed_source(
 /// can be read. A blank line is skipped and a line may end `\r\n`. The first problem ends the reading, and the values
 /// of the lines before it have been written. The result is `Ok(None)` when the input has been read to its end, and
 /// `Ok(Some(error))` when it could not be read, which is the failure of the reader and not a problem in the input, so
-/// it is for the caller to report. A line that is not UTF-8 is such a failure.
-pub fn convert_from_typed_lines(
+/// it is for the caller to report. A line that is not UTF-8 is such a failure. The output is flushed whenever the
+/// reader has nothing more in hand, so that a value is not kept back while the next line is waited for.
+pub fn convert_from_typed_lines<R: Read>(
     context: &ReadContext,
     name: &str,
-    reader: &mut dyn BufRead,
+    reader: &mut BufReader<R>,
     widening: bool,
     compact: bool,
     out: &mut dyn Write,
 ) -> Result<Option<std::io::Error>, LinesError> {
-    let mut line = String::new();
-    let mut number = 0u32;
-    loop {
-        line.clear();
-        number += 1;
-        match reader.read_line(&mut line) {
-            Ok(0) => return Ok(None),
-            Ok(_) => {}
-            Err(e) => return Ok(Some(e)),
-        }
-        let text = line.strip_suffix('\n').unwrap_or(&line);
-        let text = text.strip_suffix('\r').unwrap_or(text);
-        if text.trim_matches([' ', '\t']).is_empty() {
-            continue;
-        }
-        let node =
-            parse_line(text, number).map_err(|e| LinesError::Invalid(vec![Diagnostic::new(name, e.pos, e.message)]))?;
-        let value = read_typed(context, &node, name, widening).map_err(|d| LinesError::Invalid(vec![d]))?;
-        out.write_all(render(&value, compact).as_bytes())
-            .map_err(LinesError::Write)?;
-    }
+    convert_json_lines(name, reader, compact, out, |node| {
+        read_typed(context, node, name, widening)
+    })
 }
 
 /// Reads the lines of one input of `jsonl-exact` as they come, and writes the values of them as text to `out`. A line
@@ -292,6 +275,18 @@ pub fn convert_jsonl_from_reader<R: Read>(
     reader: &mut BufReader<R>,
     compact: bool,
     out: &mut dyn Write,
+) -> Result<Option<std::io::Error>, LinesError> {
+    convert_json_lines(name, reader, compact, out, |node| value_from_exact(node, name))
+}
+
+/// The reading of the lines of a lines input, for the exact and the typed formats, which differ only in how a line that
+/// has been parsed is read as a value. The reader of the lines is as is said for `convert_jsonl_from_reader`.
+fn convert_json_lines<R: Read>(
+    name: &str,
+    reader: &mut BufReader<R>,
+    compact: bool,
+    out: &mut dyn Write,
+    mut read: impl FnMut(&Node) -> Result<Value, Diagnostic>,
 ) -> Result<Option<std::io::Error>, LinesError> {
     let mut line = String::new();
     let mut number = 0u32;
@@ -313,7 +308,7 @@ pub fn convert_jsonl_from_reader<R: Read>(
         }
         let node =
             parse_line(text, number).map_err(|e| LinesError::Invalid(vec![Diagnostic::new(name, e.pos, e.message)]))?;
-        let value = value_from_exact(&node, name).map_err(|d| LinesError::Invalid(vec![d]))?;
+        let value = read(&node).map_err(|d| LinesError::Invalid(vec![d]))?;
         out.write_all(render(&value, compact).as_bytes())
             .map_err(LinesError::Write)?;
     }
