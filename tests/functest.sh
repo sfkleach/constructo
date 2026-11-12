@@ -1964,6 +1964,12 @@ else
 fi
 expect_json "from json-typed: one document is one value" "$TB/config.values" --from=json-typed --type=Config "$TS" \
     "$TB/config.json"
+# White space before the first declaration is what the types lexer takes as white space, and that includes U+00A0.
+printf '\xc2\xa0enum Speed = Fast, Slow;\n' > "$conv_dir/blank.types"
+printf '"Fast"\n' > "$conv_dir/blank.json"
+printf 'Fast;\n' > "$conv_dir/blank.values"
+expect_json "from json-typed: a types file may start with white space that is not ASCII" "$conv_dir/blank.values" \
+    --from=json-typed --type=Speed "$conv_dir/blank.types" "$conv_dir/blank.json"
 expect_json "from json-typed: an array type reads an array" "$TB/list.values" --from=json-typed --type='[Shape]' "$TS" \
     "$TB/list.json"
 expect_json "from jsonl-typed: a number takes the text of its slot" "$TB/floats.values" --from=jsonl-typed \
@@ -2085,7 +2091,8 @@ if [[ "$out" == '{"nat":"5"}' ]]; then
 else
     fail "convert: the files come before the standard input (got '$out')"
 fi
-rm -f "$conv_dir/out" "$conv_dir/err" "$conv_dir/not-utf8.jsonl"
+rm -f "$conv_dir/out" "$conv_dir/err" "$conv_dir/not-utf8.jsonl" \
+    "$conv_dir/blank.types" "$conv_dir/blank.json" "$conv_dir/blank.values"
 rmdir "$conv_dir"
 echo ""
 

@@ -22,7 +22,7 @@ const WORD: usize = 8;
 /// The word `enum` or `const` that is the start of a qualified name, as in `enum::Name`, is not the start of a
 /// declaration, as the parser has it.
 pub fn first_token(reader: &mut dyn BufRead) -> io::Result<FirstToken> {
-    if skip_blanks(reader, true)? == Blanks::Slash {
+    if skip_blanks(reader, true)? != Blanks::Done {
         return Ok(FirstToken::Other);
     }
     let mut word = Vec::new();
@@ -45,7 +45,7 @@ pub fn first_token(reader: &mut dyn BufRead) -> io::Result<FirstToken> {
     if word != b"enum" && word != b"const" {
         return Ok(FirstToken::Other);
     }
-    if skip_blanks(reader, false)? == Blanks::Slash {
+    if skip_blanks(reader, false)? != Blanks::Done {
         return Ok(FirstToken::Types);
     }
     Ok(match peek(reader)? {
@@ -66,16 +66,26 @@ enum Blanks {
     Done,
     /// After a slash that does not start a comment, which has been taken. No declaration starts with a slash.
     Slash,
+    /// After a character that is not white space and was taken, because it was split across two reads of the file, so
+    /// that it could not be looked at whole without taking it. It is not a blank, so what it starts is not skipped.
+    Taken,
 }
 
-/// Takes the white space and the comments, and with `start` a byte-order mark before them.
+/// Takes the white space and the comments, and with `start` a byte-order mark before them. White space is what the
+/// lexer of the types takes as such, which is `char::is_whitespace`, and so it includes characters such as U+00A0.
 fn skip_blanks(reader: &mut dyn BufRead, start: bool) -> io::Result<Blanks> {
     if start && reader.fill_buf()?.starts_with(&[0xEF, 0xBB, 0xBF]) {
         reader.consume(3);
     }
     while let Some(byte) = peek(reader)? {
-        if byte.is_ascii_whitespace() {
+        if byte.is_ascii() && (byte.is_ascii_whitespace() || byte == 0x0B) {
             reader.consume(1);
+        } else if byte >= 0x80 {
+            match skip_wide_blank(reader, byte)? {
+                Some(true) => {}
+                Some(false) => return Ok(Blanks::Taken),
+                None => break,
+            }
         } else if byte == b'/' {
             reader.consume(1);
             if peek(reader)? != Some(b'/') {
@@ -87,6 +97,49 @@ fn skip_blanks(reader: &mut dyn BufRead, start: bool) -> io::Result<Blanks> {
         }
     }
     Ok(Blanks::Done)
+}
+
+/// Takes one character that starts with `lead`, a byte that is not ASCII, if it is white space. The result is
+/// `Some(true)` when it was white space and has been taken, `None` when it is not and has not been taken, and
+/// `Some(false)` when it is not and has been taken, which happens only when it is split across two reads and the first
+/// part had to go.
+fn skip_wide_blank(reader: &mut dyn BufRead, lead: u8) -> io::Result<Option<bool>> {
+    let length = match lead {
+        0xC0..=0xDF => 2,
+        0xE0..=0xEF => 3,
+        0xF0..=0xF7 => 4,
+        // A continuation byte or an invalid one cannot be white space, and the types parser reports it.
+        _ => return Ok(None),
+    };
+    let buffer = reader.fill_buf()?;
+    if buffer.len() >= length {
+        let blank = std::str::from_utf8(&buffer[..length])
+            .ok()
+            .and_then(|text| text.chars().next());
+        return Ok(match blank {
+            Some(c) if c.is_whitespace() => {
+                reader.consume(length);
+                Some(true)
+            }
+            _ => None,
+        });
+    }
+    // The character is split across two reads, so it is taken a part at a time and decoded when it is whole.
+    let mut bytes = Vec::with_capacity(length);
+    while bytes.len() < length {
+        let buffer = reader.fill_buf()?;
+        let Some(&byte) = buffer.first() else {
+            break;
+        };
+        bytes.push(byte);
+        reader.consume(1);
+    }
+    Ok(
+        match std::str::from_utf8(&bytes).ok().and_then(|text| text.chars().next()) {
+            Some(c) if c.is_whitespace() => Some(true),
+            _ => Some(false),
+        },
+    )
 }
 
 /// Takes the rest of the line, including its end.
@@ -138,6 +191,49 @@ mod tests {
 
     fn token(text: &str) -> FirstToken {
         first_token(&mut Cursor::new(text.as_bytes().to_vec())).unwrap()
+    }
+
+    #[test]
+    fn white_space_is_what_the_lexer_takes_as_white_space() {
+        for blank in ["\u{A0}", "\u{85}", "\u{2003}", "\u{3000}", "\u{B}", " \u{A0}\t"] {
+            assert_eq!(
+                token(&format!("{blank}enum Shape = Dot;")),
+                FirstToken::Types,
+                "{blank:?}"
+            );
+            assert_eq!(token(&format!("{blank}{{}}")), FirstToken::Other, "{blank:?}");
+            assert_eq!(
+                token(&format!("{blank}// Only a comment.")),
+                FirstToken::Empty,
+                "{blank:?}"
+            );
+        }
+        assert_eq!(token("enum\u{A0}Shape = Dot;"), FirstToken::Types);
+        assert_eq!(token("enum\u{A0}:Shape"), FirstToken::Other);
+    }
+
+    #[test]
+    fn a_character_that_is_not_white_space_is_not_skipped() {
+        assert_eq!(token("\u{E9}num Shape"), FirstToken::Other);
+        assert_eq!(token("\u{200B}enum Shape"), FirstToken::Other);
+        assert_eq!(token("\u{A0}\u{200B}"), FirstToken::Other);
+        assert_eq!(token("enum\u{200B}"), FirstToken::Types);
+    }
+
+    #[test]
+    fn white_space_that_is_split_across_two_reads_is_taken() {
+        for capacity in 1..5 {
+            for (text, want) in [
+                ("\u{A0}enum Shape", FirstToken::Types),
+                ("\u{3000}\u{2003}x", FirstToken::Other),
+                ("\u{200B}enum", FirstToken::Other),
+                ("enum\u{200B}", FirstToken::Types),
+                ("\u{3000}", FirstToken::Empty),
+            ] {
+                let mut reader = BufReader::with_capacity(capacity, Cursor::new(text.as_bytes().to_vec()));
+                assert_eq!(first_token(&mut reader).unwrap(), want, "{text:?} with {capacity}");
+            }
+        }
     }
 
     #[test]
