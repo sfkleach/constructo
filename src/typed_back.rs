@@ -8,7 +8,7 @@
 //! what is written is what `check` accepts.
 
 use crate::ast::{Argument, Member, TaggedBody, Value, ValueKind, VariantBody};
-use crate::diagnostics::{Diagnostic, Pos};
+use crate::diagnostics::{shown, Diagnostic, Pos};
 use crate::json::{Kind, Member as JsonMember, Node};
 use crate::project::PRELUDE_PROJECT;
 use crate::typecheck::{check_value_as, instantiate, instantiate_fields, Scheme, Ty};
@@ -197,11 +197,11 @@ impl Reader<'_, '_, '_> {
                 };
                 return Err(self.fail(
                     member.key_pos,
-                    format!("Unknown key \"{}\" for {}; {}", member.key, what, known),
+                    format!("Unknown key \"{}\" for {}; {}", shown(&member.key), what, known),
                 ));
             };
             if out.iter().any(|earlier| earlier.name == member.key) {
-                return Err(self.fail(member.key_pos, format!("Repeated key \"{}\"", member.key)));
+                return Err(self.fail(member.key_pos, format!("Repeated key \"{}\"", shown(&member.key))));
             }
             out.push(Member {
                 name: member.key.clone(),
@@ -290,7 +290,7 @@ impl Reader<'_, '_, '_> {
             let names: Vec<&str> = decl.variants.iter().map(|variant| bare(&variant.name)).collect();
             let message = format!(
                 "\"{}\" is not a constructor of {}; the constructors are {}",
-                key,
+                shown(key),
                 self.show(ty),
                 names.join(", ")
             );
@@ -470,6 +470,21 @@ mod tests {
         assert_eq!(
             read("", "{ a: Nat }", "[]").unwrap_err(),
             "1:1 Expected an object for { a: Nat }, found an array"
+        );
+    }
+
+    #[test]
+    fn text_from_the_document_is_shown_without_control_characters() {
+        let ty = "{ a: Nat }";
+        assert_eq!(
+            read("", ty, "{\"a\": 1, \"b\\u001b[2J\\n\": 2}").unwrap_err(),
+            "1:10 Unknown key \"b\\u001b[2J\\n\" for the record; the fields are a"
+        );
+        let shape = |json: &str| read(SHAPES, "Shape", json);
+        assert_eq!(
+            shape("\"Sq\\u001buare\"").unwrap_err(),
+            "1:1 \"Sq\\u001buare\" is not a constructor of Shape; \
+             the constructors are Circle, Square, Rect, Dot, Ping, Many, Named"
         );
     }
 
