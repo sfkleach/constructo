@@ -1,16 +1,18 @@
 # The convert command
 
 `constructo convert` reads data-values and writes them in another notation. This document says what it reads, what it
-writes, what it prints when something is wrong, and what its exit code means. Four formats exist so far: `json-exact`,
+writes, what it prints when something is wrong, and what its exit code means. Five formats exist so far: `json-exact`,
 which writes every kind of value in an explicit form and needs no types, `jsonl-exact`, which writes the same encoding
 on a line for each value, `json-typed`, which writes natural JSON in the shapes that serde uses, and needs the types,
-and `jsonl-typed`, which writes the same encoding on a line for each value. With `--from` all four are read back and
-the values are written as text. The typed ones need the type that the JSON is a value of, which `--type` gives.
+`jsonl-typed`, which writes the same encoding on a line for each value, and `xml`, which writes the explicit form of
+`json-exact` as XML. With `--from` all five are read back and the values are written as text. The typed ones need the
+type that the JSON is a value of, which `--type` gives.
 
 ```text
 constructo convert --to=json-exact|jsonl-exact [--to-array] [--compact] [-x] [--stdin] [FILES]...
+constructo convert --to=xml [--compact] [-x] [--stdin] [FILES]...
 constructo convert --to=json-typed|jsonl-typed [--to-array] [--compact] [--project=FOLDER] [OPTIONS] [FILES]...
-constructo convert --from=json-exact|jsonl-exact [--compact] [--stdin] [FILES]...
+constructo convert --from=json-exact|jsonl-exact|xml [--compact] [--stdin] [FILES]...
 constructo convert --from=json-typed|jsonl-typed --type=TYPE [--compact] [--project=FOLDER] [OPTIONS] [FILES]...
 ```
 
@@ -23,11 +25,12 @@ The inputs are the `FILES`, in the order that they are written, and then the sta
 which is processed as one more file, named `<stdin>`, after the others. A run needs at least one of them, and without
 one the command line is refused as a usage error (exit code 2).
 
-For `json-exact` and `jsonl-exact` an input is read as a values file. For `json-typed` and `jsonl-typed` the inputs are those of
-[the check command](check-command.md), as [its section](#the-format-json-typed) says. The inputs are read one at a time. An
-input that cannot be read ends the run at once with exit code 2. An input that has a syntax error, or for `json-exact`
-and `jsonl-exact` is a types file, ends the reading with exit code 1, so that an unreadable input after it is never
-reached, as for [the check command](check-command.md). The standard input is only read if none of the files has failed.
+For `json-exact`, `jsonl-exact` and `xml` an input is read as a values file. For `json-typed` and `jsonl-typed` the
+inputs are those of [the check command](check-command.md), as [its section](#the-format-json-typed) says. The inputs are
+read one at a time. An input that cannot be read ends the run at once with exit code 2. An input that has a syntax
+error, or for `json-exact`, `jsonl-exact` and `xml` is a types file, ends the reading with exit code 1, so that an
+unreadable input after it is never reached, as for [the check command](check-command.md). The standard input is only
+read if none of the files has failed.
 
 - **A types file** is an error, whatever its place: `NAME is a types file; convert reads values files`, at line 1,
   column 1 of the file. The kind of a file is decided by its first token, as the check command says.
@@ -37,7 +40,7 @@ reached, as for [the check command](check-command.md). The standard input is onl
   against a schema: `[1, "x"]` is converted as it is. A name is not looked up either. A name is a const or a constructor
   by its form alone, as [decision 35](../decisions/0035-a-const-name-starts-with-a-lower-case-letter.md) says.
 
-For these two formats the prelude is not loaded and no project is read, because nothing is resolved. Of the options of
+For these formats the prelude is not loaded and no project is read, because nothing is resolved. Of the options of
 the check command, only `-x` and `--no-experimental` are accepted, since the postfix `?` has to be switched on to be
 parsed. A `?` is written as the `Some(...)` that it stands for. The options that `json-typed` takes in addition, such
 as `--project` and `--no-prelude`, are refused: `ERROR: --no-prelude does not apply to json-exact, which needs no
@@ -46,7 +49,8 @@ types`, with exit code 2.
 ## One value, or all of them
 
 This section is about `json-exact` and `json-typed`, which each write a single document. The lines formats write every
-value, as [their sections](#the-format-jsonl-exact) say.
+value, as [their sections](#the-format-jsonl-exact) say, and so does [`xml`](#the-format-xml), whose one document is a
+list of all of them.
 
 - **By default the first value is converted.** It is the first value that there is, across the inputs in order, so an
   input with no values is passed over. If any value follows it, in the same input or in a later one, there is one
@@ -63,9 +67,9 @@ the first value is a convenience, and it does not ask for the rest of the file t
 
 ## Output
 
-The output is written to the standard output. A format that writes one document, `json-exact` and `json-typed`, writes
-it only if the conversion is whole, since a document that was cut short by an error would not be valid JSON, so an error
-leaves the standard output empty. A lines format writes each line as it is converted, as [its
+The output is written to the standard output. A format that writes one document, `json-exact`, `json-typed` and `xml`,
+writes it only if the conversion is whole, since a document that was cut short by an error would not be valid, so an
+error leaves the standard output empty. A lines format writes each line as it is converted, as [its
 section](#the-format-jsonl-exact) says. Warnings and errors go to the standard error, in the usual form, which for a
 warning starts `WARNING:`. See [the exit codes](exit-codes.md).
 
@@ -280,6 +284,86 @@ with the inputs, the options, the settings and the checking of `json-typed`:
 - **`--compact` makes no difference**, and is accepted. **`--to-array` is a usage error**, exit code 2, for the reason
   that it is for `jsonl-exact`.
 
+## The format `xml`
+
+`--to=xml` writes every value of every input, in order, as one XML document. It is exact in the sense of `json-exact`:
+the kind of every value, its structure and the text of its numbers are kept, no types are needed, and what is not kept
+is the text around the values, which is the comments, the layout and the spelling of the escapes in a string. See
+[decision 40](../decisions/0040-xml-is-written-with-attributes-and-a-values-root.md).
+
+The document starts with the declaration `<?xml version="1.0" encoding="UTF-8"?>`, and its root is `values`, which is
+not a kind of value. The root holds the values, so a document is always a list, and there is no choice between one
+value and an array. Every other element is empty or holds only elements, and the text of a literal or a name is an
+attribute: `value` for a number or a string, and `name` for a name. A name is never made an element name, since a
+qualified name such as `shapes::Circle` is not a valid XML name.
+
+| A value           | Is written as                                                                   |
+|-------------------|---------------------------------------------------------------------------------|
+| `5`               | `<nat value="5"/>`                                                              |
+| `+5`, `-7`        | `<int value="+5"/>`, `<int value="-7"/>`                                        |
+| `1.50`            | `<float value="1.50"/>`                                                         |
+| `"hi"`            | `<string value="hi"/>`                                                          |
+| `[1, 2]`          | `<array><nat value="1"/><nat value="2"/></array>`                               |
+| `{ b: 1, a: 2 }`  | `<record><field name="b">...</field><field name="a">...</field></record>`       |
+| `red`             | `<const name="red"/>`                                                           |
+| `Quit`            | `<constructor name="Quit"/>`                                                    |
+| `Move { x: 1 }`   | `<constructor name="Move"><record>...</record></constructor>`                   |
+| `Write("hi")`     | `<constructor name="Write"><tuple><string value="hi"/></tuple></constructor>`   |
+| `Span(1, end: 3)` | `<constructor name="Span"><tuple>...</tuple><named>...</named></constructor>`   |
+| `Users[u1, Bob]`  | `<constructor name="Users"><array>...</array></constructor>`                    |
+
+(The examples are shown on one line each, and `...` stands for the elements inside.)
+
+- **The correspondence with `json-exact` is one to one.** The kinds are the same. A record is a `record` of `field`
+  elements, each with one value in it, and a constructor has at most one body, `record`, `tuple` or `array`, and then
+  `named` after a `tuple`, which holds `field` elements. The members and the named arguments keep the order in which
+  they were written.
+- **An empty body is kept.** `Ping()` is `<constructor name="Ping"><tuple/></constructor>`, `Move {}` has `<record/>`
+  and `Users[]` has `<array/>`, and none of them is the same as no body at all.
+- **Numbers keep their text**, as written: `+5` keeps its plus, `1.50` its trailing zero and `-2.5e3` its exponent. A
+  name is kept as written, with its qualifier, and is a `const` if the last part of it starts with a lower-case letter
+  or `_` and a `constructor` otherwise.
+- **An attribute is in double quotes.** `&`, `<`, `>` and `"` are written as `&amp;`, `&lt;`, `&gt;` and `&quot;`. A
+  tab, a newline and a carriage return are always written as `&#9;`, `&#10;` and `&#13;`, since an XML parser reads one
+  that is written as itself in an attribute as a space, and would change the string. Everything else is written as it
+  is, in UTF-8, so the white space at the ends of a string is kept.
+- **A string that XML 1.0 cannot hold is an error**, with exit code 1. XML 1.0 has no way to write the control
+  characters U+0000 to U+001F other than tab, newline and carriage return, nor U+FFFE and U+FFFF, not even as a numeric
+  reference. The error is at the string and names the character: `The string holds U+0001, which XML 1.0 cannot
+  write`. XML 1.1 is not used, because it still cannot write U+0000 and many tools do not read it.
+- **A name given twice is an error**, with the messages of `json-exact`, `Duplicate field a` and `Argument a is given
+  more than once in NAME`, though XML could hold both. The two formats are kept to the same inputs.
+
+The layout is one element on each line, with two spaces of indentation for each level and a new line at the end, and an
+element with nothing in it is closed by `/>`. There is no rule about width, so what is written for a value never depends
+on what is around it. `--compact` writes the declaration, a new line, and then the document on one line, with no white
+space between the elements. For example, `Move { x: 1 }; red;` is written as:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<values>
+  <constructor name="Move">
+    <record>
+      <field name="x">
+        <nat value="1"/>
+      </field>
+    </record>
+  </constructor>
+  <const name="red"/>
+</values>
+```
+
+- **Every value is converted**, so there is no first value to choose and no warning for the ones that follow.
+- **No values at all give `<values/>`**, with exit code 0, since an empty list is a valid document and nothing is wrong
+  with the inputs.
+- **The document is written whole.** Every input is read and every value is encoded before anything is written, so an
+  error anywhere, in the syntax, in a name or in a string, leaves the standard output empty.
+- **`--to-array` is a usage error**, exit code 2: `ERROR: --to-array does not apply to xml, which always writes a list
+  of values`.
+- **The options** are those of `json-exact`: `--compact`, `-x`, `--no-experimental`, `--stdin`, `--config` and
+  `--cache` are accepted, and the options for types are refused with `ERROR: --no-prelude does not apply to xml, which
+  needs no types`.
+
 ## Reading back with `--from`
 
 `--from` reads the JSON that `--to=json-exact` or `--to=jsonl-exact` writes, and writes the values as text, in the
@@ -415,15 +499,58 @@ value, so it needs memory for the document. Large data is for `jsonl-typed`.
 `--to=json-typed` reads. `--to-array`, `-x` and `--no-experimental` are usage errors. See
 [decision 39](../decisions/0039-reading-json-typed-back-is-driven-by-a-type.md).
 
+## Reading back `xml`
+
+`--from=xml` reads the XML that `--to=xml` writes, and writes the values as text, as `--from=json-exact` does. The
+inputs are `FILES` and then `--stdin`. Each is one document, and the values of all of them are written in order. See
+[decision 41](../decisions/0041-reading-xml-back-is-strict-with-a-parser-of-our-own.md).
+
+- **The root is `values`.** Each element in it is a value, in the shape that [`--to=xml` writes](#the-format-xml). A
+  document whose root is a value, such as `<nat value="5"/>`, is an error at the root with a note that says to wrap it
+  in `<values>`, and so is any other root. `<values/>` is a document with no values, which writes nothing, and exit
+  code 0. A file with no document in it, empty or with only white space or comments, is an error: `Expected an element,
+  but the document is empty`.
+- **The reading is strict.** An element has exactly the attribute that its kind has, `value` for a `nat`, `int`,
+  `float` or `string` and `name` for a `const`, a `constructor` and a `field`, and a missing, an unknown or a repeated
+  attribute is an error. A leaf has no content. An `array` and a `tuple` hold values, a `record` and a `named` hold
+  `field` elements with one value each, and a constructor holds at most one of `record`, `tuple` and `array`, in that
+  place, and then a `named` after a `tuple`. A name that is given twice among the fields of a `record` or of a `named`
+  is an error at the second, as a repeated key is for JSON. The text of a number must read back as a literal of the kind
+  that its element names, so `<int value="5"/>` is an error, with a note that says that it reads as a `nat`, and a name
+  has to be one that data-values can have. The lexer and parser of data-values decide all of this, as they do for
+  `json-exact`.
+- **Only a small subset of XML 1.0 is read,** by a parser of our own, and the rest is refused. It accepts a byte order
+  mark, a declaration `<?xml version="1.0" encoding="UTF-8"?>` in which the encoding may be left out, comments, white
+  space between elements, and attributes in single or double quotes. It refuses a DOCTYPE, so nothing is declared, and
+  every entity other than the five that XML defines, `&amp;`, `&lt;`, `&gt;`, `&quot;` and `&apos;`, which is named in
+  the message. It refuses CDATA sections, processing instructions, text between elements, namespaces (a name with a
+  colon, and `xmlns`), a declaration that is not version 1.0 or not UTF-8, and `standalone`. Numeric references such as
+  `&#10;` and `&#xA;` are read, if they name a character that XML 1.0 can hold. The nesting is limited to 200 levels,
+  as it is for JSON.
+- **A literal tab, newline or carriage return in an attribute value is refused.** An XML parser reads one as a space,
+  and `--to=xml` never writes one, since it writes `&#9;`, `&#10;` and `&#13;`. So it comes from another tool or from a
+  hand edit, and reading it as a space would change a string without a word. The error is at the character, with a note
+  that says to write the reference. The white space inside a value, at its ends too, is otherwise kept as it is.
+- **The values are written as for `--from=json-exact`:** each ends with `;` and a new line, in the 80-character layout,
+  or one to a line with `--compact`.
+- **A document is read whole.** A syntax error in it, such as a refused entity or an element that is not closed, writes
+  nothing from that document, and an error in a value comes after the values before it, which have been written. The
+  run stops at the first problem with exit code 1. An input that cannot be read is exit code 2.
+- **The options** are those of `--from=json-exact`: `--compact`, `--stdin`, `--config` and `--cache` are accepted, and
+  `--to-array`, `-x`, `--no-experimental`, `--type` and the options for types are usage errors, exit code 2.
+
+What comes back is the values and the text of their numbers, as it is for `json-exact`, and what is not kept is the
+text of the file: comments, layout and the spelling of the entities.
+
 ## The options `--to` and `--from`
 
 Exactly one of them is required, and giving both or neither is a usage error, exit code 2. The value of each is matched
-exactly. `--from` and `--to` each take `json-exact`, `jsonl-exact`, `json-typed` and `jsonl-typed`, and these are the
-only ones that exist. Any other value is a usage error, exit code 2. A bare `json` is not a format, so that nobody
-takes the exact form for the natural one by default. The message starts `ERROR: json is not a format; choose json-exact
-(every kind kept, no types)` and goes on to name the others. Any other name, `jsonl` among them, gives `ERROR: NAME is
-not a format; choose json-exact, jsonl-exact, json-typed or jsonl-typed`. See [decision
-36](../decisions/0036-two-kinds-of-json.md).
+exactly. `--to` and `--from` each take `json-exact`, `jsonl-exact`, `json-typed`, `jsonl-typed` and `xml`, and these
+are the only ones that exist. Any other value is a usage error, exit code 2. A bare `json` is not a format, so that
+nobody takes the exact form for the natural one by default. The message starts `ERROR: json is not a format; choose
+json-exact (every kind kept, no types)` and goes on to name the others. Any other name, `jsonl` among them, gives
+`ERROR: NAME is not a format; choose json-exact, jsonl-exact, json-typed, jsonl-typed or xml`. See
+[decision 36](../decisions/0036-two-kinds-of-json.md).
 
 ## Settings
 
@@ -439,16 +566,16 @@ used by the typed formats for a project from a repository, and otherwise neither
 | Code | When                                                                                          |
 |------|-----------------------------------------------------------------------------------------------|
 | 0    | The values were converted, with or without a warning.                                         |
-| 1    | An input has a syntax error, a name is given twice, or for a document format there is no      |
-|      | value to convert. With `--from`, JSON that is not valid, or is not what the format or the    |
-|      | type says. For the exact formats an input that is a types file. For the typed formats an      |
-|      | error in the types or in `--type`, a type error, `Some(None)`, or a project that does not     |
-|      | match its lock.                                                                               |
+| 1    | An input has a syntax error, a name is given twice, a string that `xml` cannot write, or for  |
+|      | a document format there is no value to convert. With `--from`, JSON or XML that is not valid, |
+|      | or is not what the format or the type says. For the exact formats and `xml` an input that is a      |
+|      | types file. For the typed formats an error in the types or in `--type`, a type error,         |
+|      | `Some(None)`, or a project that does not match its lock.                                      |
 | 2    | An option is not understood, `--to` and `--from` are both given or neither, the format is not |
-|      | one, `--to-array` is given with a lines format or with `--from`, an option for types is given |
-|      | with a format that needs none, `--type` is missing or is not wanted, there are no inputs or   |
-|      | no JSON, one cannot be read, the project or the settings file is bad, or the output cannot be |
-|      | written.                                                                                      |
+|      | one, `--to-array` is given with a lines format, `xml` or `--from`, an option for types is     |
+|      | given with a format that needs none, `--type` is missing or is not wanted, there are no       |
+|      | inputs or no JSON, one cannot be read, the project or the settings file is bad, or the output |
+|      | cannot be written.                                                                            |
 
 ## Related
 

@@ -1,0 +1,8 @@
+// Strings that need escapes in XML, one to a value.
+"";
+" padded ";
+"a & b";
+"<tag> and \"quoted\"";
+"it's";
+"tab \t newline \n carriage return \r";
+"café ☕ 😀";

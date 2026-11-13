@@ -1,0 +1,7 @@
+<?xml version='1.0'?>
+<!-- Written by hand, as another tool might write it: single quotes, comments, entities and white space. -->
+<values>
+  <string value='it&apos;s &amp; &lt;ok&gt; &#x41;&#66; tab&#9;newline&#10;'/>
+  <!-- A comment between two values. -->
+  <constructor name='Move'><record><field name='x'><nat value='1'/></field></record></constructor>
+</values>

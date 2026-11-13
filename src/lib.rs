@@ -24,6 +24,9 @@ pub mod typed_files;
 pub mod validate;
 pub mod values_text;
 pub mod verify;
+pub mod xml;
+pub mod xml_back;
+pub mod xml_tree;
 
 use ast::{ConstDecl, TypesFile};
 use convert::Json;
