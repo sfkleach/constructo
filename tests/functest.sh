@@ -2045,6 +2045,11 @@ expect_before_error "from jsonl-typed: the values before a number that does not 
 expect_before_error "from jsonl-typed: a number that does not fit a Nat" "5;" \
     "ERROR: The number 1.5 does not fit Nat (*not-a-nat.jsonl, line 2, col 1)" --from=jsonl-typed --type=Nat \
     "$TB/not-a-nat.jsonl"
+expect_convert_error "from typed: --type is one type and not a list of them" 1 \
+    "ERROR: Only one type is expected, and this is another (--type, line 1, col 6)" --from=json-typed \
+    --type='Nat, String' -- /dev/null
+expect_convert_error "from typed: --type is a type and not a named parameter" 1 \
+    "ERROR: A type is expected, and not a name (--type, line 1, col 1)" --from=json-typed --type='a: Nat' -- /dev/null
 expect_convert_error "from typed: an error in the type is found before anything is read" 1 \
     "ERROR: Unknown type Shap (--type, line 1, col 1)" --from=jsonl-typed --type=Shap "$TS" "$TB/shapes.jsonl"
 actual=0
