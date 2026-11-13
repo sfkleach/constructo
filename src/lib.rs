@@ -371,13 +371,35 @@ pub fn convert_typed_back(
 }
 
 /// The type that a source of the form that `convert_typed_back` makes asks for: the one parameter of its one variant.
-fn target_of(parsed: &Parsed) -> Option<Ty> {
-    let Parsed::Types(file) = parsed else { return None };
-    let variant = file.enums.first()?.variants.first()?;
-    let ast::VariantBody::Tuple(parameters) = &variant.body else {
-        return None;
+/// The text of the expression can make more than that, as `Nat, String` makes two parameters, and `a: Nat` a named
+/// one. It is then an error at the part that is too much, with the position in the expression and not in the source.
+fn target_of(parsed: &Parsed) -> Result<Ty, Diagnostic> {
+    let in_expression = |pos: Pos| Pos {
+        line: pos.line.saturating_sub(1).max(1),
+        ..pos
     };
-    Some(typecheck::instantiate(&parameters.first()?.ty, &[], &[]))
+    let fail = |pos: Pos, message: &str| Diagnostic::new(TARGET_SOURCE, in_expression(pos), message.to_string());
+    let first = Pos { line: 1, col: 1 };
+    let Parsed::Types(file) = parsed else {
+        return Err(fail(first, "A type is expected"));
+    };
+    // The source is one declaration of one variant that has a tuple body, or else something that is not a type has
+    // been put in it, which the parser may well have accepted as a declaration of its own.
+    let [declaration] = &file.enums[..] else {
+        return Err(fail(first, "Only one type is expected"));
+    };
+    let ([variant], true) = (&declaration.variants[..], file.consts.is_empty()) else {
+        return Err(fail(declaration.pos, "Only one type is expected"));
+    };
+    let ast::VariantBody::Tuple(parameters) = &variant.body else {
+        return Err(fail(first, "A type is expected"));
+    };
+    match &parameters[..] {
+        [ast::Parameter { name: None, ty, .. }] => Ok(typecheck::instantiate(ty, &[], &[])),
+        [ast::Parameter { name: Some(_), pos, .. }, ..] => Err(fail(*pos, "A type is expected, and not a name")),
+        [_, second, ..] => Err(fail(second.pos, "Only one type is expected, and this is another")),
+        [] => Err(fail(first, "A type is expected")),
+    }
 }
 
 /// The layout of sources that were given without a project: they make one project that has no name, which imports the
@@ -650,16 +672,19 @@ fn type_check_values(
         // The values are somewhere else, and so are read by the caller, if the consts were all right.
         if !stopped {
             let target_source = reading.target_source;
-            if let Some(target) = target_of(&parsed_sources[target_source]) {
-                let root_show = |text: &str| show(target_source, text);
-                let context = ReadContext {
-                    env: &env,
-                    target,
-                    show: &root_show,
-                };
-                if let Err(e) = (reading.run)(&context) {
-                    reading.failure = Some(e);
+            match target_of(&parsed_sources[target_source]) {
+                Ok(target) => {
+                    let root_show = |text: &str| show(target_source, text);
+                    let context = ReadContext {
+                        env: &env,
+                        target,
+                        show: &root_show,
+                    };
+                    if let Err(e) = (reading.run)(&context) {
+                        reading.failure = Some(e);
+                    }
                 }
+                Err(diagnostic) => reading.failure = Some(convert::LinesError::Invalid(vec![diagnostic])),
             }
         }
         return infos;
@@ -1638,6 +1663,27 @@ mod tests {
         assert!(errors[0].starts_with("--type:"), "{errors:?}");
         let errors = target_of_type(&types, "Option<Shape, Shape>").unwrap_err();
         assert!(errors[0].starts_with("--type:1:"), "{errors:?}");
+    }
+
+    #[test]
+    fn the_text_of_a_type_is_one_type() {
+        let types = ["enum Shape = Dot;"];
+        for (text, message) in [
+            (
+                "Nat, String",
+                "--type:1:6 Only one type is expected, and this is another",
+            ),
+            (
+                "[Shape], Nat",
+                "--type:1:10 Only one type is expected, and this is another",
+            ),
+            ("a: Nat", "--type:1:1 A type is expected, and not a name"),
+            ("", "--type:1:1 A type is expected"),
+            ("  // Nothing.", "--type:1:1 A type is expected"),
+        ] {
+            let errors = target_of_type(&types, text).unwrap_err();
+            assert_eq!(errors, [message], "{text:?}");
+        }
     }
 
     #[test]
