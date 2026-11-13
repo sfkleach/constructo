@@ -1828,6 +1828,24 @@ rm -f "$proj/app/constructo.lock" "$proj/app/constructo.toml" "$proj/app/scene.t
     "$proj/lib/shapes.types" "$proj/v.values" "$proj/expected-first.json" "$proj/expected-all.json"
 rmdir "$proj/app" "$proj/lib" "$proj"
 
+# The declaration that holds the type of --type has a name that an import does not give to another name, which no
+# source mentions.
+proj="$(mktemp -d)"
+mkdir "$proj/app" "$proj/lib"
+printf '[project]\nname = "com.example.lib"\n' >"$proj/lib/constructo.toml"
+printf 'enum Shape = Dot;\n' >"$proj/lib/shapes.types"
+printf '[project]\nname = "com.example.app"\n\n[[import]]\nproject-name = "com.example.lib"\ngroup = "local"\n' \
+    >"$proj/app/constructo.toml"
+printf 'path = "../lib"\n\n[import.rename]\nConstructoTarget = "Shape"\n' >>"$proj/app/constructo.toml"
+printf '5\n' >"$proj/v.json"
+printf '5;\n' >"$proj/expected.values"
+"$CONSTRUCTO" project update "$proj/app" >/dev/null 2>&1
+expect_json "from json-typed: --type is not confused with a name that an import renames to ConstructoTarget" \
+    "$proj/expected.values" --from=json-typed --type=Nat --project="$proj/app" "$proj/v.json"
+rm -f "$proj/app/constructo.lock" "$proj/app/constructo.toml" "$proj/lib/constructo.toml" "$proj/lib/shapes.types" \
+    "$proj/v.json" "$proj/expected.values"
+rmdir "$proj/app" "$proj/lib" "$proj"
+
 # The names of the prelude are written as the project sees them, which is in full when it imports the prelude into a
 # group and not into local.
 proj="$(mktemp -d)"

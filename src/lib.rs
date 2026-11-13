@@ -331,9 +331,18 @@ pub fn convert_typed_back(
         continue_after_error: false,
         ..*options
     };
-    // The name is not one that any source mentions, so that it cannot be taken for a declaration of the project.
+    // The name is not one that any source mentions, so that it cannot be taken for a declaration of the project. Nor
+    // is it one that an import gives to a name of another project, which no source need mention.
+    let renamed = |name: &str| {
+        layout.projects.iter().any(|project| {
+            project
+                .imports
+                .iter()
+                .any(|import| import.rename.iter().any(|(new, ..)| new == name))
+        })
+    };
     let mut name = String::from("ConstructoTarget");
-    while sources.iter().any(|source| source.text.contains(&name)) || type_text.contains(&name) {
+    while sources.iter().any(|source| source.text.contains(&name)) || type_text.contains(&name) || renamed(&name) {
         name.push('_');
     }
     let mut all = sources.to_vec();
