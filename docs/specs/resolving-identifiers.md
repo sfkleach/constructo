@@ -32,10 +32,17 @@ several groups of the same importer, by writing several imports of it.
 - The group `local` holds the project itself, the projects that are imported with `group = "local"`, and, unless the
   project says otherwise, the prelude.
 - An import with no group puts the project in no group. It can be named only by its full name.
-- A full name refers to the project itself, or to a project that it imports directly.
+- A full name refers to the project itself, or to a project that it imports directly. In a values file it can refer to
+  any project that is used, as below.
 
 Imports are not transitive. If A imports B and B imports C, C is loaded and checked because B's declarations may name
 it, but A can name only its own declarations and those of B. To name C, A has to import C.
+
+The exception is the values of a values file, where a full name can be that of any project of the run, imported or not.
+A value does not add a dependency. The types fix which constructors it can use, so a value of a type of B that holds a
+type of C has to write the constructors of C, and nothing in A could say how else. This is also how `convert` writes
+what it reads, since it writes full names. A full name that is not that of a project of the run is an error, so a
+misspelt name is never taken for a project. The constants of a types file are declarations, and are not an exception.
 
 ## The algorithm
 
@@ -45,7 +52,7 @@ To resolve a name `N` written in a file of project P:
    - For a bare name, or `local::N`, they are the projects in the group `local` of P.
    - For `g::N` they are the projects in the group `g` of P. If P has no group `g` it is an error.
    - For `a.b.c::N` the candidate is the project named `a.b.c`, which must be P itself or a project that P imports
-     directly. If it is not, it is an error.
+     directly, or in the value of a values file, any project of the run. If it is not, it is an error.
 2. Choose the **namespace** from the use. There are two: types, and constructors and consts together (decision 4). A
    name where a type is expected is looked up among the types, and any other name among the constructors and consts.
 3. Keep the candidates that declare `N` in that namespace, leaving out those whose import hides `N` and those whose
@@ -63,7 +70,8 @@ the name.
 
 - A group that the project does not have: `Unknown group g`.
 - A full name that is neither the project nor a project that it imports:
-  `Unknown project a.b.c: a project can name itself and the projects it imports`.
+  `Unknown project a.b.c: a project can name itself and the projects it imports`. In a values file, a full name that is
+  not that of a project of the run: `Unknown project a.b.c: no project of that name is used here`.
 - A qualifier whose projects do not declare the name: `Unknown constructor Foo in g`, or `Unknown type` or
   `Unknown const` for the other namespaces.
 - A bare name that nothing declares is not a resolution error. The checks that follow report it as unknown.

@@ -1,0 +1,3 @@
+// A type of lib has a type of base in it, which app does not import. A value is written with the full name of
+// the project of every constructor in it, and so it can name example.base, though a declaration of app could not.
+lib::Scene { shape: example.base::Dot };
