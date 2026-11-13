@@ -42,8 +42,8 @@ Those of the task, summarised, and one that the plan relies on:
 
 - `--type=TYPE` is required, takes any type expression, and a document is exactly one value of it.
 
-- The numbers are adjusted to the slot and refused where they cannot fit, the keys are strict, a field with a default
-  may be left out, and the names are plain where they resolve and qualified where ambiguous.
+- The numbers are adjusted to the slot and refused where they cannot fit, the keys are strict, every field of a record
+  is required, and the names are plain where they resolve and qualified where ambiguous.
 
 - Types files come among the files, told apart by the first token. An empty file is an ignored types file before the
   first JSON file and is JSON after it. `--` ends the types files, and then the sides are strict.
@@ -129,10 +129,10 @@ follows the mapping of decision 37 in reverse:
   `Option<Option<T>>` reads `null` as `None` and anything else as `Some` of the inner reading. These are told by
   `prelude_kind`, as the encoder does.
 
-- **Keys.** For a record, or a variant with fields, an unknown key is an error at the key, a missing field that has a
-  default is left out of the value, and a missing field with no default is an error at the object, naming it. Whether
-  a type has a default is decided by the code of the checker and of the encoder, shared and not copied, and the
-  `--default-limit` applies to it. A repeated key is an error at the second.
+- **Keys.** For a record, or a variant with fields, an unknown key is an error at the key, and a missing field is an
+  error at the object, naming it, whether or not the type of the field has a default, since the types require every
+  field of a record. A repeated key is an error at the second. A tuple that ends in named parameters may be short of
+  them, and the check gives them their defaults, as for the data-values.
 
 - **Errors** say what was expected, by the type as it is shown in the checker's messages, and what was found:
   `Expected a string for Shape, found a number`. The position is that of the JSON node.
@@ -228,8 +228,8 @@ have been written.
    including the adjustment of each number and each refusal.
 
 2. The enums: a unit variant, a record, a tuple, a one-parameter tuple unwrapped, an empty tuple, an array variant,
-   the prelude, a nested `Option`, a generic enum, and the keys (unknown, missing with and without a default,
-   repeated). A test of each error with its position.
+   the prelude, a nested `Option`, a generic enum, and the keys (unknown, missing, including a field whose type has a
+   default, repeated). A test of each error with its position.
 
 3. The names, by the namer: plain, qualified where it is ambiguous, with a renamed and a hidden import, and the
    prelude always plain.
@@ -244,9 +244,9 @@ have been written.
 
 2. Functional tests, with the files that `--to=json-typed` writes in `syntax/examples/convert/typed/`: a round trip of
    each, the array type, `Option`, a type in a project that is named by `--project`, types files among the files, `--`
-   with an empty file on each side, a number adjusted to each kind of slot, an unknown key, a missing field with and
-   without a default, an unknown constructor, a type that does not exist, a JSON syntax error, the usage errors, and
-   `--stdin`.
+   with an empty file on each side, a number adjusted to each kind of slot, an unknown key, a missing field, with and
+   without a default for its type, an unknown constructor, a type that does not exist, a JSON syntax error, the usage
+   errors, and `--stdin`.
 
 3. The spec section of `docs/specs/convert-command.md`, `exit-codes.md`, `config-file.md`, the CHANGELOG and the
    README, and decision 39, which records the synthetic declaration, the shared reading of the types and the two rules
@@ -279,7 +279,7 @@ have been written.
   its own.
 
 - **Stack depth.** The reader recurses as deep as the JSON, which is at most 200 levels, and the types that it follows
-  are as deep as that. The builder of defaults is not needed, since a missing field is left out.
+  are as deep as that. The builder of defaults is not needed, since every field of a record is required.
 
 - **Size of a JSON document.** A JSON file is streamed from the start only for `jsonl-typed`. A `json-typed` document
   is parsed whole, as in Step 5, because it is one value, so its memory is the size of the document. Large data goes in
