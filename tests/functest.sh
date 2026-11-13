@@ -1827,6 +1827,22 @@ fi
 rm -f "$proj/app/constructo.lock" "$proj/app/constructo.toml" "$proj/app/scene.types" "$proj/lib/constructo.toml" \
     "$proj/lib/shapes.types" "$proj/v.values" "$proj/expected-first.json" "$proj/expected-all.json"
 rmdir "$proj/app" "$proj/lib" "$proj"
+
+# The names of the prelude are written as the project sees them, which is in full when it imports the prelude into a
+# group and not into local.
+proj="$(mktemp -d)"
+printf '[project]\nname = "com.example.app"\ninclude = ["*.types"]\n\n[[import]]\nproject-name = "constructo.prelude"\n' \
+    >"$proj/constructo.toml"
+printf 'group = "std"\nbuiltin = "constructo:/prelude"\n' >>"$proj/constructo.toml"
+printf 'enum Speed = Fast, Slow;\n' >"$proj/speed.types"
+printf '[null, 3]\n' >"$proj/v.json"
+printf '[constructo.prelude::None, constructo.prelude::Some(3)];\n' >"$proj/expected.values"
+expect_json "from json-typed: the prelude is written as the project imports it" "$proj/expected.values" \
+    --from=json-typed --type='[std::Option<Nat>]' --project="$proj" "$proj/v.json"
+expect_exit "from json-typed: what is written for the prelude is accepted by check in the project" 0 check \
+    --project="$proj" "$proj/expected.values"
+rm -f "$proj/constructo.toml" "$proj/speed.types" "$proj/v.json" "$proj/expected.values"
+rmdir "$proj"
 rm -f "$conv_dir/settings.toml"
 
 # `--from` reads the JSON that `--to` writes and writes the values as text. The examples are in `back/`.
