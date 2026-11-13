@@ -1,4 +1,6 @@
 # 0025 - Names are resolved in the project that writes them, 2026-11-01
+> Amended by [decision 42](0042-a-value-can-name-any-project-by-its-full-name.md): a value of a values file can write the full name of any project of the run, though a declaration still cannot.
+
 > Amended by [decision 32](0032-the-projects-of-a-group-share-no-names.md): two imports in one group that declare a name are a duplicate where it is declared, and a name is never ambiguous at its use.
 
 > Amended by [decision 31](0031-a-declaration-that-clashes-with-its-own-scope-is-a-duplicate.md): a declaration that clashes with the project's own scope is a duplicate, and only imports in one group are ambiguous.

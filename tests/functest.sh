@@ -843,6 +843,8 @@ if [[ "$listing" == *"FAILED: "*"/app (project example.app)"* && "$listing" == *
 else
     fail "names: a bad hide fails its project in the verbose output (got '$listing')"
 fi
+expect_exit "project/valid-names/transitive-full-in-values" 0 check --dev \
+    --project="$NAMES/transitive-full-in-values/app" "$NAMES/transitive-full-in-values/app/values.values"
 expect_exit "project/valid-names/not-transitive" 0 check --allow-refs --dev --project="$NAMES/not-transitive/app"
 expect_exit "a const of another project is a reference" 1 check --dev --project="$NAMES/not-transitive/app"
 # Each invalid case names its expected error, which starts the message, and the exit code is 1.
@@ -1845,6 +1847,30 @@ expect_json "from json-typed: --type is not confused with a name that an import 
 rm -f "$proj/app/constructo.lock" "$proj/app/constructo.toml" "$proj/lib/constructo.toml" "$proj/lib/shapes.types" \
     "$proj/v.json" "$proj/expected.values"
 rmdir "$proj/app" "$proj/lib" "$proj"
+
+# A type of a project that is imported can hold a type of one that is not, and a value of it is written with the full
+# name of that project, which `check` accepts in a value.
+proj="$(mktemp -d)"
+mkdir "$proj/app" "$proj/lib" "$proj/base"
+printf '[project]\nname = "example.base"\n' >"$proj/base/constructo.toml"
+printf 'enum Shape = Dot;\n' >"$proj/base/base.types"
+printf '[project]\nname = "example.lib"\n\n[[import]]\nproject-name = "example.base"\ngroup = "base"\n' \
+    >"$proj/lib/constructo.toml"
+printf 'path = "../base"\n' >>"$proj/lib/constructo.toml"
+printf 'enum Scene = Scene { shape: base::Shape };\n' >"$proj/lib/lib.types"
+printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.lib"\ngroup = "lib"\n' \
+    >"$proj/app/constructo.toml"
+printf 'path = "../lib"\n' >>"$proj/app/constructo.toml"
+printf '{"Scene":{"shape":"Dot"}}\n' >"$proj/v.json"
+printf 'example.lib::Scene { shape: example.base::Dot };\n' >"$proj/expected.values"
+"$CONSTRUCTO" project update "$proj/app" >/dev/null 2>&1
+expect_json "from json-typed: a constructor of a project that is not imported is written in full" \
+    "$proj/expected.values" --from=json-typed --type=lib::Scene --project="$proj/app" "$proj/v.json"
+expect_exit "from json-typed: what is written for a project that is not imported is accepted by check" 0 check \
+    --project="$proj/app" "$proj/expected.values"
+rm -f "$proj/app/constructo.lock" "$proj/app/constructo.toml" "$proj/lib/constructo.toml" "$proj/lib/lib.types" \
+    "$proj/base/constructo.toml" "$proj/base/base.types" "$proj/v.json" "$proj/expected.values"
+rmdir "$proj/app" "$proj/lib" "$proj/base" "$proj"
 
 # The names of the prelude are written as the project sees them, which is in full when it imports the prelude into a
 # group and not into local.

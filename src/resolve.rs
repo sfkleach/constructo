@@ -10,7 +10,9 @@
 //! group `local` holds the project itself and any project that was imported into `local`, which is the standard prelude
 //! unless the project says otherwise. A qualified `group::Foo` or `full.name::Foo` is looked up in the projects of that
 //! group, or in the project of that name, which must be the project itself or one that it imports. Imports are not
-//! transitive, so those are the only projects that a project can name.
+//! transitive, so those are the only projects that a project can name in its declarations. The values of a values file
+//! are the exception: a full name there can be that of any project that is used at all, since a value is only the use
+//! of a name that the types have already fixed.
 
 use crate::ast::{ConstDecl, EnumDecl, TaggedBody, Type, TypesFile, Value, ValueKind, VariantBody};
 use crate::diagnostics::{Diagnostic, Pos};
@@ -202,6 +204,7 @@ pub fn resolve(sources: &[Source], parsed: &mut [Parsed], layout: &Layout) -> Re
             file: index,
             name: &sources[index].name,
             home,
+            values_file: matches!(file, Parsed::Values(_)),
             diagnostics: &mut diagnostics,
         };
         match file {
@@ -241,6 +244,8 @@ struct Context<'a> {
     file: usize,
     name: &'a str,
     home: Home,
+    /// Whether this is a values file, where the full name of any project that is used can be written.
+    values_file: bool,
     diagnostics: &'a mut Vec<(usize, Diagnostic)>,
 }
 
@@ -403,16 +408,21 @@ impl<'a> Resolver<'a> {
         (!members.is_empty()).then_some(members)
     }
 
-    /// The project that a full name refers to: the project itself, or one that it imports.
-    fn full_home(&self, home: Home, full: &str) -> Option<Home> {
+    /// The project that a full name refers to: the project itself, or one that it imports, or with `any_project` any
+    /// project of the layout. The names of the projects of a layout are all different, so a full name is one project.
+    fn full_home(&self, home: Home, full: &str, any_project: bool) -> Option<Home> {
         if self.layout.projects[home].name == full {
             return Some(home);
         }
-        self.layout.projects[home]
+        let imported = self.layout.projects[home]
             .imports
             .iter()
             .find(|import| self.layout.projects[import.target].name == full)
-            .map(|import| import.target)
+            .map(|import| import.target);
+        if imported.is_some() || !any_project {
+            return imported;
+        }
+        self.layout.projects.iter().position(|project| project.name == full)
     }
 
     fn declares(&self, home: Home, ns: Ns, name: &str) -> bool {
@@ -434,7 +444,17 @@ impl<'a> Resolver<'a> {
 
     /// Resolves a name written in the scope of `home`. Returns the canonical name, and an error if there is one. A bare
     /// name that nothing declares is left for the later checks to report as unknown.
-    fn name(&self, home: Home, ns: Ns, written: &str, params: &[String]) -> (String, Option<String>) {
+    ///
+    /// With `any_project` the full name of a project can be that of any project that is used, and not only the project
+    /// itself and the ones it imports.
+    fn name(
+        &self,
+        home: Home,
+        ns: Ns,
+        written: &str,
+        params: &[String],
+        any_project: bool,
+    ) -> (String, Option<String>) {
         let (qualifier, name) = match written.rsplit_once("::") {
             Some((qualifier, name)) => (Some(qualifier), name),
             None => (None, written),
@@ -445,16 +465,20 @@ impl<'a> Resolver<'a> {
         // A name written with the full name of a project is the project's own, so nothing is hidden from it.
         let members = match qualifier {
             None => self.local_members(home),
-            Some(qualifier) if qualifier.contains('.') => match self.full_home(home, qualifier) {
+            Some(qualifier) if qualifier.contains('.') => match self.full_home(home, qualifier, any_project) {
                 Some(found) => vec![Member {
                     home: found,
                     import: None,
                 }],
                 None => {
-                    let message = format!(
-                        "Unknown project {}: a project can name itself and the projects it imports",
-                        qualifier
-                    );
+                    let message = if any_project {
+                        format!("Unknown project {}: no project of that name is used here", qualifier)
+                    } else {
+                        format!(
+                            "Unknown project {}: a project can name itself and the projects it imports",
+                            qualifier
+                        )
+                    };
                     return (written.to_string(), Some(message));
                 }
             },
@@ -526,7 +550,7 @@ impl<'a> Resolver<'a> {
     fn ty(&self, context: &mut Context, params: &[String], ty: &mut Type) {
         match ty {
             Type::Ref { name, pos, args } => {
-                let (resolved, error) = self.name(context.home, Ns::Type, name, params);
+                let (resolved, error) = self.name(context.home, Ns::Type, name, params, false);
                 if let Some(message) = error {
                     context.error(*pos, message);
                 }
@@ -544,7 +568,7 @@ impl<'a> Resolver<'a> {
             ValueKind::Array(items) => items.iter_mut().for_each(|item| self.value(context, item)),
             ValueKind::Record(members) => members.iter_mut().for_each(|m| self.value(context, &mut m.value)),
             ValueKind::Tagged { name, body } => {
-                let (resolved, error) = self.name(context.home, Ns::Value, name, &[]);
+                let (resolved, error) = self.name(context.home, Ns::Value, name, &[], context.values_file);
                 if let Some(message) = error {
                     context.error(value.pos, message);
                 }
