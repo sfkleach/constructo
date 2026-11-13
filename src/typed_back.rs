@@ -34,7 +34,8 @@ pub fn read_typed(ctx: &ReadContext, node: &Node, file: &str, widening: bool) ->
 }
 
 /// Changes the canonical names of the constructors, which the check needs, to the names as the root project writes
-/// them. The names of the prelude are always written bare, as `Some`, `None`, `true` and `false`.
+/// them. The names of the prelude are written as the root project sees them, which is bare, as `Some`, `None`, `true`
+/// and `false`, unless the project imports the prelude into a group or renames or hides them.
 fn write_names(ctx: &ReadContext, value: &mut Value) {
     match &mut value.kind {
         ValueKind::Array(items) => items.iter_mut().for_each(|item| write_names(ctx, item)),
@@ -42,11 +43,7 @@ fn write_names(ctx: &ReadContext, value: &mut Value) {
             .iter_mut()
             .for_each(|member| write_names(ctx, &mut member.value)),
         ValueKind::Tagged { name, body } => {
-            *name = if name.ends_with(&format!("@{PRELUDE_PROJECT}")) {
-                bare(name).to_string()
-            } else {
-                (ctx.show)(name)
-            };
+            *name = (ctx.show)(name);
             match body {
                 Some(TaggedBody::Record(members)) => members
                     .iter_mut()
