@@ -1,4 +1,4 @@
-//! Helpers for the unit tests that need files on disk.
+//! Helpers for the unit tests: values that are as deep as the parser allows, and files on disk.
 
 use crate::fetch::{child_environment, Config, Scratch};
 use std::path::PathBuf;
@@ -108,5 +108,39 @@ impl Repo {
 
     pub fn url(&self) -> String {
         self.folder.display().to_string()
+    }
+}
+
+/// The ways that a value can hold another, each of which the formats write differently.
+pub(crate) const NESTINGS: [&str; 5] = ["array", "record", "constructor record", "tuple", "named"];
+
+/// The text of a value that is `levels` levels deep, as the parser counts them, by the nesting that is named: a nat
+/// inside `levels - 1` arrays, records, constructors with a record, tuples or named arguments.
+pub(crate) fn nested_text(nesting: &str, levels: usize) -> String {
+    let mut text = "0".to_string();
+    for _ in 1..levels {
+        text = match nesting {
+            "array" => format!("[{text}]"),
+            "record" => format!("{{ a: {text} }}"),
+            "constructor record" => format!("C {{ a: {text} }}"),
+            "tuple" => format!("C({text})"),
+            "named" => format!("C(b: {text})"),
+            _ => panic!("No nesting {nesting}."),
+        };
+    }
+    format!("{text};")
+}
+
+/// Runs a test in a thread with a stack of 8 MB, which is the size of the stack of the main thread on Linux, where the
+/// command runs. A test thread has 2 MB, and a value as deep as the parser allows takes more than that to read in a
+/// debug build, where every frame is much larger than in a release build. The stack is given, since otherwise it is
+/// read from `RUST_MIN_STACK` in the environment.
+pub(crate) fn on_a_main_sized_stack(test: impl FnOnce() + Send + 'static) {
+    let thread = std::thread::Builder::new()
+        .stack_size(8 * 1024 * 1024)
+        .spawn(test)
+        .expect("The thread starts.");
+    if let Err(panic) = thread.join() {
+        std::panic::resume_unwind(panic);
     }
 }

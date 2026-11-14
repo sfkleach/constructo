@@ -1,0 +1,9 @@
+<values>
+  <constructor name="Span">
+    <tuple/>
+    <named>
+      <field name="start"><nat value="1"/></field>
+      <field name="start"><nat value="2"/></field>
+    </named>
+  </constructor>
+</values>

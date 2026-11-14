@@ -294,6 +294,8 @@ mod tests {
     use super::*;
     use crate::convert::encode_exact;
     use crate::json::parse_document;
+    use crate::limits::MAX_DEPTH;
+    use crate::test_support::{nested_text, on_a_main_sized_stack, NESTINGS};
     use crate::values_text::bare;
 
     fn read(json: &str) -> Result<Value, Diagnostic> {
@@ -507,5 +509,28 @@ mod tests {
             }
         }
         assert!(seen > 20, "{seen}");
+    }
+
+    #[test]
+    fn a_value_as_deep_as_the_parser_allows_reads_back() {
+        on_a_main_sized_stack(|| {
+            for nesting in NESTINGS {
+                let values =
+                    parse_values_with(&nested_text(nesting, MAX_DEPTH as usize), Experimental::default()).unwrap();
+                let json = encode_exact("t", &values[0]).unwrap();
+                for compact in [true, false] {
+                    // The values of a document may be in an array, which is one more level of JSON.
+                    for written in [json.write(compact), format!("[{}]", json.write(compact))] {
+                        let node = parse_document(&written).unwrap_or_else(|e| panic!("{nesting}: {}", e.message));
+                        let node = match &node.kind {
+                            Kind::Array(items) => &items[0],
+                            _ => &node,
+                        };
+                        let back = value_from_exact(node, "t.json").unwrap_or_else(|e| panic!("{nesting}: {e}"));
+                        assert_eq!(bare(&back), bare(&values[0]), "{nesting}");
+                    }
+                }
+            }
+        });
     }
 }

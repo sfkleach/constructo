@@ -11,6 +11,7 @@ use crate::ast::{
     VariantBody,
 };
 use crate::diagnostics::Pos;
+use crate::limits::{DEFAULT_VALUE_LIMIT, MAX_TYPE_DEPTH};
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -217,15 +218,6 @@ pub fn check_value_as<'a, 'e>(
     checker.check_omitted()?;
     Ok(Typed { checker })
 }
-
-/// The default for the most nodes that the inferred type of a const may have. Types share their parts, so a short value
-/// can have a type that is exponentially large when written out, and generalising it would take as long.
-pub const DEFAULT_INFER_LIMIT: usize = 10_000;
-
-/// The default for the most nodes that the default value of an omitted argument may have. A default is the first
-/// constructor of an enum, filled in all the way down, so a few short declarations can make one that doubles in size
-/// at each level.
-pub const DEFAULT_VALUE_LIMIT: usize = 10_000;
 
 /// Checks the consts of a run, each given with the index of its source, and returns the errors ordered by source and
 /// position. A const without a declared type has its type inferred from its value, and the consts are taken in
@@ -1047,12 +1039,6 @@ impl Checker<'_, '_> {
     }
 }
 
-/// The most levels of arrays, records and type arguments that a type may have when its default value is worked out.
-/// Substituting arguments can make a type deeper than any that is written, so this is larger than the nesting limit of
-/// the parser. It is chosen to keep well inside the smallest stack that the checker might run on: freeing a type uses
-/// a little under 200 bytes of stack per level in a debug build, so this takes about 200 KB.
-const MAX_TYPE_DEPTH: u32 = 1000;
-
 /// Whether a type has more than `levels` levels of arrays, records and type arguments. The search stops at the limit, so
 /// it cannot overflow the stack however deep the type is.
 fn is_deeper_than(ty: &Ty, levels: u32) -> bool {
@@ -1204,6 +1190,7 @@ impl fmt::Display for TypeError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::limits::DEFAULT_INFER_LIMIT;
     use crate::parser::{parse, parse_values};
 
     /// Checks each value of `values` against `types`, and returns the error of each value as `line:col message`.
