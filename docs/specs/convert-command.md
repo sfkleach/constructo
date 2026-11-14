@@ -386,6 +386,9 @@ then `--stdin`, as for `--to`. There is no option to name an output file, since 
   `int` and is not a `nat`. A JSON number in its place is an error that says to write it as a string. A name has to be
   one that data-values can have, a const for `const` and a constructor for `constructor`, and a field name for the
   members. The lexer and parser of data-values decide all of this, and the reader holds no second grammar.
+- **The JSON may be nested 401 levels,** since `json-exact` spends up to two on a value and an array of values is one
+  more, so every value that `--to` writes from a value that `check` accepts can be read back. A deeper document is an
+  error: `JSON is nested too deeply`.
 - **A file of `json-typed` is not read by the exact formats.** Its objects, such as `{"Circle": {"r": 1.5}}`, have no
   key that names a kind, so the error is `Unknown key "Circle"` with a note that the file may have been written with
   `--to=json-typed`. It is read with `--from=json-typed` and a type, [as below](#reading-back-typed-json).
@@ -525,8 +528,9 @@ inputs are `FILES` and then `--stdin`. Each is one document, and the values of a
   every entity other than the five that XML defines, `&amp;`, `&lt;`, `&gt;`, `&quot;` and `&apos;`, which is named in
   the message. It refuses CDATA sections, processing instructions, text between elements, namespaces (a name with a
   colon, and `xmlns`), a declaration that is not version 1.0 or not UTF-8, and `standalone`. Numeric references such as
-  `&#10;` and `&#xA;` are read, if they name a character that XML 1.0 can hold. The nesting is limited to 200 levels,
-  as it is for JSON.
+  `&#10;` and `&#xA;` are read, if they name a character that XML 1.0 can hold. The elements may be nested 601
+  levels, since `xml` spends up to three on a value and the root is one more, so every value that `--to=xml` writes
+  from a value that `check` accepts can be read back.
 - **A literal tab, newline or carriage return in an attribute value is refused.** An XML parser reads one as a space,
   and `--to=xml` never writes one, since it writes `&#9;`, `&#10;` and `&#13;`. So it comes from another tool or from a
   hand edit, and reading it as a space would change a string without a word. The error is at the character, with a note

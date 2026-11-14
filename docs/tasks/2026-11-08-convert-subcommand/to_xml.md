@@ -221,7 +221,8 @@ declared, expanded or fetched.
   (the message names it), CDATA sections, processing instructions other than the declaration, text between elements,
   namespaces (a name with a colon, and `xmlns`), and any name that is not one of the kinds above.
 - **A reference to a character that XML 1.0 cannot hold,** such as `&#1;` or `&#0;`, is an error at the reference.
-- **The nesting is limited** to 200 levels, as the other parsers are.
+- **The nesting is limited** to 200 levels, as the other parsers are. (Changed by decision 43: the elements may be
+  nested 601 levels.)
 - **Every node has its line and column,** so that every problem is reported where it is, in the usual form, for
   example `ERROR: Expected a value attribute on nat (shapes.xml, line 7, col 14)`. A column counts characters.
 - A document is read whole, since the closing of the root can only be known at the end, and the values are written

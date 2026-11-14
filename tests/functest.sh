@@ -2139,6 +2139,8 @@ expect_convert_error "from xml: the body of a constructor is in its place" 1 "ER
     --from=xml "$BX/constructor-order.xml"
 expect_convert_error "from xml: a field given twice" 1 \
     "ERROR: Repeated field \"a\" ($BX/repeated-field.xml, line 4, col 12)" --from=xml "$BX/repeated-field.xml"
+expect_convert_error "from xml: a named argument given twice" 1 \
+    "ERROR: Repeated field \"start\" ($BX/repeated-named.xml, line 6, col 14)" --from=xml "$BX/repeated-named.xml"
 expect_convert_error "from xml: a document that is cut off writes nothing" 1 "ERROR: The element values is not closed" \
     --from=xml "$BX/cut-off.xml"
 : >"$conv_dir/blank.xml"

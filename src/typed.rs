@@ -8,19 +8,10 @@
 use crate::ast::{TaggedBody, Value, ValueKind, VariantBody};
 use crate::convert::Json;
 use crate::diagnostics::Pos;
+use crate::limits::{MAX_TYPED_NESTING, MAX_TYPED_NODES};
 use crate::project::PRELUDE_PROJECT;
 use crate::typecheck::{bind_arguments, check_value_as, instantiate, instantiate_fields, Env, Ty, TypeError, Typed};
 use std::cell::Cell;
-
-/// The most levels of values, and of the consts that they refer to, that are encoded. The parser limits the nesting of
-/// a value to 200, but a const can refer to another, and a long chain of them would otherwise be as deep as it is long.
-/// Each level takes a few kilobytes of stack in a debug build, so the limit is chosen to stay well inside the stack of
-/// a test thread, which is the smallest that the encoder runs on.
-const MAX_NESTING: usize = 300;
-
-/// The most nodes that the encoding of one value may have. Depth is limited by `MAX_NESTING`, but a const that is
-/// referred to twice by another const is written out in full each time, so the size can double at every level.
-const MAX_NODES: usize = 1_000_000;
 
 /// The names of the types of the prelude that are written specially, which are told by the project that declares them
 /// and so are not mistaken for the types of a user that happen to have the same names.
@@ -86,7 +77,7 @@ pub fn encode_typed(typed: &Typed, widening: bool, infer_limit: usize, value: &V
     Encoder {
         widening,
         infer_limit,
-        budget: Cell::new(MAX_NODES),
+        budget: Cell::new(MAX_TYPED_NODES),
     }
     .encode(typed, value, 0)
 }
@@ -100,7 +91,7 @@ struct Encoder {
 
 impl Encoder {
     fn encode(&self, typed: &Typed, node: &Value, depth: usize) -> Result<Json, TypeError> {
-        if depth > MAX_NESTING {
+        if depth > MAX_TYPED_NESTING {
             return error(node.pos, "The value is nested too deeply to convert");
         }
         let Some(left) = self.budget.get().checked_sub(1) else {
@@ -349,8 +340,9 @@ impl Encoder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::limits::DEFAULT_INFER_LIMIT;
     use crate::parser::{parse_file, Experimental, Parsed};
-    use crate::typecheck::{check_consts, check_value_typed, DEFAULT_INFER_LIMIT};
+    use crate::typecheck::{check_consts, check_value_typed};
     use crate::{plain_layout, prelude_source, resolve, Source};
 
     /// Checks and encodes each value of the text with the declarations, in the way that a run does, with the prelude

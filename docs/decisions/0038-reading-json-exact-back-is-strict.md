@@ -14,7 +14,7 @@ about how forgiving the reader is, where its JSON parser comes from, and how it 
 - **The JSON parser is our own**, in `src/json.rs`, and not a dependency. It keeps the position of every node and key,
   so that every problem is reported at its line and column, as the other diagnostics are, and a line of a JSONL file is
   parsed with the number of its line in the file. It follows RFC 8259, with a nesting limit of 200 as the other parsers
-  have.
+  have. (Decision 43 raised the limit of the JSON parser to 401.)
 - **Names and numbers are checked by the real lexer and parser.** The text of a number is parsed as a value, and a name
   is parsed as `NAME;` or as a field of `{ NAME: 0 }`, and must come back as the same text. The reader holds no second
   grammar, so a change to the grammar changes it too. The cost is the parse of a small string for each, which is small

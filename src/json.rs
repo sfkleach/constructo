@@ -5,8 +5,7 @@
 
 use crate::diagnostics::{shown, Pos};
 
-/// The deepest nesting of arrays and objects that is accepted, which keeps the stack of the recursive parser bounded.
-const MAX_DEPTH: u32 = 200;
+use crate::limits::MAX_JSON_DEPTH;
 
 /// A JSON value and where it starts.
 #[derive(Debug, Clone, PartialEq)]
@@ -141,7 +140,7 @@ impl Parser {
     }
 
     fn enter(&self, depth: u32) -> Result<u32, JsonError> {
-        if depth >= MAX_DEPTH {
+        if depth >= MAX_JSON_DEPTH {
             return Err(self.error("JSON is nested too deeply"));
         }
         Ok(depth + 1)
@@ -509,8 +508,9 @@ mod tests {
     #[test]
     fn nesting_is_limited() {
         let deep = |n: usize| format!("{}{}", "[".repeat(n), "]".repeat(n));
-        assert!(parse_document(&deep(200)).is_ok());
-        assert_eq!(err(&deep(201)).1, "JSON is nested too deeply");
+        let most = MAX_JSON_DEPTH as usize;
+        assert!(parse_document(&deep(most)).is_ok());
+        assert_eq!(err(&deep(most + 1)).1, "JSON is nested too deeply");
         assert_eq!(err(&"[".repeat(100000)).1, "JSON is nested too deeply");
     }
 

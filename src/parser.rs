@@ -8,6 +8,7 @@ use crate::ast::{
 };
 use crate::diagnostics::{shown, Pos};
 use crate::lexer::{lex, Tok, Token};
+use crate::limits::MAX_DEPTH;
 
 /// The first syntax error found in a text.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,9 +20,6 @@ pub struct SyntaxError {
 }
 
 type Result<T> = std::result::Result<T, SyntaxError>;
-
-/// The deepest nesting of arrays, records, tuples and type arguments that the parser accepts.
-const MAX_DEPTH: u32 = 200;
 
 /// The kind of a file, which is decided by its first token.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

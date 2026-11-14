@@ -10,6 +10,7 @@ use crate::ast::{Argument, Member, TaggedBody, Value, ValueKind};
 use crate::diagnostics::{shown, Diagnostic, Pos};
 use crate::exact::{is_name, number_kind, Names};
 use crate::xml_tree::Element;
+use std::collections::HashSet;
 
 /// The elements that are values, for the messages.
 const KINDS: &str = "nat, int, float, string, array, record, const or constructor";
@@ -208,9 +209,11 @@ impl Reader<'_> {
     /// The `field` elements as the members of a record. A name that is given twice is an error at the second.
     fn members(&self, elements: &[Element]) -> Result<Vec<Member>, Diagnostic> {
         let mut out: Vec<Member> = Vec::new();
+        // The names seen so far, so that a repeat is found in linear time however many members there are.
+        let mut seen: HashSet<&str> = HashSet::new();
         for element in elements {
             let (name, value) = self.field(element)?;
-            if out.iter().any(|m| m.name == name) {
+            if !seen.insert(name) {
                 // The attribute is there, since `field` has read it.
                 return Err(self.fail(element.attributes[0].pos, format!("Repeated field \"{name}\"")));
             }
@@ -308,6 +311,8 @@ fn is_value_element(name: &str) -> bool {
 mod tests {
     use super::*;
     use crate::convert::encode_exact;
+    use crate::limits::MAX_DEPTH;
+    use crate::test_support::{nested_text, on_a_main_sized_stack, NESTINGS};
     use crate::values_text::render;
     use crate::xml::{encode_xml, write_document};
     use crate::xml_tree::parse_document;
@@ -581,6 +586,21 @@ mod tests {
         for v in &values {
             assert!(encode_exact("k", v).is_ok());
         }
+    }
+
+    #[test]
+    fn a_value_as_deep_as_the_parser_allows_reads_back() {
+        on_a_main_sized_stack(|| {
+            for nesting in NESTINGS {
+                let text = nested_text(nesting, MAX_DEPTH as usize);
+                let values = crate::parser::parse_values_with(&text, crate::parser::Experimental::default()).unwrap();
+                let elements = vec![encode_xml("k", &values[0]).unwrap()];
+                for compact in [false, true] {
+                    let back = read(&write_document(&elements, compact)).unwrap_or_else(|e| panic!("{nesting}: {e}"));
+                    assert_eq!(back, render(&values[0], true), "{nesting}");
+                }
+            }
+        });
     }
 
     #[test]

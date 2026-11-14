@@ -8,9 +8,8 @@
 //! elements mean is for the reader in `xml_back.rs`. See `docs/tasks/2026-11-08-convert-subcommand/to_xml.md`.
 
 use crate::diagnostics::Pos;
-
-/// The deepest nesting of elements that is accepted, which keeps the stack of the recursive parser bounded.
-const MAX_DEPTH: u32 = 200;
+use crate::limits::MAX_XML_DEPTH;
+use std::collections::HashSet;
 
 /// An element, where it starts, its attributes in the order written, and the elements in it.
 #[derive(Debug, Clone, PartialEq)]
@@ -199,6 +198,7 @@ impl Parser {
     fn declaration(&mut self) -> Result<(), XmlError> {
         self.skip("<?xml");
         let mut version = false;
+        let mut encoding = false;
         loop {
             let spaced = self.peek().is_some_and(is_space);
             self.skip_space();
@@ -228,10 +228,14 @@ impl Parser {
                     }
                     version = true;
                 }
+                "version" | "encoding" if version && (name == "version" || encoding) => {
+                    return Err(self.error_at(pos, &format!("The declaration gives the {name} more than once")));
+                }
                 "encoding" if version => {
                     if !value.eq_ignore_ascii_case("utf-8") {
                         return Err(self.error_at(value_pos, "Only the encoding UTF-8 is accepted"));
                     }
+                    encoding = true;
                 }
                 "standalone" => return Err(self.error_at(pos, "The declaration has no standalone; it is not accepted")),
                 _ => return Err(self.error_at(pos, "Expected version, and then encoding, in the declaration")),
@@ -324,8 +328,15 @@ impl Parser {
                     self.bump();
                     break;
                 }
-                // The longest reference that is valid is `&#x10FFFF;`, so a longer one is not looked at further.
-                Some(c) if body.chars().count() < 12 && (c.is_ascii_alphanumeric() || c == '#') => {
+                // A numeric reference may have any number of leading zeroes, as in `&#x0000041;`. The first is kept,
+                // so that `&#0x41;` is still refused, and the rest are skipped, so that they do not count towards
+                // the length below.
+                Some('0') if body == "#0" || body == "#x0" => {
+                    self.bump();
+                }
+                // Apart from leading zeroes, the longest reference that is valid is `&#x10FFFF;`, so a longer one is
+                // not looked at further.
+                Some(c) if body.len() < 12 && (c.is_ascii_alphanumeric() || c == '#') => {
                     body.push(c);
                     self.bump();
                 }
@@ -364,13 +375,15 @@ impl Parser {
     }
 
     fn element(&mut self, depth: u32) -> Result<Element, XmlError> {
-        if depth >= MAX_DEPTH {
+        if depth >= MAX_XML_DEPTH {
             return Err(self.error("The XML is nested too deeply"));
         }
         let pos = self.pos();
         self.bump();
         let name = self.name()?;
         let mut attributes: Vec<Attribute> = Vec::new();
+        // The names of the attributes so far, so that a repeat is found in linear time however many there are.
+        let mut seen: HashSet<String> = HashSet::new();
         loop {
             let spaced = self.peek().is_some_and(is_space);
             self.skip_space();
@@ -408,7 +421,7 @@ impl Parser {
                     self.skip_space();
                     let value_pos = self.pos();
                     let value = self.quoted(true)?;
-                    if attributes.iter().any(|a| a.name == attribute) {
+                    if !seen.insert(attribute.clone()) {
                         let message = format!("The attribute {attribute} is given more than once");
                         return Err(self.error_at(attribute_pos, &message));
                     }
@@ -462,6 +475,7 @@ impl Parser {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::on_a_main_sized_stack;
 
     fn parse(text: &str) -> Element {
         parse_document(text).unwrap_or_else(|e| panic!("{text}: {} at {}:{}", e.message, e.pos.line, e.pos.col))
@@ -520,6 +534,14 @@ mod tests {
         assert!(standalone.starts_with("The declaration has no standalone"));
         assert!(fails(r#"<?xml encoding="UTF-8"?><a/>"#).starts_with("Expected version"));
         assert!(fails("<?xml?><a/>").starts_with("The declaration needs a version"));
+        assert_eq!(
+            fails(r#"<?xml version="1.0" encoding="UTF-8" encoding="UTF-8"?><a/>"#),
+            "The declaration gives the encoding more than once at 1:38"
+        );
+        assert_eq!(
+            fails(r#"<?xml version="1.0" version="1.0"?><a/>"#),
+            "The declaration gives the version more than once at 1:21"
+        );
         // A declaration that is not first is a processing instruction.
         assert!(fails("\n<?xml version=\"1.0\"?><a/>").starts_with("A processing instruction is not accepted"));
     }
@@ -543,6 +565,20 @@ mod tests {
             value_of(r#"<a v="&#10;&#9;&#13;&#xA;&#x41;&#233;&#x1F600;"/>"#),
             "\n\t\r\nAé😀"
         );
+    }
+
+    #[test]
+    fn a_numeric_reference_may_have_leading_zeroes() {
+        assert_eq!(value_of(r#"<a v="&#x00000000000041;"/>"#), "A");
+        assert_eq!(value_of(r#"<a v="&#00000000000065;"/>"#), "A");
+        let many = format!(r#"<a v="&#x{}10FFFF;"/>"#, "0".repeat(1000));
+        assert_eq!(value_of(&many), "\u{10FFFF}");
+        // The zeroes come before the `x`, so this is a decimal reference with a letter in it.
+        assert!(fails(r#"<a v="&#0x41;"/>"#).contains("not a character"));
+        // A reference of only zeroes is still the character 0, which XML cannot hold.
+        assert!(fails(r#"<a v="&#x0000;"/>"#).contains("&#x0;"));
+        // The zeroes do not let a reference that is too long through.
+        assert!(fails(r#"<a v="&#x0001111111111111111;"/>"#).starts_with("An & that starts no entity"));
     }
 
     #[test]
@@ -644,6 +680,7 @@ mod tests {
         assert!(fails(r#"<a v/>"#).starts_with("Expected = after"));
         assert!(fails(r#"<a v="1"w="2"/>"#).starts_with("Expected white space"));
         assert!(fails(r#"<a v="1" v="2"/>"#).starts_with("The attribute v is given more than once"));
+        assert!(fails(r#"<a v="1" w="2" v="3"/>"#).starts_with("The attribute v is given more than once"));
         assert!(fails("<a/><b/>").starts_with("Expected the end of the document"));
         assert!(fails("<1/>").starts_with("Expected a name"));
         assert!(fails("<>").starts_with("Expected a name"));
@@ -660,11 +697,15 @@ mod tests {
 
     #[test]
     fn the_nesting_is_limited() {
-        let deep = |n: usize| format!("{}{}", "<a>".repeat(n), "</a>".repeat(n));
-        parse(&deep(200));
-        assert!(fails(&deep(201)).starts_with("The XML is nested too deeply"));
-        // A document that is cut off deep inside is still an error and not a crash.
-        assert!(parse_document(&"<a>".repeat(100_000)).is_err());
+        // Parsing as deep as the limit takes more than the stack of a test thread in a debug build.
+        on_a_main_sized_stack(|| {
+            let deep = |n: usize| format!("{}{}", "<a>".repeat(n), "</a>".repeat(n));
+            let most = MAX_XML_DEPTH as usize;
+            parse(&deep(most));
+            assert!(fails(&deep(most + 1)).starts_with("The XML is nested too deeply"));
+            // A document that is cut off deep inside is still an error and not a crash.
+            assert!(parse_document(&"<a>".repeat(100_000)).is_err());
+        });
     }
 
     #[test]

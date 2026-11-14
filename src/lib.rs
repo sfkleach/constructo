@@ -11,6 +11,7 @@ pub mod exact;
 pub mod fetch;
 pub mod json;
 pub mod lexer;
+pub mod limits;
 pub mod lock;
 pub mod parser;
 pub mod project;
@@ -37,10 +38,10 @@ use typed::encode_typed;
 use validate::{validate, ParsedFile};
 
 pub use config::Config;
+pub use limits::{DEFAULT_INFER_LIMIT, DEFAULT_VALUE_LIMIT};
 pub use parser::{Experimental, SourceKind};
 pub use project::{InputFile, Project, ProjectSet, PRELUDE_PROJECT};
 pub use resolve::{ImportInfo, Layout, ProjectInfo};
-pub use typecheck::{DEFAULT_INFER_LIMIT, DEFAULT_VALUE_LIMIT};
 
 /// The standard prelude: declarations that are available to every types file unless the prelude is disabled.
 pub const PRELUDE: &str = "enum Bool = False, True;
