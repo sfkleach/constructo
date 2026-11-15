@@ -661,7 +661,9 @@ fn deref(item: &Item) -> R<Item> {
             value: value.clone(),
             src: at.src.clone(),
             lit: false,
-            ty: ty.clone(),
+            // The type that the outer const declares wins over the inner's, as `const f: Float = n` makes a Float of
+            // a Nat; the inner's applies only where the outer has none.
+            ty: at.ty.clone().or_else(|| ty.clone()),
             file: at.file,
         };
     }
@@ -1063,12 +1065,15 @@ fn stream_method(
             }
             let common = common_kind(&items)?;
             let src = items.first().map(|i| i.src.clone()).unwrap_or_else(query_src);
-            // The array keeps the type of its elements, when every element has one, so that it is known again when
-            // they are taken out.
-            let element = items
-                .first()
-                .and_then(|i| i.ty.clone())
-                .filter(|_| items.iter().all(|i| i.ty.is_some()));
+            // The array keeps the type of its elements, when every element has the same one, so that it is known again
+            // when they are taken out. Elements of different types, such as an [Int] and a [Float] from the branches
+            // of an `if`, leave it unknown, since the type of one would misread the others.
+            let element = items.first().and_then(|i| i.ty.clone()).filter(|first| {
+                items.iter().all(|i| {
+                    i.ty.as_ref()
+                        .is_some_and(|t| super::typed_check::agree(t, first, false))
+                })
+            });
             let mut values = Vec::new();
             for item in items {
                 values.push(match common {
@@ -1484,15 +1489,29 @@ fn fits(ty: &Ty, value: &Value) -> bool {
             }
             let Some(typing) = typing() else { return true };
             let Some((decl, _)) = typing.types.ctor(ctor) else {
-                // A const of the right type fits too, which its type would say; it is taken on trust here.
-                return crate::convert::is_const_name(ctor);
+                // A const fits when the value that it names does; a const of some other type does not.
+                return const_fits(ty, ctor);
             };
             if decl.name != *name {
                 return false;
             }
             fits_body(&typing.types, ctor, ty, value, body.as_ref())
         }
+        // A const of a type that is not an enum, such as a Nat, fits by its value as well.
+        (_, ValueKind::Tagged { name, body: None }) => const_fits(ty, name),
         _ => false,
+    }
+}
+
+/// Whether the const of the name, if it is one that the types declare, has a value that fits the type. The chain of
+/// consts that one value may name ends, since a const cannot refer to itself.
+fn const_fits(ty: &Ty, name: &str) -> bool {
+    if !crate::convert::is_const_name(name) {
+        return false;
+    }
+    match typing() {
+        Some(typing) => typing.types.constant(name).is_some_and(|(value, _)| fits(ty, value)),
+        None => false,
     }
 }
 
@@ -1788,14 +1807,21 @@ pub fn bind(pattern: &Pattern, of: &Item, env: &Env) -> R<Option<Env>> {
                 ),
             }
         }
-        PatternKind::Record { fields, rest } => match &deref(of)?.value.kind {
-            ValueKind::Record(ms) => bind_members(fields, *rest, ms, of, env),
-            _ => wrong("a record"),
-        },
-        PatternKind::Array { items, rest, rest_as } => match &deref(of)?.value.kind {
-            ValueKind::Array(vs) => bind_items(items, *rest, rest_as, vs, of, env),
-            _ => wrong("an array"),
-        },
+        // The parts are bound with the item that a const expands to, which carries the type that they are read by.
+        PatternKind::Record { fields, rest } => {
+            let of = &deref(of)?;
+            match &of.value.kind {
+                ValueKind::Record(ms) => bind_members(fields, *rest, ms, of, env),
+                _ => wrong("a record"),
+            }
+        }
+        PatternKind::Array { items, rest, rest_as } => {
+            let of = &deref(of)?;
+            match &of.value.kind {
+                ValueKind::Array(vs) => bind_items(items, *rest, rest_as, vs, of, env),
+                _ => wrong("an array"),
+            }
+        }
     }
 }
 

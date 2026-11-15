@@ -350,15 +350,23 @@ impl Checker<'_> {
             return Ok(());
         };
         let mark = self.scope.len();
-        if let Some(p) = closure.params.first() {
-            self.pattern(p, ty)?;
+        let checked = match closure.params.first() {
+            Some(p) => self.pattern(p, ty),
+            None => Ok(()),
         }
+        .and_then(|()| self.assignment(closure, target, *op, value));
+        // The parameter stays in scope until the new value has been fitted, since fitting it looks at its parts again.
+        self.scope.truncate(mark);
+        checked
+    }
+
+    /// Checks the assignment of an `update`, with the closure's parameter in scope.
+    fn assignment(&mut self, closure: &Closure, target: &Expr, op: Option<BinOp>, value: &Expr) -> R<()> {
         let at = self.value(target)?;
         let new = self.value(value)?;
-        self.scope.truncate(mark);
         let Some(at) = at else { return Ok(()) };
         if let Some(op) = op {
-            let ok = matches!(at, Ty::Nat | Ty::Int | Ty::Float) || (*op == BinOp::Add && matches!(at, Ty::Str));
+            let ok = matches!(at, Ty::Nat | Ty::Int | Ty::Float) || (op == BinOp::Add && matches!(at, Ty::Str));
             if !ok {
                 return fail(
                     closure.body.pos,
@@ -647,7 +655,7 @@ fn same(a: &Ty, b: &Ty) -> bool {
 
 /// Whether two types agree, comparing their arguments, elements and fields. A part that is not known agrees with
 /// anything when `lenient`, and with nothing otherwise.
-fn agree(a: &Ty, b: &Ty, lenient: bool) -> bool {
+pub(super) fn agree(a: &Ty, b: &Ty, lenient: bool) -> bool {
     if !known(a) || !known(b) {
         return lenient;
     }
@@ -672,6 +680,18 @@ fn compatible(new: &Ty, at: &Ty) -> bool {
     match (new, at) {
         (Ty::Nat, Ty::Int | Ty::Float) | (Ty::Int, Ty::Float) => true,
         (x, y) if !known(x) || !known(y) => true,
+        // A number widens where it is inside another type too, as it does when the value is fitted as the query runs.
+        (Ty::Array(x), Ty::Array(y)) => compatible(x, y),
+        (Ty::Record(xs), Ty::Record(ys)) => {
+            xs.len() == ys.len()
+                && xs
+                    .iter()
+                    .zip(ys.iter())
+                    .all(|((n, p), (m, q))| n == m && compatible(p, q))
+        }
+        (Ty::Enum(x, xs), Ty::Enum(y, ys)) => {
+            x == y && xs.len() == ys.len() && xs.iter().zip(ys.iter()).all(|(p, q)| compatible(p, q))
+        }
         (x, y) => agree(x, y, true),
     }
 }

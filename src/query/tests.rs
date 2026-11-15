@@ -399,6 +399,17 @@ fn a_const_reference_needs_the_types() {
 
 /// Runs a typed query over the values in `input`, with the declarations in `types`, as `query` does.
 fn typed(types: &str, input: &str, text: &str, type_text: Option<&str>) -> Result<String, String> {
+    typed_with(types, input, text, type_text, &crate::CheckOptions::default())
+}
+
+/// Runs a typed query as `typed` does, with the given options for the check.
+fn typed_with(
+    types: &str,
+    input: &str,
+    text: &str,
+    type_text: Option<&str>,
+    options: &crate::CheckOptions,
+) -> Result<String, String> {
     let expr = prepare(text, true).map_err(|d| format!("before any value: {}", d))?;
     let sources = vec![
         crate::prelude_source(),
@@ -414,19 +425,12 @@ fn typed(types: &str, input: &str, text: &str, type_text: Option<&str>) -> Resul
     let layout = crate::plain_layout(&sources);
     let names = constructor_names(&expr);
     let mut written = String::new();
-    let result = crate::query_typed(
-        &sources,
-        &layout,
-        &crate::CheckOptions::default(),
-        &names,
-        type_text,
-        &mut |inputs| {
-            run_typed(&expr, inputs, &mut |v| {
-                written.push_str(&render(v, true));
-                Ok(())
-            })
-        },
-    );
+    let result = crate::query_typed(&sources, &layout, options, &names, type_text, &mut |inputs| {
+        run_typed(&expr, inputs, &mut |v| {
+            written.push_str(&render(v, true));
+            Ok(())
+        })
+    });
     let shown = written.trim_end().replace(";\n", "; ");
     match result {
         Ok(()) => Ok(shown),
@@ -974,5 +978,83 @@ fn the_rest_of_a_typed_array_has_the_type_of_an_array_of_its_elements() {
     assert!(
         typed_err(types, "Many[Dot];", "#values.filter_match(|Many[rest @ ..]| rest[0].z)")
             .contains("has a field or a parameter z")
+    );
+}
+
+#[test]
+fn an_outer_const_keeps_its_declared_type_through_an_inner_one() {
+    let options = crate::CheckOptions {
+        allow_refs: true,
+        ..crate::CheckOptions::default()
+    };
+    let types = "enum U = Unit;\nconst n = 5;\nconst f: Float = n;";
+    assert_eq!(
+        typed_with(types, "Unit;", "#values.map(|u| f / 2)", None, &options).unwrap(),
+        "2.5;"
+    );
+}
+
+#[test]
+fn the_parts_of_a_const_are_bound_with_its_type() {
+    let types = "enum U = Unit;\nconst xs = [1.5, 5];\nconst r: { a: Float, b: Float } = { a: 1.5, b: 5 };";
+    assert_eq!(
+        typed_ok(types, "xs;", "#values.filter_match(|[_, rest @ ..]| rest[0] / 2)"),
+        "2.5;"
+    );
+    assert_eq!(typed_ok(types, "r;", "#values.map(|{ b, .. }| b / 2)"), "2.5;");
+}
+
+#[test]
+fn collected_elements_of_different_types_leave_the_element_type_unknown() {
+    let types = "enum R = R { ints: [Int], floats: [Float], choose: Bool };";
+    let input = "R { ints: [+1], floats: [1.5], choose: true };\nR { ints: [+1], floats: [1.5], choose: false };";
+    let query = "#values.map(|r| if r.choose then r.ints else r.floats endif).collect().iter()\
+                 .flat_map(|a| a.iter()).map(|n| n + 1)";
+    assert_eq!(typed(types, input, query, Some("R")).unwrap(), "+2; 2.5;");
+}
+
+#[test]
+fn the_new_value_of_an_update_is_checked_with_the_parameter_in_scope() {
+    let types = "enum C = C { a: Nat, b: String };";
+    // No value reaches the closure, so only the check before the run can find the mistake.
+    let e = typed(
+        types,
+        "C { a: 1, b: \"x\" };",
+        "#values.filter(|c| false).map(|c| c.update(|x| x.a = x.b))",
+        Some("C"),
+    )
+    .unwrap_err();
+    assert!(e.starts_with("before any value:"), "{}", e);
+    assert!(e.contains("does not fit"), "{}", e);
+}
+
+#[test]
+fn a_number_widens_inside_an_array_that_an_update_assigns() {
+    let types = "enum C = C { ns: [Nat], fs: [Float] };";
+    assert_eq!(
+        typed(
+            types,
+            "C { ns: [1], fs: [2.5] };",
+            "#values.map(|c| c.update(|x| x.fs = c.ns))",
+            Some("C")
+        )
+        .unwrap(),
+        "C { ns: [1], fs: [1] };"
+    );
+}
+
+#[test]
+fn a_const_of_another_type_does_not_fit_an_enum_field() {
+    let types = "enum Shape = Dot, Circle { r: Nat };\nconst t: Bool = true;\nconst d: Shape = Dot;\n\
+                 enum H = H { s: Shape };";
+    let e = typed_err(types, "H { s: Dot };", "#values.map(|h| h.update(|x| x.s = t))");
+    assert!(e.contains("does not fit"), "{}", e);
+    assert_eq!(
+        typed_ok(
+            types,
+            "H { s: Circle { r: 1 } };",
+            "#values.map(|h| h.update(|x| x.s = d))"
+        ),
+        "H { s: Dot };"
     );
 }

@@ -141,13 +141,14 @@ position in the expression.
 - **Exit code 0:** the query ran to the end. No output is not an error.
 - **Exit code 1:** an error in the inputs: a syntax error, a types file among the values of an untyped query, and,
   typed, the errors of `check`; and an error at a value as the query runs, such as a missing field, an index out of
-  range, a number of the wrong kind, a `Nat` below zero, or a value that no arm of a `match` matches. The values
-  before an error at a value have been written; typed, an error in the inputs is found before anything is written.
+  range, a number of the wrong kind, a `Nat` below zero, a value that no arm of a `match` matches, or branches whose
+  types depend on the values and have no common type. The values before an error at a value have been written; typed,
+  an error in the inputs is found before anything is written.
 - **Exit code 2:** a mistake in the query. A syntax error, a name that no pattern binds, a closure's parameter that
-  may not match and branches with no common type are found before any input is read. Typed, an unknown constructor, a
-  `--type` that is not a type, and what `--type` lets the types find are found once the inputs have been read and
-  checked, before the query runs on any value. Also an option or an argument that is not
-  understood, an option for the types in an untyped query, an input that cannot be read, and an output that cannot be
-  written, as for `convert`.
+  may not match and branches with no common type, when the query fixes their types, are found before any input is
+  read. Typed, an unknown constructor, a `--type` that is not a type, and what `--type` lets the types find are found
+  once the inputs have been read and checked, before the query runs on any value. Also an option or an argument that
+  is not understood, an option for the types in an untyped query, an input that cannot be read, and an output that
+  cannot be written, as for `convert`.
 
 See [the exit codes](exit-codes.md).
