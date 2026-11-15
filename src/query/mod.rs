@@ -8,6 +8,7 @@ pub mod lexer;
 pub mod number;
 pub mod parser;
 pub mod syntax;
+pub mod typed_check;
 pub mod types;
 
 use crate::ast::Value;
@@ -130,6 +131,8 @@ fn run_items(
 #[derive(Debug)]
 pub enum RunError {
     Failed(Failure),
+    /// A mistake in a typed query that the types found before any value was read: exit code 2.
+    Query(Diagnostic),
     Write(std::io::Error),
 }
 
@@ -259,6 +262,7 @@ pub fn run_typed(
             *name = next;
         }
     });
+    typed_check::check_typed(&expr, &inputs.types, inputs.target.as_ref()).map_err(RunError::Query)?;
     let typing = Rc::new(eval::Typing {
         types: inputs.types,
         names_source: inputs.names_source,

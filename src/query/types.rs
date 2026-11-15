@@ -123,6 +123,35 @@ impl Types {
         }
     }
 
+    /// The fields of a constructor with a record body, with their types, given the type of a value of it.
+    pub fn ctor_fields(&self, name: &str, ty: Option<&Ty>) -> Option<Vec<(String, Ty)>> {
+        let (decl, variant) = self.ctor(name)?;
+        let VariantBody::Record(fields) = &variant.body else {
+            return None;
+        };
+        Some(instantiate_fields(fields, &decl.params, &Types::enum_args(decl, ty)))
+    }
+
+    /// The type of the elements of a constructor with an array body, given the type of a value of it.
+    pub fn ctor_element(&self, name: &str, ty: Option<&Ty>) -> Option<Ty> {
+        let (decl, variant) = self.ctor(name)?;
+        let VariantBody::Array(element) = &variant.body else {
+            return None;
+        };
+        Some(instantiate(element, &decl.params, &Types::enum_args(decl, ty)))
+    }
+
+    /// The enum with the canonical name.
+    pub fn enum_decl(&self, name: &str) -> Option<&EnumDecl> {
+        self.enums.get(name).map(|decl| &**decl)
+    }
+
+    /// The type of a value of a constructor: its enum, with the arguments of `ty` if it is a value of that enum.
+    pub fn ctor_type(&self, name: &str, ty: Option<&Ty>) -> Option<Ty> {
+        let (decl, _) = self.ctor(name)?;
+        Some(Ty::Enum(decl.name.clone(), Rc::new(Types::enum_args(decl, ty))))
+    }
+
     /// The parameters of a tuple constructor, with their types, given the type of the value.
     pub fn tuple_params(&self, name: &str, ty: Option<&Ty>) -> Option<(Vec<crate::ast::Parameter>, Vec<Ty>)> {
         let (decl, variant) = self.ctor(name)?;

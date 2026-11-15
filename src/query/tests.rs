@@ -26,6 +26,7 @@ fn query(input: &str, text: &str) -> Result<String, String> {
         Err(RunError::Failed(Failure::Error(d))) => Err(format!("{}after: {}", d, written.replace(";\n", "; "))),
         Err(RunError::Failed(Failure::Input(m))) => Err(m),
         Err(RunError::Write(e)) => Err(e.to_string()),
+        Err(RunError::Query(d)) => Err(format!("before any value: {}", d)),
     }
 }
 
@@ -430,7 +431,9 @@ fn typed(types: &str, input: &str, text: &str, type_text: Option<&str>) -> Resul
     match result {
         Ok(()) => Ok(shown),
         Err(crate::QueryTypedError::Invalid(ds)) => Err(format!("invalid: {}", ds[0])),
-        Err(crate::QueryTypedError::Query(d)) => Err(format!("before any value: {}", d)),
+        Err(crate::QueryTypedError::Query(d)) | Err(crate::QueryTypedError::Run(RunError::Query(d))) => {
+            Err(format!("before any value: {}", d))
+        }
         Err(crate::QueryTypedError::Run(RunError::Failed(Failure::Error(d)))) => Err(format!("{}after: {}", d, shown)),
         Err(crate::QueryTypedError::Run(e)) => Err(format!("{:?}", e)),
     }
@@ -525,4 +528,87 @@ fn typed_with_a_type_for_every_value() {
     let e = typed(SHAPES, "T(a: 1);", "@values", Some("Shape")).unwrap_err();
     assert!(e.starts_with("invalid") && e.contains("Expected Shape"), "{}", e);
     assert_eq!(typed(SHAPES, "Dot;", "@values", Some("Shape")).unwrap(), "Dot;");
+}
+
+const CONFIG: &str = "enum Config = Config { name: String, port: Nat };";
+
+#[test]
+fn e37_typed_a_value_of_the_wrong_type_is_found_up_front() {
+    let e = typed(
+        CONFIG,
+        r#"Config { name: "h", port: 80 };"#,
+        r#"@values.map(|c| c.update(|c| c.port = "x"))"#,
+        Some("Config"),
+    )
+    .unwrap_err();
+    assert!(
+        e.starts_with("before any value") && e.contains("does not fit") && e.contains("Nat"),
+        "{}",
+        e
+    );
+    assert_eq!(
+        typed(
+            CONFIG,
+            r#"Config { name: "h", port: 80 };"#,
+            "@values.map(|c| c.update(|c| c.port = 8080))",
+            Some("Config")
+        )
+        .unwrap(),
+        r#"Config { name: "h", port: 8080 };"#
+    );
+}
+
+#[test]
+fn typed_fields_are_checked_up_front() {
+    let e = typed(CONFIG, "", "@values.map(|c| c.prot)", Some("Config")).unwrap_err();
+    assert!(
+        e.starts_with("before any value") && e.contains("No constructor of Config has a field or a parameter prot"),
+        "{}",
+        e
+    );
+    let e = typed(SHAPES, "", "@values.filter_match(|Circle { radius }| radius)", None).unwrap_err();
+    assert!(
+        e.starts_with("before any value") && e.contains("Circle has no field radius"),
+        "{}",
+        e
+    );
+}
+
+#[test]
+fn typed_patterns_must_be_of_the_type() {
+    let e = typed(SHAPES, "", "@values.filter_match(|Circle { .. }| 1)", Some("T")).unwrap_err();
+    assert!(e.contains("never matches a value of T"), "{}", e);
+}
+
+#[test]
+fn typed_match_must_be_exhaustive() {
+    let e = typed(
+        SHAPES,
+        "",
+        "@values.map(|s| match s with Circle { r } => r, endmatch)",
+        Some("Shape"),
+    )
+    .unwrap_err();
+    assert!(
+        e.starts_with("before any value") && e.contains("does not cover Dot of Shape"),
+        "{}",
+        e
+    );
+    assert_eq!(
+        typed(
+            SHAPES,
+            "Dot; Circle { r: 2.0 };",
+            "@values.map(|s| match s with Circle { r } => r, Dot => 0.0, endmatch)",
+            Some("Shape")
+        )
+        .unwrap(),
+        "0.0; 2.0;"
+    );
+    // Without a type for the values, the match is checked at each value.
+    let e = typed_err(
+        SHAPES,
+        "Dot;",
+        "@values.map(|s| match s with Circle { r } => r, endmatch)",
+    );
+    assert!(e.contains("No arm"), "{}", e);
 }

@@ -489,8 +489,8 @@ pub enum QueryTypedError {
 
 /// Runs a query with the types. The sources are checked as `check_in_projects` checks them, and the first error ends
 /// the run before the query starts. Then every value is handed to `run`, resolved, with the declarations, the type of
-/// every value if `type_text` gives one, and the constructor names of the query, which are `names`, resolved as a values
-/// file of the root project would resolve them.
+/// every value if `type_text` gives one, and the constructor names of the query, which are `names`, resolved as a
+/// values file of the root project would resolve them.
 pub fn query_typed(
     sources: &[Source],
     layout: &Layout,
