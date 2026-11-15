@@ -182,11 +182,18 @@ impl Parser {
         Ok(result)
     }
 
+    /// A chain of binary operators. The chain is read in a loop, but it makes a tree as deep as it is long, which the
+    /// later passes recurse over, so each link counts as a level of nesting, as do those of `postfix` and `cast`.
     fn binary(&mut self, ops: &[(&str, BinOp)], next: fn(&mut Self) -> Result<Expr>, chain: bool) -> Result<Expr> {
+        let start = self.depth;
         let mut left = next(self)?;
         loop {
             let found = ops.iter().find(|(p, _)| self.is_punct(p)).map(|(_, op)| *op);
-            let Some(op) = found else { return Ok(left) };
+            let Some(op) = found else {
+                self.depth = start;
+                return Ok(left);
+            };
+            self.deeper()?;
             let pos = self.pos();
             self.bump();
             let right = next(self)?;
@@ -199,6 +206,7 @@ impl Parser {
                 if ops.iter().any(|(p, _)| self.is_punct(p)) {
                     return self.fail(self.pos(), "Comparisons cannot be chained; use && between them");
                 }
+                self.depth = start;
                 return Ok(left);
             }
         }
@@ -237,8 +245,10 @@ impl Parser {
     }
 
     fn cast(&mut self) -> Result<Expr> {
+        let start = self.depth;
         let mut expr = self.unary()?;
         while self.is_keyword("as") {
+            self.deeper()?;
             let pos = self.pos();
             self.bump();
             let kind = match self.peek() {
@@ -259,6 +269,7 @@ impl Parser {
                 kind: ExprKind::Cast(Box::new(expr), kind),
             };
         }
+        self.depth = start;
         Ok(expr)
     }
 
@@ -291,8 +302,12 @@ impl Parser {
     }
 
     fn postfix(&mut self) -> Result<Expr> {
+        let start = self.depth;
         let mut expr = self.primary()?;
         loop {
+            if self.is_punct(".") || self.is_punct("[") {
+                self.deeper()?;
+            }
             if self.is_punct(".") {
                 self.bump();
                 let pos = self.pos();
@@ -338,6 +353,7 @@ impl Parser {
                     kind: ExprKind::Index(Box::new(expr), Box::new(index)),
                 };
             } else {
+                self.depth = start;
                 return Ok(expr);
             }
         }
