@@ -2328,6 +2328,69 @@ rm -f "$conv_dir/out" "$conv_dir/err" "$conv_dir/not-utf8.jsonl" "$conv_dir/two"
 rmdir "$conv_dir"
 echo ""
 
+echo "--- query ---"
+# `query` runs a Rust-like expression over @values. See docs/tasks/2026-11-15-query-subcommand/query-subcommand.md.
+query_dir="$(mktemp -d)"
+printf 'Move { x: 1, y: 2 };\nQuit;\nMove { x: 3, y: 4 };\n' >"$query_dir/moves.values"
+printf '[1, 2];\n[];\n[5, 6, 7];\n' >"$query_dir/arrays.values"
+
+# Runs query, and requires exit code 0, no errors and the output, with each line of it joined by a space.
+expect_query() {
+    local name="$1" expected="$2"; shift 2
+    local actual=0
+    "$CONSTRUCTO" query "$@" >"$query_dir/out" 2>"$query_dir/err" || actual=$?
+    local got
+    got="$(tr '\n' ' ' <"$query_dir/out" | sed 's/ $//')"
+    if [[ "$actual" -eq 0 && "$got" == "$expected" && ! -s "$query_dir/err" ]]; then
+        pass "query: $name"
+    else
+        fail "query: $name (exit $actual, got '$got', errors '$(head -n 1 "$query_dir/err")')"
+    fi
+}
+
+# Runs query, and requires the exit code, the output before the error, and a first line of the errors that starts as
+# given, where the message is a pattern.
+expect_query_error() {
+    local name="$1" code="$2" before="$3" message="$4"; shift 4
+    local actual=0
+    "$CONSTRUCTO" query "$@" >"$query_dir/out" 2>"$query_dir/err" || actual=$?
+    local got first
+    got="$(tr '\n' ' ' <"$query_dir/out" | sed 's/ $//')"
+    first="$(head -n 1 "$query_dir/err")"
+    if [[ "$actual" -eq "$code" && "$got" == "$before" && "$first" == $message* ]]; then
+        pass "query: $name"
+    else
+        fail "query: $name (exit $actual, got '$got', first error '$first')"
+    fi
+}
+
+expect_query "pass the input through" "Move { x: 1, y: 2 }; Quit; Move { x: 3, y: 4 };" '@values' \
+    "$query_dir/moves.values"
+expect_query "filter_match with field shorthand after a constructor" "Point { x: 1, y: 2 }; Point { x: 3, y: 4 };" \
+    '@values.filter_match(|Move { x, y, .. }| Point { x, y })' "$query_dir/moves.values"
+expect_query "a result that is not an iterator is one value" "1;" '@values.filter(|v| matches!(v, Quit)).count()' \
+    "$query_dir/moves.values"
+expect_query "collect, compact" "[[1, 2], [], [5, 6, 7]];" --compact '@values.collect()' "$query_dir/arrays.values"
+expect_query "take stops reading early" "Move { x: 1, y: 2 };" '@values.take(1)' "$query_dir/moves.values" \
+    "$query_dir/missing.values"
+expect_query "update" "{ a: 10, b: { c: 20 } };" '@values.map(|v| v.update(|v| v.a = 10).update(|v| v.b.c = 20))' \
+    --stdin < <(printf '{ a: 1, b: { c: 2 } };\n')
+expect_query_error "an error at a value comes after the values before it" 1 "1;" \
+    "ERROR: The index 0 is out of range for an array of 0 ($query_dir/arrays.values, line 2, col 1)" \
+    '@values.map(|a| a[0])' "$query_dir/arrays.values"
+expect_query_error "a mistake in the query is found before any value" 2 "" \
+    "ERROR: A bare record names its fields" '@values.map(|m| { x })' "$query_dir/moves.values"
+expect_query_error "branches without a common type are refused" 2 "" \
+    "ERROR: The branches give a Nat and a String, which have no common type" \
+    '@values.map(|v| if matches!(v, Quit) then 1 else "move" endif)' "$query_dir/moves.values"
+expect_query_error "an input that cannot be read is exit code 2" 2 "Move { x: 1, y: 2 }; Quit; Move { x: 3, y: 4 };" \
+    "ERROR: Cannot read $query_dir/missing.values" '@values' "$query_dir/moves.values" "$query_dir/missing.values"
+expect_query_error "the typed mode is not available yet" 2 "" "ERROR: --type is not available yet" --type=Shape \
+    '@values' "$query_dir/moves.values"
+rm -f "$query_dir/out" "$query_dir/err" "$query_dir/moves.values" "$query_dir/arrays.values"
+rmdir "$query_dir"
+echo ""
+
 TOTAL=$(( PASS + FAIL ))
 echo "Results: $PASS/$TOTAL passed"
 if [[ $FAIL -gt 0 ]]; then

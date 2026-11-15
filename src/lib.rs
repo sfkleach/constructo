@@ -15,6 +15,7 @@ pub mod limits;
 pub mod lock;
 pub mod parser;
 pub mod project;
+pub mod query;
 pub mod resolve;
 #[cfg(test)]
 mod test_support;

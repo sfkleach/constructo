@@ -7,7 +7,9 @@ use constructo::diagnostics::{Diagnostic, Pos};
 use constructo::fetch::Cache;
 use constructo::lock::Lock;
 use constructo::project::{init_project, Init, ProjectError, Remotes, PROJECT_FILE};
+use constructo::query::{self, QueryFailure, RunError};
 use constructo::typed_files::{first_token, types_end, FirstToken};
+use constructo::values_text::render;
 use constructo::verify::{read_lock, update_lock_with, verify_lock_with};
 use constructo::{
     check_in_projects, convert_typed, convert_typed_back, convert_typed_lines, source_kind, syntax_error, CheckOptions,
@@ -257,6 +259,70 @@ settings file is read for [global] and [experimental]."
 
         /// The files to convert. With --to=json-typed the types files come among them or from --project, and with
         /// --from=json-typed they come first, until the first file that is JSON or a `--`, which ends them
+        #[arg(value_name = "FILES", required_unless_present_any = ["stdin", "project"])]
+        files: Vec<PathBuf>,
+    },
+
+    /// Extract and transform values with a Rust-like expression over @values, the stream of the input values
+    #[command(after_help = "\
+The expression is Rust-like: @values is a lazy iterator over the values of every input, in order, with Rust's \
+adaptors, such as map, filter, filter_map, flat_map, take, skip, nth, next, count and collect, and our own \
+filter_match, whose closure takes a pattern that may not match. If the result is an iterator, each item is written \
+as a value; otherwise the one result is written. For example:
+
+    constructo query '@values.map(|m| m.x)' measurements.values
+    constructo query '@values.filter_match(|Move { x, .. }| x)' moves.values
+    constructo query '@values.map(|c| c.update(|c| c.server.port = 8080))' config.values
+
+The settings file is read for [global] and [experimental].")]
+    Query {
+        /// The query, such as '@values.map(|m| m.x)'
+        #[arg(value_name = "EXPR")]
+        expr: String,
+
+        /// The type of every value, such as Shape, which is resolved in the types that are given
+        #[arg(long = "type", value_name = "TYPE")]
+        type_expr: Option<String>,
+
+        /// Write each value on one line, with no white space between the parts
+        #[arg(long)]
+        compact: bool,
+
+        /// Also read the standard input as if it were another file
+        #[arg(long)]
+        stdin: bool,
+
+        #[command(flatten)]
+        typing: TypingArgs,
+
+        /// Switch on experimental features. On its own it switches on all of them, and `-x=FEATURE` switches on just
+        /// that one. The option can be repeated, and for each feature the last of this and --no-experimental wins.
+        #[arg(
+            short = 'x',
+            long,
+            value_name = "FEATURE",
+            value_enum,
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "all",
+            action = ArgAction::Append
+        )]
+        experimental: Vec<Feature>,
+
+        /// Switch off experimental features. On its own it switches off all of them, and `--no-experimental=FEATURE`
+        /// switches off just that one. The option can be repeated.
+        #[arg(
+            long,
+            value_name = "FEATURE",
+            value_enum,
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "all",
+            action = ArgAction::Append
+        )]
+        no_experimental: Vec<Feature>,
+
+        /// The files whose values are queried
         #[arg(value_name = "FILES", required_unless_present_any = ["stdin", "project"])]
         files: Vec<PathBuf>,
     },
@@ -594,6 +660,37 @@ fn main() -> ExitCode {
             };
             convert_typed_files(stdin, to_array, compact, format.is_lines(), &options, &set, &files)
         }
+        Command::Query {
+            expr,
+            type_expr,
+            compact,
+            stdin,
+            typing: _,
+            experimental: _,
+            no_experimental: _,
+            files,
+        } => {
+            let query_matches = matches
+                .subcommand_matches("query")
+                .expect("the query subcommand was given");
+            // The typed mode is still to come, so its options are refused rather than ignored without a word.
+            let typing_given = TYPING_OPTIONS
+                .iter()
+                .find(|id| query_matches.value_source(id) == Some(clap::parser::ValueSource::CommandLine));
+            if let Some(id) = typing_given {
+                eprintln!(
+                    "ERROR: --{} is not available yet: queries are untyped for now",
+                    id.replace('_', "-")
+                );
+                return ExitCode::from(EXIT_USAGE);
+            }
+            if type_expr.is_some() {
+                eprintln!("ERROR: --type is not available yet: queries are untyped for now");
+                return ExitCode::from(EXIT_USAGE);
+            }
+            let experimental = experimental(config.check_options().experimental, &feature_changes(query_matches));
+            query_files(&expr, compact, stdin, experimental, &files)
+        }
         Command::Check {
             stdin,
             typing,
@@ -820,6 +917,74 @@ fn convert_files(stdin: bool, options: &ConvertOptions, files: &[PathBuf]) -> Ex
             eprintln!("{}", diagnostic);
             ExitCode::from(EXIT_ERRORS)
         }
+    }
+}
+
+/// Runs a query over the values of the files and then of the standard input. The query is read and checked before any
+/// input, so a mistake in it is reported at once, with exit code 2. The inputs are read only as the query reaches
+/// them, and each value of the result is written as soon as it is made, so an error at a value comes after the values
+/// before it have been written.
+fn query_files(text: &str, compact: bool, stdin: bool, experimental: Experimental, files: &[PathBuf]) -> ExitCode {
+    let expr = match query::prepare(text) {
+        Ok(expr) => expr,
+        Err(diagnostic) => {
+            eprintln!("{}", diagnostic);
+            return ExitCode::from(EXIT_USAGE);
+        }
+    };
+    type Read = Box<dyn FnOnce() -> Result<Source, String>>;
+    let mut reads: Vec<Read> = files
+        .iter()
+        .map(|path| {
+            let path = path.clone();
+            Box::new(move || {
+                std::fs::read_to_string(&path)
+                    .map(|text| Source {
+                        name: path.display().to_string(),
+                        text,
+                    })
+                    .map_err(|e| format!("Cannot read {}: {}", path.display(), e))
+            }) as Read
+        })
+        .collect();
+    if stdin {
+        reads.push(Box::new(|| {
+            let mut text = String::new();
+            std::io::stdin()
+                .read_to_string(&mut text)
+                .map_err(|e| format!("Cannot read standard input: {}", e))?;
+            Ok(Source {
+                name: "<stdin>".to_string(),
+                text,
+            })
+        }));
+    }
+    let values = query::stream_of(reads.into_iter(), experimental);
+    let mut out = std::io::BufWriter::new(std::io::stdout().lock());
+    let result = query::run(&expr, values, &mut |value| {
+        out.write_all(render(value, compact).as_bytes())
+    });
+    match result {
+        Ok(()) => match out.flush() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => write_failure(&e),
+        },
+        Err(RunError::Failed(failure)) => {
+            // The error is about the inputs or the query, so a failure to write what came before it is not reported
+            // over it.
+            let _ = out.flush();
+            match failure {
+                QueryFailure::Error(diagnostic) => {
+                    eprintln!("{}", diagnostic);
+                    ExitCode::from(EXIT_ERRORS)
+                }
+                QueryFailure::Input(message) => {
+                    eprintln!("ERROR: {}", message);
+                    ExitCode::from(EXIT_USAGE)
+                }
+            }
+        }
+        Err(RunError::Write(e)) => write_failure(&e),
     }
 }
 
