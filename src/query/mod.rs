@@ -1,6 +1,6 @@
 //! Queries: Rust-like expressions over `@values`, the lazy stream of the input values, which extract data and
 //! transform it. See `docs/decisions/0044-queries-are-rust-like-expressions-over-a-stream-of-values.md` and the task,
-//! `docs/tasks/2026-11-15-query-subcommand/query-subcommand.md`, which settles the details.
+//! `docs/tasks/done/2026-11-15-query-subcommand/query-subcommand.md`, which settles the details.
 
 pub mod check;
 pub mod eval;

@@ -37,7 +37,9 @@ standard prelude declaring `Bool` and `Option<T>`. `constructo convert` writes v
 with every kind of value explicit (`--to=json-exact`) or in the natural shapes
 of serde, using the types (`--to=json-typed`), each as one document or a line to a value, or as
 XML with every kind explicit (`--to=xml`). It reads all of these back with `--from`, the typed ones with `--type`;
-see the [spec](docs/specs/convert-command.md).
+see the [spec](docs/specs/convert-command.md). `constructo query` extracts and transforms values with a Rust-like
+expression over the stream of the input values, such as `@values.filter_match(|Move { x, .. }| x)`, with or without
+the types; see the [spec](docs/specs/query-command.md).
 
 Types can be organised into *projects*: a folder with a `constructo.toml` that
 names the project and lists the projects it imports, whether from a folder, from

@@ -3,7 +3,7 @@
 ## Overview
 
 `docs/vision.md` lists, for later, selecting sub-values from a file or stdin. The design is settled in
-[decision 44](../../decisions/0044-queries-are-rust-like-expressions-over-a-stream-of-values.md): a query is a
+[decision 44](../../../decisions/0044-queries-are-rust-like-expressions-over-a-stream-of-values.md): a query is a
 Rust-like expression over `@values`, the lazy stream of the input values, which extracts data and transforms it with one
 language. This task implements it, test first.
 
@@ -97,6 +97,19 @@ unit tests too. The values are written as a values file would have them.
    and names, and widen numbers, as the principle in the decision requires.
 5. Errors at the position of the value, or of the expression, and exit codes as in `docs/specs/exit-codes.md`.
 6. Write the specification in `docs/specs/`, update the CHANGELOG, and move this task to `docs/tasks/done/`.
+
+## Outcome
+
+Done, in the stages of the steps above: the untyped language, then the typed mode, then the check of a typed query
+against the types before any value is read. The command is specified in `docs/specs/query-command.md`. Three choices
+were made while implementing it:
+
+- **A typed query reads every input before it runs,** since every value is checked as `check` checks it first; an
+  untyped one reads them lazily.
+- **Typed, a name is written as the source of its value writes it,** after resolution, so a name written with a
+  qualifier that it does not need may be written without one. Numbers and the rest of a value keep their text.
+- **Without `--type`, the type of a value that the query is given is not known up front,** so example 37 needs
+  `--type=Config` for its error to be found before any value is read; without it, the error is found at the value.
 
 ## Questions to settle
 

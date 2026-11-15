@@ -8,7 +8,7 @@ field while keeping the rest need the same paths. The decision is what kind of l
 from a stream of values and to transform it.
 
 This record settles the shape of the language. The command is `query`. Its command line and the remaining details of
-the language are settled in the implementation task, `docs/tasks/2026-11-15-query-subcommand/query-subcommand.md`.
+the language are settled in the implementation task, `docs/tasks/done/2026-11-15-query-subcommand/query-subcommand.md`.
 
 ## Factors
 
@@ -144,10 +144,9 @@ of its own, so a Rust programmer is never misled by a familiar name with a new m
 
 ### Still open
 
-The command line, casts, `match`, the operators and the string methods are settled in the implementation task. Left
-open there:
+The command line, casts, `match`, the operators and the string methods are settled in the implementation task, and
+the command is specified in `docs/specs/query-command.md`, with its exit codes. Left open:
 - A way to update every location that a predicate selects, as jq's `|=` does, if real use shows the need.
-- Errors and exit codes, following `docs/specs/exit-codes.md`.
 
 ## Options and Outcome
 
