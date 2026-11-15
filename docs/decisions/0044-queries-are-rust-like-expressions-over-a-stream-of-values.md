@@ -50,7 +50,7 @@ of its own, so a Rust programmer is never misled by a familiar name with a new m
   body: `v[i]`, which is an error when out of range, `v.get(i)` and `v.first()`, which give an `Option`, `v.len()`,
   and `v.iter()`, since an array is not an iterator, as in Rust.
 - A missing field or argument, or the wrong shape (`Quit has no body`), is an error at the value.
-- Constructor tests use Rust's `match`, `if let` and `matches!`, with patterns written in Constructo's value syntax
+- Constructor tests use Rust's `match` and `matches!`, with patterns written in Constructo's value syntax
   plus `..`, `_` and bindings.
 - **`filter_match`** is our addition for the commonest extraction: its closure parameter is a refutable pattern, a
   value that does not match is dropped, and the body's result is kept: `@values.filter_match(|Move { x, .. }| x)`.
@@ -174,7 +174,7 @@ the command is specified in `docs/specs/query-command.md`, with its exit codes. 
 
 ### Option 3: patterns and templates
 
-- Pros: it reuses the value grammar, and patterns survive here inside `match`, `if let` and `filter_match`.
+- Pros: it reuses the value grammar, and patterns survive here inside `match`, `matches!` and `filter_match`.
 - Cons: on its own it cannot express iteration, counting or arithmetic.
 
 ### Option 4: a small query language

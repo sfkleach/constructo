@@ -176,6 +176,20 @@ fn value_method(name: &str) -> Option<(Arg, K)> {
     })
 }
 
+/// Whether a value of a kind has a method. A constructor may have an array body, or be an Option, so it is allowed
+/// the methods of either, and the value is checked when it arrives.
+fn receiver_has(name: &str, kind: Fixed) -> bool {
+    match name {
+        "contains" | "starts_with" | "ends_with" | "trim" | "to_lowercase" | "to_uppercase" | "char_strings"
+        | "split" => kind == Fixed::Str,
+        "len" | "is_empty" => matches!(kind, Fixed::Str | Fixed::Array | Fixed::Ctor),
+        "first" | "last" | "get" | "iter" => matches!(kind, Fixed::Array | Fixed::Ctor),
+        "is_some" | "is_none" | "unwrap_or" => kind == Fixed::Ctor,
+        "update" => matches!(kind, Fixed::Record | Fixed::Ctor),
+        _ => true,
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Arg {
     None,
@@ -230,6 +244,10 @@ impl Checker {
                 ),
             ),
             // A literal gives way to the kind that it meets.
+            // Two literals keep the wider of their kinds, which a later value must still fit.
+            (K::Fixed(Fixed::Num(a, true)), K::Fixed(Fixed::Num(b, true))) => {
+                Ok(K::Fixed(Fixed::Num(if widens(a, b) { b } else { a }, true)))
+            }
             (K::Fixed(Fixed::Num(_, true)), K::Fixed(y)) => Ok(K::Fixed(y)),
             (K::Fixed(x), _) | (_, K::Fixed(x)) => Ok(K::Fixed(x)),
             _ => Ok(K::Any),
@@ -251,10 +269,12 @@ impl Checker {
                 Ok(K::Iter)
             }
             ExprKind::Var(name) => {
-                if self.bound(name) || self.lenient {
+                if self.bound(name) {
                     Ok(K::Any)
                 } else if matches!(name.as_str(), "true" | "false") {
                     fixed(Fixed::Bool)
+                } else if self.lenient {
+                    Ok(K::Any)
                 } else if name == "null" {
                     fixed(Fixed::Ctor)
                 } else {
@@ -475,6 +495,12 @@ impl Checker {
             };
             return fail(pos, format!("{} has no method {}{}", what, name, hint));
         };
+        // A receiver whose kind the expression fixes must be one that has the method.
+        if let K::Fixed(f) = r {
+            if !receiver_has(name, f) {
+                return fail(pos, format!("{} has no method {}", capitalise(&f.describe()), name));
+            }
+        }
         let count = if arg == Arg::None { 0 } else { 1 };
         if args.len() != count {
             return fail(
@@ -530,6 +556,16 @@ impl Checker {
         self.names.truncate(mark);
         let body = body?;
         match method {
+            "filter" | "any" | "all" | "find" | "filter_map" if body == K::Iter => {
+                let wanted = if method == "filter_map" { "an Option" } else { "a Bool" };
+                return fail(
+                    closure.body.pos,
+                    format!(
+                        "The closure of {} must give {}, and this is an iterator",
+                        method, wanted
+                    ),
+                );
+            }
             "filter" | "any" | "all" | "find" => {
                 if let K::Fixed(f) = body {
                     if f != Fixed::Bool {

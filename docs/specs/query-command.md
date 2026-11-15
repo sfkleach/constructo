@@ -101,7 +101,7 @@ Typed, a named argument is found however it was written, an omitted one takes it
 number takes the kind of its place, so a `5` in a `Float` field is a `Float`, and the constructor names of the query
 are resolved as a values file of the root project would resolve them, so an unknown one is an error. `update` checks
 that the new value fits, and an omitted argument that it changes is written by name. With `--type`, more is checked
-before any value is read: a field or parameter that no constructor of the type has, a pattern whose constructor is of
+before the query runs on any value: a field or parameter that no constructor of the type has, a pattern whose constructor is of
 another type, a new value that cannot fit where `update` puts it, and a `match` that does not cover every constructor
 of its enum.
 
@@ -125,9 +125,10 @@ position in the expression.
   typed, the errors of `check`; and an error at a value as the query runs, such as a missing field, an index out of
   range, a number of the wrong kind, a `Nat` below zero, or a value that no arm of a `match` matches. The values
   before an error at a value have been written; typed, an error in the inputs is found before anything is written.
-- **Exit code 2:** a mistake in the query, found before any input is read: a syntax error, a name that no pattern
-  binds, a closure's parameter that may not match, branches with no common type, and, typed, an unknown constructor,
-  a `--type` that is not a type, and what `--type` lets the types find. Also an option or an argument that is not
+- **Exit code 2:** a mistake in the query. A syntax error, a name that no pattern binds, a closure's parameter that
+  may not match and branches with no common type are found before any input is read. Typed, an unknown constructor, a
+  `--type` that is not a type, and what `--type` lets the types find are found once the inputs have been read and
+  checked, before the query runs on any value. Also an option or an argument that is not
   understood, an option for the types in an untyped query, an input that cannot be read, and an output that cannot be
   written, as for `convert`.
 

@@ -111,9 +111,10 @@ and the same errors have the same codes.
 - **Exit code 1:** a syntax error in an input, a types file among the values of an untyped query, the errors of `check`
   for a typed query, and an error at a value as the query runs, such as a missing field, an index out of range, a
   number of the wrong kind or a `Nat` below zero. The values before an error at a value have been written.
-- **Exit code 2:** a mistake in the query, which is found before any input is read: its syntax, a name that is not
-  bound, a closure's parameter that may not match, branches with no common type, and, typed, an unknown constructor,
-  a `--type` that is not a type, and what `--type` lets the types find, such as a field that the type does not have.
+- **Exit code 2:** a mistake in the query. Its syntax, a name that is not bound, a closure's parameter that may not
+  match and branches with no common type are found before any input is read. Typed, an unknown constructor, a
+  `--type` that is not a type, and what `--type` lets the types find, such as a field that the type does not have,
+  are found once the inputs have been read and checked, before the query runs on any value.
   Also an option or an argument that is not understood, an option for the types in an untyped query, an input that
   cannot be read, an output that cannot be written, and, typed, the problems with a project-file or with how projects
   are found, as for `check`.

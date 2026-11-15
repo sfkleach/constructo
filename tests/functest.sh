@@ -2373,6 +2373,7 @@ expect_query "a result that is not an iterator is one value" "1;" '@values.filte
 expect_query "collect, compact" "[[1, 2], [], [5, 6, 7]];" --compact '@values.collect()' "$query_dir/arrays.values"
 expect_query "take stops reading early" "Move { x: 1, y: 2 };" '@values.take(1)' "$query_dir/moves.values" \
     "$query_dir/missing.values"
+expect_query "a pipe among the files is read whole" "1;" '@values.count()' <(printf '1;\n')
 expect_query "update" "{ a: 10, b: { c: 20 } };" '@values.map(|v| v.update(|v| v.a = 10).update(|v| v.b.c = 20))' \
     --stdin < <(printf '{ a: 1, b: { c: 2 } };\n')
 expect_query_error "an error at a value comes after the values before it" 1 "1;" \

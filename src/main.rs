@@ -676,14 +676,27 @@ fn main() -> ExitCode {
                 .expect("the query subcommand was given");
             let from_file = config.check_options();
             let experimental = experimental(from_file.experimental, &feature_changes(query_matches));
+            // The query is read and checked before any input is looked at, so a mistake in it is reported at once.
+            let parsed = match query::prepare(&expr) {
+                Ok(parsed) => parsed,
+                Err(diagnostic) => {
+                    eprintln!("{}", diagnostic);
+                    return ExitCode::from(EXIT_USAGE);
+                }
+            };
             // The query is typed when there are types: a project, a type for the values, or a types file among the
-            // files. Only the start of each file is read to tell.
+            // files. Only the start of each file is read to tell, and only of a regular file: reading the start of a
+            // pipe would take what it reads from the query, and opening a FIFO would wait for a writer, so such an
+            // input is taken to hold values, and is only opened if the query reaches it.
             let mut typed = typing.project.is_some() || type_expr.is_some();
             for path in &files {
+                if !std::fs::metadata(path).is_ok_and(|m| m.is_file()) {
+                    continue;
+                }
                 match first_token_of(path) {
                     Ok(FirstToken::Types) => typed = true,
                     Ok(_) => {}
-                    // The file is reported when it is read, after the query is checked.
+                    // The file is reported when it is read.
                     Err(_) => break,
                 }
             }
@@ -699,7 +712,7 @@ fn main() -> ExitCode {
                     );
                     return ExitCode::from(EXIT_USAGE);
                 }
-                return query_files(&expr, compact, stdin, experimental, &files);
+                return query_files(&parsed, compact, stdin, experimental, &files);
             }
             let TypingArgs {
                 prelude,
@@ -725,13 +738,6 @@ fn main() -> ExitCode {
             };
             let load_prelude = setting(prelude, no_prelude, config.prelude());
             let dev = setting(dev, no_dev, config.dev());
-            let parsed = match query::prepare(&expr) {
-                Ok(parsed) => parsed,
-                Err(diagnostic) => {
-                    eprintln!("{}", diagnostic);
-                    return ExitCode::from(EXIT_USAGE);
-                }
-            };
             let set = match load_projects(project.as_deref(), load_prelude, dev, cache.as_deref()) {
                 Ok(set) => set,
                 Err(code) => return code,
@@ -967,18 +973,16 @@ fn convert_files(stdin: bool, options: &ConvertOptions, files: &[PathBuf]) -> Ex
     }
 }
 
-/// Runs a query over the values of the files and then of the standard input. The query is read and checked before any
-/// input, so a mistake in it is reported at once, with exit code 2. The inputs are read only as the query reaches
-/// them, and each value of the result is written as soon as it is made, so an error at a value comes after the values
-/// before it have been written.
-fn query_files(text: &str, compact: bool, stdin: bool, experimental: Experimental, files: &[PathBuf]) -> ExitCode {
-    let expr = match query::prepare(text) {
-        Ok(expr) => expr,
-        Err(diagnostic) => {
-            eprintln!("{}", diagnostic);
-            return ExitCode::from(EXIT_USAGE);
-        }
-    };
+/// Runs a query, which has been read and checked, over the values of the files and then of the standard input. The
+/// inputs are read only as the query reaches them, and each value of the result is written as soon as it is made, so an
+/// error at a value comes after the values before it have been written.
+fn query_files(
+    expr: &query::syntax::Expr,
+    compact: bool,
+    stdin: bool,
+    experimental: Experimental,
+    files: &[PathBuf],
+) -> ExitCode {
     type Read = Box<dyn FnOnce() -> Result<Source, String>>;
     let mut reads: Vec<Read> = files
         .iter()
@@ -1008,7 +1012,7 @@ fn query_files(text: &str, compact: bool, stdin: bool, experimental: Experimenta
     }
     let values = query::stream_of(reads.into_iter(), experimental);
     let mut out = std::io::BufWriter::new(std::io::stdout().lock());
-    let result = query::run(&expr, values, &mut |value| {
+    let result = query::run(expr, values, &mut |value| {
         out.write_all(render(value, compact).as_bytes())
     });
     match result {

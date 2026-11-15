@@ -4,6 +4,7 @@
 //! arrives, by its kind, and a mismatch is an error at that value. See the settled questions of
 //! `docs/tasks/done/2026-11-15-query-subcommand/query-subcommand.md`.
 
+use super::check::Fixed;
 use super::number::{self, kind_of};
 use super::parser::QUERY_NAME;
 use super::syntax::*;
@@ -156,6 +157,11 @@ fn some(item: Item) -> Item {
     let pos = item.value.pos;
     let src = item.src.clone();
     let file = item.file;
+    // The Option keeps the type of what it holds, so that it is known again when it is taken out.
+    let ty = item
+        .ty
+        .clone()
+        .map(|t| Ty::Enum("Option".to_string(), Rc::new(vec![t])));
     let arg = Argument {
         name: None,
         pos,
@@ -163,6 +169,7 @@ fn some(item: Item) -> Item {
     };
     let mut result = made(tagged("Some", Some(TaggedBody::Tuple(vec![arg]))), pos, &src, false);
     result.file = file;
+    result.ty = ty;
     result
 }
 
@@ -211,6 +218,7 @@ fn describe_item(item: &Item) -> String {
 }
 
 fn as_bool(item: &Item) -> R<bool> {
+    let item = &deref(item)?;
     if let ValueKind::Tagged { name, body: None } = &item.value.kind {
         match canonical(name) {
             "true" => return Ok(true),
@@ -369,7 +377,7 @@ pub fn eval(expr: &Expr, env: &Env, values: &mut Option<Stream>) -> R<Val> {
         }
         ExprKind::Closure(_) => at_query(pos, "A closure can only be the argument of a method"),
         ExprKind::Unary(op, operand) => {
-            let operand = item(operand, env, values)?;
+            let operand = deref(&item(operand, env, values)?)?;
             match op {
                 UnOp::Not => one(boolean(!as_bool(&operand)?, pos)),
                 UnOp::Neg => {
@@ -391,7 +399,7 @@ pub fn eval(expr: &Expr, env: &Env, values: &mut Option<Stream>) -> R<Val> {
         }
         ExprKind::Binary(op, left, right) => binary(*op, left, right, pos, env, values),
         ExprKind::Cast(operand, to) => {
-            let operand = item(operand, env, values)?;
+            let operand = deref(&item(operand, env, values)?)?;
             let Some((kind, text)) = num(&operand) else {
                 return at_item(
                     &operand,
@@ -440,32 +448,36 @@ pub fn eval(expr: &Expr, env: &Env, values: &mut Option<Stream>) -> R<Val> {
 /// fix, which the check before any data was read could not see.
 fn branch(chosen: &Expr, whole: &Expr, env: &Env, values: &mut Option<Stream>) -> R<Val> {
     let result = eval(chosen, env, values)?;
-    if let Val::One(found) = &result {
-        let others: Vec<&Expr> = match &whole.kind {
-            ExprKind::If { branches, otherwise } => branches
-                .iter()
-                .map(|(_, b)| b)
-                .chain(std::iter::once(&**otherwise))
-                .collect(),
-            ExprKind::Match { arms, .. } => arms.iter().map(|a| &a.body).collect(),
-            _ => Vec::new(),
-        };
-        for other in others {
-            if let Some(fixed) = super::check::fixed_kind(other) {
-                if !fixed.admits(&found.value, found.lit) {
+    let Val::One(found) = result else { return Ok(result) };
+    let others: Vec<&Expr> = match &whole.kind {
+        ExprKind::If { branches, otherwise } => branches
+            .iter()
+            .map(|(_, b)| b)
+            .chain(std::iter::once(&**otherwise))
+            .collect(),
+        ExprKind::Match { arms, .. } => arms.iter().map(|a| &a.body).collect(),
+        _ => Vec::new(),
+    };
+    let mut common = fixed_of(&found);
+    for other in others {
+        if let Some(fixed) = super::check::fixed_kind(other) {
+            match merge(common, fixed) {
+                Some(merged) => common = merged,
+                None => {
                     return at_item(
-                        found,
+                        &found,
                         format!(
                             "This branch gives {}, but another gives {}, and they have no common type",
-                            describe(&found.value),
+                            describe_item(&found),
                             fixed.describe()
                         ),
-                    );
+                    )
                 }
             }
         }
     }
-    Ok(result)
+    // A literal takes the kind that the branches have in common, as the check found it.
+    Ok(Val::One(adapt(found, common)?))
 }
 
 /// Evaluates an expression that must give one value.
@@ -484,32 +496,81 @@ fn array(items: &[Expr], env: &Env, values: &mut Option<Stream>) -> R<Vec<Value>
     for e in items {
         out.push(item(e, env, values)?);
     }
-    common_kind(&out)?;
-    Ok(out.into_iter().map(|i| i.value).collect())
+    let common = common_kind(&out)?;
+    let mut adapted = Vec::new();
+    for item in out {
+        adapted.push(match common {
+            Some(common) => adapt(item, common)?.value,
+            None => item.value,
+        });
+    }
+    Ok(adapted)
 }
 
 /// Checks that the elements of an array have a common type, as far as their kinds can tell: numbers of one kind (a
 /// literal adapting), or all strings, or all records, and so on. Constructors are not told apart without the types.
-fn common_kind(items: &[Item]) -> R<()> {
-    let Some(first) = items.iter().find(|i| !i.lit).or(items.first()) else {
-        return Ok(());
-    };
-    let fixed = super::check::Fixed::of(&first.value);
+fn common_kind(items: &[Item]) -> R<Option<Fixed>> {
+    let mut common: Option<Fixed> = None;
     for item in items {
-        if !fixed.admits(&item.value, item.lit)
-            && !(first.lit && super::check::Fixed::of(&item.value).admits(&first.value, true))
-        {
-            return at_item(
-                item,
-                format!(
-                    "An array's elements must have a common type, but this is {} and another is {}",
-                    describe(&item.value),
-                    fixed.describe()
-                ),
-            );
-        }
+        let fixed = fixed_of(item);
+        common = Some(match common {
+            None => fixed,
+            Some(so_far) => match merge(so_far, fixed) {
+                Some(merged) => merged,
+                None => {
+                    return at_item(
+                        item,
+                        format!(
+                            "An array's elements must have a common type, but this is {} and another is {}",
+                            describe_item(item),
+                            so_far.describe()
+                        ),
+                    )
+                }
+            },
+        });
     }
-    Ok(())
+    Ok(common)
+}
+
+/// What an item fixes about its type, with the kind of a number that its type gives it.
+fn fixed_of(item: &Item) -> Fixed {
+    match num(item) {
+        Some((kind, _)) => Fixed::Num(kind, item.lit),
+        None => Fixed::of(&item.value),
+    }
+}
+
+/// The kind that two have in common, if they have one: a literal number gives way to the kind that it meets, and two
+/// literals keep the wider of their kinds.
+fn merge(a: Fixed, b: Fixed) -> Option<Fixed> {
+    match (a, b) {
+        (Fixed::Num(x, lx), Fixed::Num(y, ly)) => {
+            if x == y {
+                Some(Fixed::Num(x, lx && ly))
+            } else if lx && widens(x, y) {
+                Some(Fixed::Num(y, ly))
+            } else if ly && widens(y, x) {
+                Some(Fixed::Num(x, lx))
+            } else {
+                None
+            }
+        }
+        (a, b) if a == b => Some(a),
+        _ => None,
+    }
+}
+
+/// A literal number converted to the kind that it has in common with others. Anything else is unchanged.
+fn adapt(item: Item, common: Fixed) -> R<Item> {
+    let Fixed::Num(to, _) = common else { return Ok(item) };
+    match num(&item) {
+        Some((kind, text)) if item.lit && kind != to => {
+            let text = number::cast(text, to).map_err(num_error(&item))?;
+            Ok(num_value(text, item.value.pos, &item.src, true))
+        }
+        _ => Ok(item),
+    }
 }
 
 /// The members of a record: the base's, if there is one, with the fields that are given replacing them or added.
@@ -820,11 +881,17 @@ fn apply_one(closure: &Closure, env: &Env, arg: &Item) -> R<Item> {
 }
 
 fn option(item: &Item) -> R<Option<Item>> {
+    let item = &deref(item)?;
     if let ValueKind::Tagged { name, body } = &item.value.kind {
         match (canonical(name), body) {
             ("None", None) => return Ok(None),
             ("Some", Some(TaggedBody::Tuple(args))) if args.len() == 1 && args[0].name.is_none() => {
-                return Ok(Some(part(item, &args[0].value)))
+                // The type of what is in an Option is the argument of its type, when that is known.
+                let inner = match &item.ty {
+                    Some(Ty::Enum(_, args)) if args.len() == 1 => Some(args[0].clone()).filter(known),
+                    _ => None,
+                };
+                return Ok(Some(typed_part(item, &args[0].value, inner)));
             }
             _ => {}
         }
@@ -992,10 +1059,24 @@ fn stream_method(
             for r in stream {
                 items.push(r?);
             }
-            common_kind(&items)?;
+            let common = common_kind(&items)?;
             let src = items.first().map(|i| i.src.clone()).unwrap_or_else(query_src);
-            let values = items.into_iter().map(|i| i.value).collect();
-            Ok(Val::One(made(ValueKind::Array(values), pos, &src, false)))
+            // The array keeps the type of its elements, when every element has one, so that it is known again when
+            // they are taken out.
+            let element = items
+                .first()
+                .and_then(|i| i.ty.clone())
+                .filter(|_| items.iter().all(|i| i.ty.is_some()));
+            let mut values = Vec::new();
+            for item in items {
+                values.push(match common {
+                    Some(common) => adapt(item, common)?.value,
+                    None => item.value,
+                });
+            }
+            let mut array = made(ValueKind::Array(values), pos, &src, false);
+            array.ty = element.map(|t| Ty::Array(Rc::new(t)));
+            Ok(Val::One(array))
         }
         "any" | "all" | "find" => {
             let c = closure_arg(args, 0, name, pos)?.clone();
@@ -1416,6 +1497,7 @@ fn ty_text(ty: &Ty) -> String {
 }
 
 fn arithmetic(op: BinOp, a: &Item, b: &Item, pos: Pos) -> R<Item> {
+    let (a, b) = (&deref(a)?, &deref(b)?);
     if op == BinOp::Add {
         if let (Some(x), Some(y)) = (string(a), string(b)) {
             return Ok(made(
@@ -1457,7 +1539,8 @@ fn binary(op: BinOp, left: &Expr, right: &Expr, pos: Pos, env: &Env, values: &mu
         }
         _ => {}
     }
-    let b = item(right, env, values)?;
+    let b = deref(&item(right, env, values)?)?;
+    let a = deref(&a)?;
     if op.is_arithmetic() {
         return Ok(Val::One(arithmetic(op, &a, &b, pos)?));
     }
@@ -1478,7 +1561,7 @@ fn binary(op: BinOp, left: &Expr, right: &Expr, pos: Pos, env: &Env, values: &mu
                     }
                 }
                 let (_, x, y) = unify(&a, &b, "compared with")?;
-                number::compare(&x, &y)
+                number::compare(&x, &y).map_err(num_error(&a))?
             }
         };
         let result = match op {
@@ -1489,47 +1572,33 @@ fn binary(op: BinOp, left: &Expr, right: &Expr, pos: Pos, env: &Env, values: &mu
         };
         return Ok(Val::One(boolean(result, pos)));
     }
-    let same = equal(&a, &a.value, &b, &b.value)?;
+    let same = equal(&a, &b)?;
     Ok(Val::One(boolean(if op == BinOp::Eq { same } else { !same }, pos)))
 }
 
 /// Whether two values are equal, structurally. Numbers must be of one kind, a literal adapting, and values of
 /// different kinds are an error, as they have no common type.
-fn equal(a: &Item, x: &Value, b: &Item, y: &Value) -> R<bool> {
-    // The types are known only at the top, where the values are the items themselves.
-    let ia = Item {
-        value: x.clone(),
-        src: a.src.clone(),
-        lit: a.lit,
-        ty: a.ty.clone().filter(|_| std::ptr::eq(x, &a.value)),
-        file: a.file,
-    };
-    let ib = Item {
-        value: y.clone(),
-        src: b.src.clone(),
-        lit: b.lit,
-        ty: b.ty.clone().filter(|_| std::ptr::eq(y, &b.value)),
-        file: b.file,
-    };
+fn equal(a: &Item, b: &Item) -> R<bool> {
+    let a = &deref(a)?;
+    let b = &deref(b)?;
     let mismatch = || {
-        let blamed = if ia.lit && !ib.lit { &ib } else { &ia };
-        let other = if ia.lit && !ib.lit { &ia } else { &ib };
+        let (blamed, other) = if a.lit && !b.lit { (b, a) } else { (a, b) };
         at_item(
             blamed,
             format!(
                 "{} is compared with {}, and they have no common type",
-                capitalised(&describe(&blamed.value)),
-                describe(&other.value)
+                capitalised(&describe_item(blamed)),
+                describe_item(other)
             ),
         )
     };
-    match (&x.kind, &y.kind) {
+    match (&a.value.kind, &b.value.kind) {
         (
             ValueKind::Nat(_) | ValueKind::Int(_) | ValueKind::Float(_),
             ValueKind::Nat(_) | ValueKind::Int(_) | ValueKind::Float(_),
         ) => {
-            let (_, p, q) = unify(&ia, &ib, "compared with")?;
-            Ok(number::compare(&p, &q).is_eq())
+            let (_, p, q) = unify(a, b, "compared with")?;
+            Ok(number::compare(&p, &q).map_err(num_error(a))?.is_eq())
         }
         (ValueKind::Str(p), ValueKind::Str(q)) => Ok(p == q),
         (ValueKind::Array(p), ValueKind::Array(q)) => sequence(a, p, b, q),
@@ -1546,8 +1615,21 @@ fn equal(a: &Item, x: &Value, b: &Item, y: &Value) -> R<bool> {
                     if p.len() != q.len() {
                         return Ok(false);
                     }
+                    let mut position = 0;
                     for (u, v) in p.iter().zip(q) {
-                        if u.name != v.name || !equal(a, &u.value, b, &v.value)? {
+                        if u.name != v.name {
+                            return Ok(false);
+                        }
+                        let param = match &u.name {
+                            Some(name) => Param::Named(name),
+                            None => {
+                                position += 1;
+                                Param::At(position - 1)
+                            }
+                        };
+                        let x = typed_part(a, &u.value, param_type(a, n, param));
+                        let y = typed_part(b, &v.value, param_type(b, m, param));
+                        if !equal(&x, &y)? {
                             return Ok(false);
                         }
                     }
@@ -1560,12 +1642,23 @@ fn equal(a: &Item, x: &Value, b: &Item, y: &Value) -> R<bool> {
     }
 }
 
+/// The type of a parameter of a tuple constructor, if the types give it.
+fn param_type(of: &Item, ctor: &str, param: Param) -> Option<Ty> {
+    let (params, tys) = typing()?.types.tuple_params(ctor, of.ty.as_ref())?;
+    let index = match param {
+        Param::At(n) => n,
+        Param::Named(name) => params.iter().position(|p| p.name.as_deref() == Some(name))?,
+    };
+    tys.get(index).cloned().filter(known)
+}
+
 fn sequence(a: &Item, p: &[Value], b: &Item, q: &[Value]) -> R<bool> {
     if p.len() != q.len() {
         return Ok(false);
     }
+    let (ta, tb) = (element_type(a), element_type(b));
     for (u, v) in p.iter().zip(q) {
-        if !equal(a, u, b, v)? {
+        if !equal(&typed_part(a, u, ta.clone()), &typed_part(b, v, tb.clone()))? {
             return Ok(false);
         }
     }
@@ -1579,7 +1672,9 @@ fn members(a: &Item, p: &[Member], b: &Item, q: &[Member]) -> R<bool> {
     for m in p {
         match q.iter().find(|n| n.name == m.name) {
             Some(n) => {
-                if !equal(a, &m.value, b, &n.value)? {
+                let x = typed_part(a, &m.value, field_type(a, &m.name));
+                let y = typed_part(b, &n.value, field_type(b, &n.name));
+                if !equal(&x, &y)? {
                     return Ok(false);
                 }
             }
@@ -1622,7 +1717,7 @@ pub fn bind(pattern: &Pattern, of: &Item, env: &Env) -> R<Option<Env>> {
                 Lit::Str(t) => ValueKind::Str(t.clone()),
             };
             let lit_item = made(kind, pattern.pos, &query_src(), true);
-            Ok(equal(of, &of.value, &lit_item, &lit_item.value)?.then(|| env.clone()))
+            Ok(equal(of, &lit_item)?.then(|| env.clone()))
         }
         PatternKind::Ctor { name, body } => {
             let of = &deref(of)?;
