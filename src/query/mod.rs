@@ -136,10 +136,16 @@ fn pattern_names(p: &syntax::Pattern, names: &mut Vec<String>) {
             None => {}
             Some(PatBody::Record { fields, .. }) => fields.iter().for_each(|f| pattern_names(&f.pattern, names)),
             Some(PatBody::Tuple { args, .. }) => args.iter().for_each(|a| pattern_names(&a.pattern, names)),
-            Some(PatBody::Array { items, .. }) => items.iter().for_each(|p| pattern_names(p, names)),
+            Some(PatBody::Array { items, rest_as, .. }) => {
+                items.iter().for_each(|p| pattern_names(p, names));
+                names.extend(rest_as.iter().cloned());
+            }
         },
         PatternKind::Record { fields, .. } => fields.iter().for_each(|f| pattern_names(&f.pattern, names)),
-        PatternKind::Array { items, .. } => items.iter().for_each(|p| pattern_names(p, names)),
+        PatternKind::Array { items, rest_as, .. } => {
+            items.iter().for_each(|p| pattern_names(p, names));
+            names.extend(rest_as.iter().cloned());
+        }
     }
 }
 

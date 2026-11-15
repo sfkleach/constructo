@@ -1776,8 +1776,8 @@ pub fn bind(pattern: &Pattern, of: &Item, env: &Env) -> R<Option<Env>> {
                 (Some(PatBody::Record { fields, rest }), Some(TaggedBody::Record(ms))) => {
                     bind_members(fields, *rest, ms, of, env)
                 }
-                (Some(PatBody::Array { items, rest }), Some(TaggedBody::Array(vs))) => {
-                    bind_items(items, *rest, vs, of, env)
+                (Some(PatBody::Array { items, rest, rest_as }), Some(TaggedBody::Array(vs))) => {
+                    bind_items(items, *rest, rest_as, vs, of, env)
                 }
                 (Some(PatBody::Tuple { args, rest }), Some(TaggedBody::Tuple(vs))) => {
                     bind_args(args, *rest, vs, found, of, env)
@@ -1792,8 +1792,8 @@ pub fn bind(pattern: &Pattern, of: &Item, env: &Env) -> R<Option<Env>> {
             ValueKind::Record(ms) => bind_members(fields, *rest, ms, of, env),
             _ => wrong("a record"),
         },
-        PatternKind::Array { items, rest } => match &deref(of)?.value.kind {
-            ValueKind::Array(vs) => bind_items(items, *rest, vs, of, env),
+        PatternKind::Array { items, rest, rest_as } => match &deref(of)?.value.kind {
+            ValueKind::Array(vs) => bind_items(items, *rest, rest_as, vs, of, env),
             _ => wrong("an array"),
         },
     }
@@ -1824,7 +1824,14 @@ fn bind_members(fields: &[FieldPat], rest: bool, ms: &[Member], of: &Item, env: 
     Ok(Some(env))
 }
 
-fn bind_items(items: &[Pattern], rest: bool, vs: &[Value], of: &Item, env: &Env) -> R<Option<Env>> {
+fn bind_items(
+    items: &[Pattern],
+    rest: bool,
+    rest_as: &Option<String>,
+    vs: &[Value],
+    of: &Item,
+    env: &Env,
+) -> R<Option<Env>> {
     if vs.len() < items.len() || (!rest && vs.len() != items.len()) {
         return Ok(None);
     }
@@ -1835,6 +1842,15 @@ fn bind_items(items: &[Pattern], rest: bool, vs: &[Value], of: &Item, env: &Env)
             Some(e) => env = e,
             None => return Ok(None),
         }
+    }
+    // The rest is a new array of the elements that the pattern does not name, as a slice is in Rust.
+    if let Some(name) = rest_as {
+        let others = Value {
+            pos: of.value.pos,
+            kind: ValueKind::Array(vs[items.len()..].to_vec()),
+        };
+        let rest_ty = ty.map(|t| Ty::Array(Rc::new(t)));
+        env = env.with(name, typed_part(of, &others, rest_ty));
     }
     Ok(Some(env))
 }

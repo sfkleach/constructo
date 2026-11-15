@@ -873,8 +873,8 @@ impl Parser {
                     let (args, rest) = self.arg_patterns()?;
                     Some(PatBody::Tuple { args, rest })
                 } else if self.eat_punct("[") {
-                    let (items, rest) = self.item_patterns()?;
-                    Some(PatBody::Array { items, rest })
+                    let (items, rest, rest_as) = self.item_patterns()?;
+                    Some(PatBody::Array { items, rest, rest_as })
                 } else {
                     None
                 };
@@ -903,8 +903,8 @@ impl Parser {
             }
             Tok::Punct("[") => {
                 self.bump();
-                let (items, rest) = self.item_patterns()?;
-                PatternKind::Array { items, rest }
+                let (items, rest, rest_as) = self.item_patterns()?;
+                PatternKind::Array { items, rest, rest_as }
             }
             Tok::Punct("(") => {
                 self.bump();
@@ -982,14 +982,26 @@ impl Parser {
         Ok((args, rest))
     }
 
-    /// The elements of an array pattern, after the `[` and up to and including the `]`. A `..` may only come last.
-    fn item_patterns(&mut self) -> Result<(Vec<Pattern>, bool)> {
+    /// The elements of an array pattern, after the `[` and up to and including the `]`, with whether a `..` ends it
+    /// and the name that `name @ ..` binds the rest to. A `..` may only come last.
+    fn item_patterns(&mut self) -> Result<(Vec<Pattern>, bool, Option<String>)> {
         let mut items = Vec::new();
         let mut rest = false;
+        let mut rest_as = None;
         while !self.is_punct("]") {
             if self.eat_punct("..") {
                 rest = true;
                 break;
+            }
+            if let Tok::Name(name) = self.peek().clone() {
+                if self.peek_at(1) == &Tok::Punct("@") && self.peek_at(2) == &Tok::Punct("..") {
+                    self.bump();
+                    self.bump();
+                    self.bump();
+                    rest = true;
+                    rest_as = Some(name);
+                    break;
+                }
             }
             items.push(self.pattern(true)?);
             if !self.eat_punct(",") {
@@ -997,7 +1009,7 @@ impl Parser {
             }
         }
         self.expect_punct("]")?;
-        Ok((items, rest))
+        Ok((items, rest, rest_as))
     }
 }
 

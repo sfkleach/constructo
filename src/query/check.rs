@@ -701,6 +701,15 @@ impl Checker {
         Ok(K::Any)
     }
 
+    /// The elements of an array pattern, and the name that the rest is bound to, if any.
+    fn items(&mut self, items: &[Pattern], rest_as: &Option<String>) -> R<()> {
+        items.iter().try_for_each(|p| self.pattern(p))?;
+        if let Some(name) = rest_as {
+            self.names.push(name.clone());
+        }
+        Ok(())
+    }
+
     fn pattern(&mut self, pattern: &Pattern) -> R<()> {
         match &pattern.kind {
             PatternKind::Wild | PatternKind::Lit(_) => Ok(()),
@@ -736,10 +745,10 @@ impl Checker {
                 None => Ok(()),
                 Some(PatBody::Record { fields, .. }) => fields.iter().try_for_each(|f| self.pattern(&f.pattern)),
                 Some(PatBody::Tuple { args, .. }) => args.iter().try_for_each(|a| self.pattern(&a.pattern)),
-                Some(PatBody::Array { items, .. }) => items.iter().try_for_each(|p| self.pattern(p)),
+                Some(PatBody::Array { items, rest_as, .. }) => self.items(items, rest_as),
             },
             PatternKind::Record { fields, .. } => fields.iter().try_for_each(|f| self.pattern(&f.pattern)),
-            PatternKind::Array { items, .. } => items.iter().try_for_each(|p| self.pattern(p)),
+            PatternKind::Array { items, rest_as, .. } => self.items(items, rest_as),
         }
     }
 }

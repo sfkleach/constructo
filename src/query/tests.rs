@@ -941,3 +941,38 @@ fn an_untyped_query_cannot_name_a_const() {
         .contains("origin is not bound by any pattern; if it is a const, supply the types that declare it"));
     assert!(err("Dot;", "#values.map(|s| shapes::origin)").contains("shapes::origin is a const, which needs the types"));
 }
+
+// The rest of an array pattern, bound with `name @ ..`, as a slice pattern is in Rust.
+
+#[test]
+fn the_rest_of_an_array_is_bound_with_at() {
+    assert_eq!(
+        ok(
+            "[1, 2, 3]; [4];",
+            "#values.map(|xs| match xs { [h, t @ ..] => t, [] => [] })"
+        ),
+        "[2, 3]; [];"
+    );
+    assert_eq!(
+        ok("Users[1, 2, 3];", "#values.filter_match(|Users[rest @ ..]| rest.len())"),
+        "3;"
+    );
+    assert_eq!(ok("[1, 2];", "#values.filter_match(|[a, b, rest @ ..]| rest)"), "[];");
+}
+
+#[test]
+fn the_rest_of_a_typed_array_has_the_type_of_an_array_of_its_elements() {
+    let types = "enum Shape = Circle { r: Float }, Dot;\nenum Many = Many[Shape];";
+    assert_eq!(
+        typed_ok(
+            types,
+            "Many[Dot, Circle { r: 2 }];",
+            "#values.filter_match(|Many[_, rest @ ..]| rest[0].r > 1.0)"
+        ),
+        "true;"
+    );
+    assert!(
+        typed_err(types, "Many[Dot];", "#values.filter_match(|Many[rest @ ..]| rest[0].z)")
+            .contains("has a field or a parameter z")
+    );
+}

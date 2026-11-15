@@ -722,14 +722,30 @@ Diagram(
                     Optional(
                         Sequence(
                             Terminal(','),
-                            Optional(Terminal('..'))
+                            Optional(NonTerminal('ArrayRest'))
                         )
                     )
                 ),
-                Terminal('..')
+                NonTerminal('ArrayRest')
             )
         ),
         Terminal(']')
+    )
+)
+
+// ArrayRest
+Diagram(
+    Comment('ArrayRest'),
+    Sequence(
+        Optional(
+            Sequence(
+                NonTerminal('name'),
+                Terminal('@')
+            ),
+            'skip'
+        ),
+        Terminal('..'),
+        Comment('the rest, as an array')
     )
 )
 
