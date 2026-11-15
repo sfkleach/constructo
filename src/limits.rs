@@ -48,3 +48,8 @@ pub const DEFAULT_INFER_LIMIT: usize = 10_000;
 /// constructor of an enum, filled in all the way down, so a few short declarations can make one that doubles in size
 /// at each level.
 pub const DEFAULT_VALUE_LIMIT: usize = 10_000;
+
+/// The most digits that a whole number made by a query may have. Integers are unbounded, so a few multiplications, or
+/// a cast of a `Float` with a large exponent such as `1.0e999999999 as Nat`, could otherwise ask for more memory and
+/// time than any real query needs.
+pub const MAX_NUMBER_DIGITS: usize = 1_000_000;

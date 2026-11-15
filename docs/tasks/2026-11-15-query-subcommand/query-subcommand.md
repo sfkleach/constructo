@@ -3,7 +3,7 @@
 ## Overview
 
 `docs/vision.md` lists, for later, selecting sub-values from a file or stdin. The design is settled in
-[decision 44](../../../decisions/0044-queries-are-rust-like-expressions-over-a-stream-of-values.md): a query is a
+[decision 44](../../decisions/0044-queries-are-rust-like-expressions-over-a-stream-of-values.md): a query is a
 Rust-like expression over `@values`, the lazy stream of the input values, which extracts data and transforms it with one
 language. This task implements it, test first.
 
@@ -130,7 +130,7 @@ Rust-like principle already accepts Rust's level of verbosity, and a shorthand c
 ### Exact casts, and casts to `Float` (2026-11-15)
 
 - **A narrowing cast that does not change the number is allowed:** `5.0 as Nat` gives `5`, `+5 as Nat` gives `5`, and
-  `1e3 as Int` gives `+1000`. An untouched literal converts by the exact value of its text, and a computed `Float` by
+  `1.0e3 as Int` gives `+1000`. An untouched literal converts by the exact value of its text, and a computed `Float` by
   the exact value of its `f64`. A cast that would change the number, such as `1.5 as Int`, stays an error.
 - **`as Float` rounds to the nearest `f64`,** as `Float` arithmetic does, so `12345678901234567890123 as Float` and
   `0.1 as Float` are allowed although neither is exact. A `Float` is exact only for integers in a limited range and

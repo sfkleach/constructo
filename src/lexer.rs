@@ -214,7 +214,7 @@ fn scan_number(chars: &[char], start: usize) -> (Tok, usize, Option<(usize, Stri
 ///
 /// Returns the decoded text and the index after the closing quote. For a malformed string it returns the index of the
 /// error, the message, and the index at which lexing should resume.
-fn scan_string(chars: &[char], start: usize) -> Result<(String, usize), (usize, String, usize)> {
+pub(crate) fn scan_string(chars: &[char], start: usize) -> Result<(String, usize), (usize, String, usize)> {
     let mut text = String::new();
     let mut i = start + 1;
     loop {
