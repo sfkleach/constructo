@@ -90,7 +90,7 @@ pub struct Expr {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprKind {
-    /// `@values`, the stream of the input values.
+    /// `#values`, the stream of the input values.
     Values,
     /// A lower-case name: a variable that a pattern bound, or a const of the prelude such as `true`.
     Var(String),

@@ -300,14 +300,14 @@ fn num_error(item: &Item) -> impl Fn(String) -> Failure + '_ {
     move |m| Failure::Error(Diagnostic::new(&item.src, item.value.pos, m))
 }
 
-/// Evaluates an expression. `values` holds the stream of the inputs until `@values` takes it.
+/// Evaluates an expression. `values` holds the stream of the inputs until `#values` takes it.
 pub fn eval(expr: &Expr, env: &Env, values: &mut Option<Stream>) -> R<Val> {
     let pos = expr.pos;
     let one = |item: Item| Ok(Val::One(item));
     match &expr.kind {
         ExprKind::Values => match values.take() {
             Some(stream) => Ok(Val::Many(stream)),
-            None => at_query(pos, "@values can only be used once"),
+            None => at_query(pos, "#values can only be used once"),
         },
         ExprKind::Var(name) => match env.get(name) {
             Some(item) => one(item.clone()),

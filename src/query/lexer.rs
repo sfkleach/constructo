@@ -21,7 +21,7 @@ pub enum Tok {
     Name(String),
     /// A keyword, such as `if` or `_`.
     Keyword(&'static str),
-    /// A sigil and its word, as in `@values`.
+    /// A sigil and its word, as in `#values`.
     Sigil(String),
     /// An unsigned whole number, such as `42`.
     Nat(String),
@@ -118,7 +118,7 @@ pub fn lex(text: &str) -> Vec<Token> {
                 None if c.is_ascii_uppercase() => Tok::TypeName(word),
                 None => Tok::Name(word),
             }
-        } else if c == '@' && chars.get(i + 1).is_some_and(|c| c.is_ascii_alphabetic()) {
+        } else if c == '#' && chars.get(i + 1).is_some_and(|c| c.is_ascii_alphabetic()) {
             i += 1;
             while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
                 i += 1;
@@ -196,7 +196,7 @@ mod tests {
     #[test]
     fn lexes_a_query() {
         assert_eq!(
-            toks("@values.map(|m| m.x)"),
+            toks("#values.map(|m| m.x)"),
             vec![
                 Tok::Sigil("values".into()),
                 Tok::Punct("."),
@@ -209,6 +209,19 @@ mod tests {
                 Tok::Punct("."),
                 Tok::Name("x".into()),
                 Tok::Punct(")"),
+                Tok::Eof
+            ]
+        );
+    }
+
+    #[test]
+    fn the_binding_of_a_pattern_is_not_a_sigil() {
+        assert_eq!(
+            toks("p@Poly"),
+            vec![
+                Tok::Name("p".into()),
+                Tok::Punct("@"),
+                Tok::TypeName("Poly".into()),
                 Tok::Eof
             ]
         );

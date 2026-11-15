@@ -208,9 +208,9 @@ Following the style in https://keepachangelog.com/en/1.0.0/
   indentation, and spreads it over lines otherwise.
 - A diagnostic has a severity. A warning is written as `WARNING: <message> (<file>, line L, col C)` and does not change
   the exit code. The library has `Severity` and `Diagnostic::warning`.
-- `constructo query EXPR FILES` extracts and transforms values with a Rust-like expression over `@values`, the lazy
-  stream of the input values, such as `@values.filter_match(|Move { x, .. }| x)` or
-  `@values.map(|c| c.update(|c| c.server.port = 8080))`. It has Rust's iterator adaptors, `filter_match`, field,
+- `constructo query EXPR FILES` extracts and transforms values with a Rust-like expression over `#values`, the lazy
+  stream of the input values, such as `#values.filter_match(|Move { x, .. }| x)` or
+  `#values.map(|c| c.update(|c| c.server.port = 8080))`. It has Rust's iterator adaptors, `filter_match`, field,
   position and index access, patterns, `if` and `match` in an outfix form and in Rust's, struct update, `update`, and
   strict numbers with `as Nat`, `as Int` and `as Float`: unbounded integers, `f64` floats and exact comparison on the
   text. Untyped, it reads its inputs lazily and still type-checks what the expression fixes before any value is read.

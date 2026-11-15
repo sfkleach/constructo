@@ -31,18 +31,21 @@ of its own, so a Rust programmer is never misled by a familiar name with a new m
 
 ### The stream
 
-- **The whole input is one lazy iterator, `@values`.** The values of every input, in order, as for `check` and
-  `convert`. A query is an expression over it: `@values.map(|m| m.x)`, `@values.take(1)`, `@values.count()`.
+- **The whole input is one lazy iterator, `#values`.** The values of every input, in order, as for `check` and
+  `convert`. A query is an expression over it: `#values.map(|m| m.x)`, `#values.take(1)`, `#values.count()`.
 - **The output rule:** if the result is an iterator, each item is written as a value; otherwise the one result is
-  written. So `@values.take(0)` writes nothing and `@values.count()` writes one number.
-- **Laziness** lets `@values.take(1)` stop reading early, as `convert` streams lines input.
-- **The name** is `@values` until something forces a change: a sigil cannot clash with a const (lower case) or a
-  constructor (capitalised), `@` is not expanded inside a shell's double quotes as `$` is, and `values` is
-  Constructo's own word for what the stream holds.
+  written. So `#values.take(0)` writes nothing and `#values.count()` writes one number.
+- **Laziness** lets `#values.take(1)` stop reading early, as `convert` streams lines input.
+- **The name** is `#values` until something forces a change: a sigil cannot clash with a const (lower case) or a
+  constructor (capitalised), `#` is not expanded inside a shell's quotes as `$` is, and `values` is Constructo's own
+  word for what the stream holds. The sigil was `@` at first, but `@` is also the binding of Rust's patterns,
+  `p @ Poly[..]`, and the lexer took `p@Poly` for the sigil `@Poly`, which Rust reads as a binding. `#` has no
+  meaning in Rust's expressions or patterns, where it only starts an attribute, nor in a values file, so the stream
+  and the binding no longer share a character, and the spacing of a binding does not matter.
 - **Rust's adaptors keep their meanings:** `map`, `filter`, `filter_map`, `flat_map`, `take`, `skip`, `nth`, `next`,
   `count`, and so on. `next()` and `nth(n)` give an `Option` (`Some(v)` or `None`, from the prelude), while
   `take`/`skip` give the bare value or nothing. `.collect()` always makes an array, since Constructo has one sequence
-  type, and `@values.collect()` gathers the whole stream into one value.
+  type, and `#values.collect()` gathers the whole stream into one value.
 
 ### Reaching inside values
 
@@ -53,7 +56,7 @@ of its own, so a Rust programmer is never misled by a familiar name with a new m
 - Constructor tests use Rust's `match` and `matches!`, with patterns written in Constructo's value syntax
   plus `..`, `_` and bindings.
 - **`filter_match`** is our addition for the commonest extraction: its closure parameter is a refutable pattern, a
-  value that does not match is dropped, and the body's result is kept: `@values.filter_match(|Move { x, .. }| x)`.
+  value that does not match is dropped, and the body's result is kept: `#values.filter_match(|Move { x, .. }| x)`.
   In every Rust-named method a closure parameter must always match, as in Rust, so `filter_map` keeps exactly Rust's
   meaning.
 - **Braces need only ever denote records.** It is always possible to write a query in which braces denote only
@@ -111,7 +114,7 @@ of its own, so a Rust programmer is never misled by a familiar name with a new m
 ### Transformation
 
 - **One language serves extraction and transformation.** The two were a soft distinction, made to focus the design.
-- **Struct update keeps the rest of a record:** `@values.map(|c| Config { port: 8080, ..c })`, and `{ port: 8080, ..r }`
+- **Struct update keeps the rest of a record:** `#values.map(|c| Config { port: 8080, ..c })`, and `{ port: 8080, ..r }`
   for a bare record.
 - **`update` is copy and assign.** Rust's idiom is `let mut c = c.clone(); c.server.tls.port = 1; c`, but it needs
   blocks and statements. Our `update` method takes a closure that assigns to a path and returns the changed value:
@@ -129,7 +132,7 @@ of its own, so a Rust programmer is never misled by a familiar name with a new m
 ## Consequences
 
 - A Rust programmer can read a query without learning a new language, and anyone who knows a language with closures
-  and method chains can guess it. The deviations (`@values`, `filter_match`, `update`, `{` for records, the outfix
+  and method chains can guess it. The deviations (`#values`, `filter_match`, `update`, `{` for records, the outfix
   `if` and `match`, `as` with Constructo's types) are few and named.
 - Queries can be checked against the types before reading any data, and a typed transformation cannot produce a value
   that the types refuse. No untyped tool can offer that.
@@ -137,7 +140,7 @@ of its own, so a Rust programmer is never misled by a familiar name with a new m
   distinctions the text shows.
 - Strict numbers mean that, untyped, a field that is spelled `5` in one value and `5.0` in another fails only when the
   odd value is reached, which may be late. The message suggests the cast, and a cast written to be safe avoids it.
-- Expressions are longer than jq's for the simplest cases (`@values.map(|m| m.x)` against `.x`), in exchange for
+- Expressions are longer than jq's for the simplest cases (`#values.map(|m| m.x)` against `.x`), in exchange for
   readability beyond them.
 - Deep changes are written with `update` and a path. jq's ability to update every location that a predicate selects,
   such as every number anywhere, has no direct equivalent yet.
