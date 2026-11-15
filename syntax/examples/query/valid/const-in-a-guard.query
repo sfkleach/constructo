@@ -1,0 +1,4 @@
+// A guard compares with a const, since a lower-case name in a pattern always binds.
+// output: "elsewhere"; "origin";
+#values.filter_match(|Poly[a, b]| [a, b]).flat_map(|ps| ps.iter())
+    .map(|p| match p { q if q == origin => "origin", _ => "elsewhere" })

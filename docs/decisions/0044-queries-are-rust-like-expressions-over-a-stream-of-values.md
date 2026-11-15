@@ -87,6 +87,12 @@ of its own, so a Rust programmer is never misled by a familiar name with a new m
   cannot answer, the untyped mode reports an error that says to supply the types, and does not guess. For example,
   untyped `v.0` is the first argument written by position and typed `v.0` is the first parameter however it was
   written; positional arguments bind a prefix of the parameters, so the two always agree when both answer.
+- **A typed query may name the consts of its types,** as `origin` or `shapes::origin`, in its expressions: a name
+  that no pattern binds is a const, and a binding hides a const of the same name. A pattern never compares with a const,
+  as Rust's do: a lower-case name in a pattern always binds, and a guard compares, `p if p == origin`. Untyped there
+  are no consts to know, so a pattern that compared with one would mean one thing typed and another untyped, which the
+  principle above rules out, and a misspelt const would silently bind. Untyped, a name that no pattern binds is an
+  error that says to supply the types. `true`, `false` and `null` of the prelude are values of the query in both modes.
 - **Untyped, constructor names match by their exact text:** the same text is the same constructor and different text
   a different one. Unchecked processing is obliged to assume the distinctions that the text shows, so the principle
   is strictly true only when the types agree with them. They may not: `Circle` and `shapes::Circle`, or a name and its

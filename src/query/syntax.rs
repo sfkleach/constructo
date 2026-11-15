@@ -94,6 +94,9 @@ pub enum ExprKind {
     Values,
     /// A lower-case name: a variable that a pattern bound, or a const of the prelude such as `true`.
     Var(String),
+    /// A const of the types, possibly qualified, as `origin` or `shapes::origin`. In a typed query, a name that no
+    /// pattern binds is a const, other than those of the prelude, which stay `Var`s.
+    Const(String),
     Lit(Lit),
     /// A constructor, possibly qualified, with an optional body.
     Ctor {

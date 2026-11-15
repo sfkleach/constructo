@@ -1,0 +1,2 @@
+// expect: ERROR: oops is not bound by any pattern, nor a const of the types
+#values.map(|s| oops)

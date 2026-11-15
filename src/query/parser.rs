@@ -402,6 +402,19 @@ impl Parser {
 
     /// A constructor name, possibly qualified, as `shapes::Circle` or `acme.shapes::Circle`.
     fn ctor_name(&mut self) -> Result<String> {
+        let mut text = self.qualifier()?;
+        match self.peek().clone() {
+            Tok::TypeName(name) => {
+                self.bump();
+                text.push_str(&name);
+                Ok(text)
+            }
+            _ => self.error("a constructor name"),
+        }
+    }
+
+    /// The qualifiers in front of a name, as `acme.shapes::`, which is empty if there are none.
+    fn qualifier(&mut self) -> Result<String> {
         let mut text = String::new();
         while self.at_qualifier() {
             loop {
@@ -419,14 +432,7 @@ impl Parser {
                 }
             }
         }
-        match self.peek().clone() {
-            Tok::TypeName(name) => {
-                self.bump();
-                text.push_str(&name);
-                Ok(text)
-            }
-            _ => self.error("a constructor name"),
-        }
+        Ok(text)
     }
 
     fn literal(&mut self) -> Option<Lit> {
@@ -478,9 +484,19 @@ impl Parser {
                 ExprKind::Matches(Box::new(subject), pattern)
             }
             Tok::Name(_) | Tok::TypeName(_) if self.at_qualifier() || matches!(self.peek(), Tok::TypeName(_)) => {
-                let name = self.ctor_name()?;
-                let body = self.ctor_body()?;
-                ExprKind::Ctor { name, body }
+                let qualifier = self.qualifier()?;
+                match self.peek().clone() {
+                    // A qualified lower-case name is a const, as in a values file.
+                    Tok::Name(name) if !qualifier.is_empty() => {
+                        self.bump();
+                        ExprKind::Const(format!("{}{}", qualifier, name))
+                    }
+                    _ => {
+                        let name = format!("{}{}", qualifier, self.ctor_name()?);
+                        let body = self.ctor_body()?;
+                        ExprKind::Ctor { name, body }
+                    }
+                }
             }
             Tok::Name(name) => {
                 self.bump();

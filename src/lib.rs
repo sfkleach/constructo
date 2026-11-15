@@ -924,8 +924,21 @@ fn run_query(
                     return;
                 }
                 if let ast::ValueKind::Tagged { name, .. } = &value.kind {
-                    if env.constructor(name).is_none() {
-                        let message = format!("Unknown constructor {}", show(index, name));
+                    // A lower-case name is a const of the query, which resolving has already found.
+                    let known = if convert::is_const_name(name) {
+                        env.constant(name).is_some()
+                    } else {
+                        env.constructor(name).is_some()
+                    };
+                    if !known {
+                        let message = if convert::is_const_name(name) {
+                            format!(
+                                "{} is not bound by any pattern, nor a const of the types",
+                                show(index, name)
+                            )
+                        } else {
+                            format!("Unknown constructor {}", show(index, name))
+                        };
                         outcomes[index] = Outcome::Failed;
                         diagnostics.push((index, Diagnostic::new(QUERY_NAMES_SOURCE, value.pos, message)));
                         return;

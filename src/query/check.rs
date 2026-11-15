@@ -96,6 +96,7 @@ pub fn fixed_kind(expr: &Expr) -> Option<Fixed> {
         values_used: true,
         closures: 0,
         lenient: true,
+        consts: true,
     };
     match checker.expr(expr) {
         Ok(K::Fixed(f)) => Some(f),
@@ -103,13 +104,14 @@ pub fn fixed_kind(expr: &Expr) -> Option<Fixed> {
     }
 }
 
-/// Checks a whole query.
-pub fn check_query(expr: &Expr) -> Result<(), Diagnostic> {
+/// Checks a whole query. A typed query may refer to the consts of its types, which an untyped one cannot know.
+pub fn check_query(expr: &Expr, typed: bool) -> Result<(), Diagnostic> {
     let mut checker = Checker {
         names: Vec::new(),
         values_used: false,
         closures: 0,
         lenient: false,
+        consts: typed,
     };
     checker.expr(expr).map(|_| ())
 }
@@ -122,6 +124,8 @@ struct Checker {
     closures: u32,
     /// Whether names that are not bound are taken to come from the data, for `fixed_kind`.
     lenient: bool,
+    /// Whether the query has types, whose consts it may refer to.
+    consts: bool,
 }
 
 type R<T> = Result<T, Diagnostic>;
@@ -278,7 +282,27 @@ impl Checker {
                 } else if name == "null" {
                     fixed(Fixed::Ctor)
                 } else {
-                    fail(pos, format!("{} is not bound by any pattern", name))
+                    fail(
+                        pos,
+                        format!(
+                            "{} is not bound by any pattern; if it is a const, supply the types that declare it",
+                            name
+                        ),
+                    )
+                }
+            }
+            // The kind of a const is only known from the types, which the typed check consults.
+            ExprKind::Const(name) => {
+                if self.consts {
+                    Ok(K::Any)
+                } else {
+                    fail(
+                        pos,
+                        format!(
+                            "{} is a const, which needs the types; supply the types that declare it",
+                            name
+                        ),
+                    )
                 }
             }
             ExprKind::Lit(lit) => fixed(match lit {

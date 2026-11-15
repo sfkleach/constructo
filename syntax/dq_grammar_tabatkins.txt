@@ -188,7 +188,11 @@ Diagram(
         NonTerminal('Literal'),
         Terminal('#values'),
         NonTerminal('ConstructorExpr'),
-        Sequence(NonTerminal('name'), Comment('variable, true, false or null')),
+        Sequence(
+            Optional(NonTerminal('Qualifier')),
+            NonTerminal('name'),
+            Comment('variable or const')
+        ),
         NonTerminal('RecordExpr'),
         NonTerminal('ArrayExpr'),
         Sequence(
