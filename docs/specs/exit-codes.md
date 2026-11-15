@@ -113,9 +113,10 @@ and the same errors have the same codes.
   number of the wrong kind, a `Nat` below zero, or branches whose types depend on the values and have no common type.
   The values before an error at a value have been written.
 - **Exit code 2:** a mistake in the query. Its syntax, a name that is not bound, a closure's parameter that may not
-  match and branches with no common type, when the query fixes their types, are found before any input is read. Typed, an unknown constructor, a
-  `--type` that is not a type, and what `--type` lets the types find, such as a field that the type does not have,
-  are found once the inputs have been read and checked, before the query runs on any value.
+  match and branches with no common type, when the query fixes their types, are found before any input is read.
+  Typed, an unknown constructor, a `--type` that is not a type, and what `--type` lets the types find, such as a field
+  that the type does not have, are found once the inputs have been read and checked, before the query runs on any
+  value.
   Also an option or an argument that is not understood, an option for the types in an untyped query, an input that
   cannot be read, an output that cannot be written, and, typed, the problems with a project-file or with how projects
   are found, as for `check`.

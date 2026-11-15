@@ -284,7 +284,8 @@ The settings file is read for [global] and [experimental].",
     )]
     Query {
         /// The query, such as '#values.map(|m| m.x)'
-        #[arg(short, long, value_name = "EXPR")]
+        // A query may start with a hyphen, as `-e '-#values.count()'` does, so the word after -e is always the query.
+        #[arg(short, long, value_name = "EXPR", allow_hyphen_values = true)]
         expr: Option<String>,
 
         /// Read the query from a file, which may have comments, instead of giving it with --expr
@@ -692,7 +693,11 @@ fn main() -> ExitCode {
             // that reads only the first token of a regular file, and reports nothing.
             let (text, query_name) = match expr_file {
                 Some(path) => match std::fs::read_to_string(&path) {
-                    Ok(text) => (text, path.display().to_string()),
+                    // A byte-order mark, as some editors write, is dropped, as it is from every other input.
+                    Ok(text) => (
+                        constructo::lexer::strip_bom(&text).to_string(),
+                        path.display().to_string(),
+                    ),
                     Err(e) => {
                         eprintln!("ERROR: Cannot read {}: {}", path.display(), e);
                         return ExitCode::from(EXIT_USAGE);
