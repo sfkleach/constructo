@@ -520,7 +520,7 @@ fn typed_values_are_checked_before_the_query_runs() {
 #[test]
 fn typed_update_must_fit() {
     let e = typed_err(SHAPES, "T(a: 1);", r#"@values.map(|t| t.update(|t| t.a = "x"))"#);
-    assert!(e.contains("does not fit") && e.contains("a Nat"), "{}", e);
+    assert!(e.contains("does not fit") && e.contains("of type Nat"), "{}", e);
 }
 
 #[test]
@@ -766,4 +766,44 @@ fn typed_alternatives_that_disagree_leave_a_binding_unknown() {
         .unwrap(),
         "1;"
     );
+}
+
+#[test]
+fn typed_update_checks_the_parts_of_the_new_value() {
+    let types = "enum P = P { a: Nat };\nenum C = C { xs: [Nat], p: P };";
+    let input = "C { xs: [1], p: P { a: 1 } };";
+    // At the value, without --type.
+    let e = typed_err(types, input, r#"@values.map(|c| c.update(|c| c.xs = ["bad"]))"#);
+    assert!(e.contains("does not fit") && e.contains("of type [Nat]"), "{}", e);
+    let e = typed_err(types, input, r#"@values.map(|c| c.update(|c| c.p = P { a: "x" }))"#);
+    assert!(e.contains("does not fit") && e.contains("of type P"), "{}", e);
+    assert_eq!(
+        typed_ok(
+            types,
+            input,
+            "@values.map(|c| c.update(|c| c.xs = [2, 3]).update(|c| c.p = P { a: 4 }))"
+        ),
+        "C { xs: [2, 3], p: P { a: 4 } };"
+    );
+    // Before the query runs, with --type.
+    let e = typed(
+        types,
+        input,
+        r#"@values.map(|c| c.update(|c| c.xs = ["bad"]))"#,
+        Some("C"),
+    )
+    .unwrap_err();
+    assert!(
+        e.starts_with("before any value") && e.contains("of type [Nat]"),
+        "{}",
+        e
+    );
+    let e = typed(
+        types,
+        input,
+        r#"@values.map(|c| c.update(|c| c.p = P { b: 1 }))"#,
+        Some("C"),
+    )
+    .unwrap_err();
+    assert!(e.starts_with("before any value"), "{}", e);
 }

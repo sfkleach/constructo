@@ -270,3 +270,29 @@ fn const_type(constant: &ConstDecl, env: &Env) -> Option<Ty> {
         }
     }
 }
+
+/// A type as it is written, with the names of enums shown without their projects, for a message.
+pub fn type_name(ty: &Ty) -> String {
+    match ty {
+        Ty::Nat => "Nat".to_string(),
+        Ty::Int => "Int".to_string(),
+        Ty::Float => "Float".to_string(),
+        Ty::Str => "String".to_string(),
+        Ty::Array(element) => format!("[{}]", type_name(element)),
+        Ty::Record(fields) if fields.is_empty() => "{}".to_string(),
+        Ty::Record(fields) => {
+            let fields: Vec<String> = fields.iter().map(|(n, t)| format!("{}: {}", n, type_name(t))).collect();
+            format!("{{ {} }}", fields.join(", "))
+        }
+        Ty::Enum(name, args) => {
+            let name = name.split('@').next().unwrap_or(name);
+            if args.is_empty() {
+                name.to_string()
+            } else {
+                let args: Vec<String> = args.iter().map(type_name).collect();
+                format!("{}<{}>", name, args.join(", "))
+            }
+        }
+        _ => "_".to_string(),
+    }
+}

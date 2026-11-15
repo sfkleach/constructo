@@ -365,16 +365,7 @@ impl Checker<'_> {
                 );
             }
         }
-        let fits = match (&value.kind, &new) {
-            (ExprKind::Lit(Lit::Nat(_)), _) => matches!(at, Ty::Nat | Ty::Int | Ty::Float),
-            (ExprKind::Lit(Lit::Int(_)), _) => matches!(at, Ty::Int | Ty::Float),
-            (ExprKind::Lit(Lit::Float(_)), _) => matches!(at, Ty::Float),
-            (ExprKind::Record { .. }, _) => matches!(at, Ty::Record(_)),
-            (ExprKind::Array(_), _) => matches!(at, Ty::Array(_)),
-            (_, Some(new)) => compatible(new, &at),
-            (_, None) => true,
-        };
-        if !fits {
+        if !self.fits(value, &at) {
             let what = match (&value.kind, &new) {
                 (ExprKind::Lit(Lit::Nat(_)), _) => "a Nat".to_string(),
                 (ExprKind::Lit(Lit::Int(_)), _) => "an Int".to_string(),
@@ -387,13 +378,84 @@ impl Checker<'_> {
             return fail(
                 value.pos,
                 format!(
-                    "The new value is {}, which does not fit where it goes, which is {}",
+                    "The new value is {}, which does not fit where it goes, which is of type {}",
                     what,
-                    ty_text(&at)
+                    super::types::type_name(&at)
                 ),
             );
         }
         Ok(())
+    }
+
+    /// Whether the value of an expression can fit where a type is expected, as far as the expression shows: a literal
+    /// by its kind, an array, a record or a constructor by its parts, and anything else by the type it has, if that is
+    /// known. Where nothing is known it is taken to fit, and the value is checked when it is made.
+    fn fits(&mut self, expr: &Expr, at: &Ty) -> bool {
+        if !known(at) {
+            return true;
+        }
+        match (&expr.kind, at) {
+            (ExprKind::Lit(Lit::Nat(_)), _) => matches!(at, Ty::Nat | Ty::Int | Ty::Float),
+            (ExprKind::Lit(Lit::Int(_)), _) => matches!(at, Ty::Int | Ty::Float),
+            (ExprKind::Lit(Lit::Float(_)), _) => matches!(at, Ty::Float),
+            (ExprKind::Lit(Lit::Str(_)), _) => matches!(at, Ty::Str),
+            (ExprKind::Array(items), Ty::Array(element)) => items.iter().all(|item| self.fits(item, element)),
+            (ExprKind::Array(_), _) => false,
+            (ExprKind::Record { fields, base }, Ty::Record(declared)) => {
+                let named = fields
+                    .iter()
+                    .all(|f| declared.iter().any(|(n, t)| *n == f.name && self.fits(&f.value, t)));
+                named && (base.is_some() || fields.len() == declared.len())
+            }
+            (ExprKind::Record { .. }, _) => false,
+            (ExprKind::Var(name), Ty::Enum(enum_name, _)) if matches!(name.as_str(), "true" | "false") => {
+                canonical(shown(enum_name)) == "Bool"
+            }
+            (ExprKind::Ctor { name, body }, Ty::Enum(enum_name, _)) => {
+                match self.types.ctor(name) {
+                    Some((decl, _)) if decl.name != *enum_name => return false,
+                    Some(_) => {}
+                    None => return true,
+                }
+                match body {
+                    None => true,
+                    Some(CtorBody::Record { fields, base }) => match self.types.ctor_fields(name, Some(at)) {
+                        Some(declared) => {
+                            let named = fields
+                                .iter()
+                                .all(|f| declared.iter().any(|(n, t)| *n == f.name && self.fits(&f.value, t)));
+                            named && (base.is_some() || fields.len() == declared.len())
+                        }
+                        None => false,
+                    },
+                    Some(CtorBody::Array(items)) => match self.types.ctor_element(name, Some(at)) {
+                        Some(element) => items.iter().all(|item| self.fits(item, &element)),
+                        None => false,
+                    },
+                    Some(CtorBody::Tuple(args)) => match self.types.tuple_params(name, Some(at)) {
+                        Some((params, tys)) => {
+                            let mut position = 0;
+                            args.iter().all(|a| {
+                                let index = match &a.name {
+                                    Some(n) => params.iter().position(|p| p.name.as_deref() == Some(n.as_str())),
+                                    None => {
+                                        position += 1;
+                                        Some(position - 1).filter(|i| *i < params.len())
+                                    }
+                                };
+                                index.is_some_and(|i| self.fits(&a.value, &tys[i]))
+                            })
+                        }
+                        None => false,
+                    },
+                }
+            }
+            (ExprKind::Ctor { .. }, _) => false,
+            _ => match self.value(expr) {
+                Ok(Some(new)) => compatible(&new, at),
+                _ => true,
+            },
+        }
     }
 
     /// Binds the names of a pattern with their types, and checks that a constructor in it is of the type it is
