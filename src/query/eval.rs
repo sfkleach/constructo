@@ -1307,11 +1307,11 @@ fn set_path(at: &mut Value, ty: Option<Ty>, steps: &[Step], new: &Item, whole: &
     };
     let Some((step, rest)) = steps.split_first() else {
         if let Some(ty) = ty.filter(known) {
-            if !fits(&ty, new) {
+            if !fits(&ty, &new.value) {
                 return at_query(
                     pos,
                     format!(
-                        "The new value is {}, which does not fit where it goes, which is {}",
+                        "The new value is {}, which does not fit where it goes, which is of type {}",
                         describe_item(new),
                         ty_text(&ty)
                     ),
@@ -1456,44 +1456,74 @@ fn param_name(of: &Item, ctor: &str, param: Param) -> Option<String> {
 }
 
 /// Whether a value fits where a type is expected, as far as its kind can tell, with the widening of numbers.
-fn fits(ty: &Ty, item: &Item) -> bool {
-    match (ty, &item.value.kind) {
+fn fits(ty: &Ty, value: &Value) -> bool {
+    if !known(ty) {
+        return true;
+    }
+    match (ty, &value.kind) {
         (Ty::Nat, ValueKind::Nat(_)) => true,
         (Ty::Int, ValueKind::Int(_) | ValueKind::Nat(_)) => true,
         (Ty::Float, ValueKind::Float(_) | ValueKind::Int(_) | ValueKind::Nat(_)) => true,
         (Ty::Str, ValueKind::Str(_)) => true,
-        (Ty::Array(_), ValueKind::Array(_)) => true,
-        (Ty::Record(_), ValueKind::Record(_)) => true,
-        (Ty::Enum(name, _), ValueKind::Tagged { name: ctor, .. }) => {
-            match (canonical(shown(name)), canonical(ctor)) {
-                ("Bool", "true" | "false") | ("Option", "Some" | "None") => return true,
+        (Ty::Array(element), ValueKind::Array(items)) => items.iter().all(|item| fits(element, item)),
+        (Ty::Record(fields), ValueKind::Record(members)) => {
+            members.len() == fields.len()
+                && members
+                    .iter()
+                    .all(|m| fields.iter().any(|(name, t)| *name == m.name && fits(t, &m.value)))
+        }
+        (Ty::Enum(name, args), ValueKind::Tagged { name: ctor, body }) => {
+            match (canonical(shown(name)), canonical(ctor), body) {
+                ("Bool", "true" | "false", None) | ("Option", "None", None) => return true,
+                ("Option", "Some", Some(TaggedBody::Tuple(items))) if items.len() == 1 && args.len() == 1 => {
+                    return fits(&args[0], &items[0].value)
+                }
                 _ => {}
             }
-            match typing() {
-                Some(typing) => match typing.types.ctor(ctor) {
-                    Some((decl, _)) => decl.name == *name,
-                    // A const of the right type fits too, which its type would say; it is taken on trust here.
-                    None => crate::convert::is_const_name(ctor),
-                },
-                None => true,
+            let Some(typing) = typing() else { return true };
+            let Some((decl, _)) = typing.types.ctor(ctor) else {
+                // A const of the right type fits too, which its type would say; it is taken on trust here.
+                return crate::convert::is_const_name(ctor);
+            };
+            if decl.name != *name {
+                return false;
             }
+            fits_body(&typing.types, ctor, ty, value, body.as_ref())
         }
-        (ty, _) => !known(ty),
+        _ => false,
+    }
+}
+
+/// Whether the body of a constructor fits the declaration of the constructor, in the enum type that is expected.
+fn fits_body(types: &super::types::Types, ctor: &str, ty: &Ty, value: &Value, body: Option<&TaggedBody>) -> bool {
+    match body {
+        None => matches!(types.ctor(ctor), Some((_, v)) if matches!(v.body, crate::ast::VariantBody::Unit)),
+        Some(TaggedBody::Record(members)) => match types.ctor_fields(ctor, Some(ty)) {
+            Some(fields) => {
+                members.len() == fields.len()
+                    && members
+                        .iter()
+                        .all(|m| fields.iter().any(|(name, t)| *name == m.name && fits(t, &m.value)))
+            }
+            None => false,
+        },
+        Some(TaggedBody::Array(items)) => match types.ctor_element(ctor, Some(ty)) {
+            Some(element) => items.iter().all(|item| fits(&element, item)),
+            None => false,
+        },
+        Some(TaggedBody::Tuple(args)) => match types.tuple_params(ctor, Some(ty)) {
+            Some((params, tys)) => match bind_arguments(value.pos, ctor, &params, args) {
+                Ok((targets, _)) => args.iter().zip(&targets).all(|(a, t)| fits(&tys[*t], &a.value)),
+                Err(_) => false,
+            },
+            None => false,
+        },
     }
 }
 
 /// A type as a message shows it.
 fn ty_text(ty: &Ty) -> String {
-    match ty {
-        Ty::Nat => "a Nat".to_string(),
-        Ty::Int => "an Int".to_string(),
-        Ty::Float => "a Float".to_string(),
-        Ty::Str => "a String".to_string(),
-        Ty::Array(_) => "an array".to_string(),
-        Ty::Record(_) => "a record".to_string(),
-        Ty::Enum(name, _) => format!("a {}", shown(name)),
-        _ => "not known".to_string(),
-    }
+    super::types::type_name(ty)
 }
 
 fn arithmetic(op: BinOp, a: &Item, b: &Item, pos: Pos) -> R<Item> {
