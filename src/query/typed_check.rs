@@ -549,9 +549,9 @@ impl Checker<'_> {
                         }
                         Ok(())
                     }
-                    Some(PatBody::Array { items, .. }) => {
+                    Some(PatBody::Array { items, rest_as, .. }) => {
                         let element = self.types.ctor_element(name, ty.as_ref());
-                        items.iter().try_for_each(|p| self.pattern(p, element.as_ref()))
+                        self.items(items, rest_as, element)
                     }
                 }
             }
@@ -567,11 +567,21 @@ impl Checker<'_> {
                 }
                 Ok(())
             }
-            PatternKind::Array { items, .. } => {
+            PatternKind::Array { items, rest_as, .. } => {
                 let element = ty.and_then(|t| self.element(t));
-                items.iter().try_for_each(|p| self.pattern(p, element.as_ref()))
+                self.items(items, rest_as, element)
             }
         }
+    }
+
+    /// The elements of an array pattern, each of the type of an element, and the rest, an array of them.
+    fn items(&mut self, items: &[Pattern], rest_as: &Option<String>, element: Option<Ty>) -> R<()> {
+        items.iter().try_for_each(|p| self.pattern(p, element.as_ref()))?;
+        if let Some(name) = rest_as {
+            self.scope
+                .push((name.clone(), element.map(|e| Ty::Array(std::rc::Rc::new(e)))));
+        }
+        Ok(())
     }
 
     /// Checks that the arms of a `match` on a value of an enum cover every constructor of it, as in Rust. An arm covers
@@ -619,7 +629,7 @@ fn covers(pattern: &Pattern, covered: &mut Vec<String>) -> bool {
                 None => true,
                 Some(PatBody::Record { fields, .. }) => fields.iter().all(|f| f.pattern.is_irrefutable()),
                 Some(PatBody::Tuple { args, .. }) => args.iter().all(|a| a.pattern.is_irrefutable()),
-                Some(PatBody::Array { items, rest }) => *rest && items.is_empty(),
+                Some(PatBody::Array { items, rest, .. }) => *rest && items.is_empty(),
             };
             if whole {
                 covered.push(name.clone());

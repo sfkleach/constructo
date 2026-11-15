@@ -73,7 +73,9 @@ Rust, the deviation has a name of its own. How a query is written is given by th
   `if c { a } else if d { b } else { e }`. `else` is required. In the outfix form every brace is a record.
 - **`match`** has an outfix form, `match v with ARMS endmatch`, and Rust's form, `match v { ARMS }`. An arm is
   `pattern => expression`, with an optional `if` guard, separated by commas. Patterns have `_`, bindings, `name @ p`,
-  `p | q`, literals, constructors with bodies and `..`, records and arrays. `matches!(v, pattern)` is a Bool.
+  `p | q`, literals, constructors with bodies and `..`, records and arrays. The `..` that ends an array, bare or as a
+  constructor's body, may bind the rest as an array, as a slice pattern does in Rust: `[first, rest @ ..]`.
+  `matches!(v, pattern)` is a Bool.
 - **Operators** are Rust's, with Rust's precedence: `||`, `&&`, `!`, the comparisons, which do not chain, `+`, `-`,
   `*`, `/`, `%`, and `as Nat`, `as Int` or `as Float`. `&&`, `||` and `!` need Bools: there is no truthiness. `==`
   compares whole values; `<` and the others compare numbers and strings only.

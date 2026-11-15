@@ -149,6 +149,8 @@ The diagrams allow some things that are refused after parsing, and say less than
 - **Field shorthand,** `Point { x, y }` for `Point { x: x, y: y }`, is allowed only after a constructor name, as in
   Rust, which is why `ConstructorRecord` and `RecordExpr` are separate rules. A field may be given only once.
 - **In a constructor's tuple** the positional arguments come before the named ones, as in a values file.
+- **The `..` of a pattern** may only come last. In an array, bare or as a constructor's body, `name @ ..` binds the
+  rest to an array, as a slice pattern does in Rust. A record or a tuple has no such binding, as in Rust.
 - **A closure's parameters** are single patterns: an alternative `p | q` needs parentheses, since `|` ends the list.
   A closure with no parameters is written `| |`, with a space, because `||` is the `Disjunction` operator.
 - **`matches!`** is the name `matches` followed by `!`, as in Rust, and is not a macro: no other name may be followed

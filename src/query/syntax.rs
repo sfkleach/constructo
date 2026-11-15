@@ -208,10 +208,11 @@ pub enum PatternKind {
         fields: Vec<FieldPat>,
         rest: bool,
     },
-    /// An array: `[a, b, ..]`.
+    /// An array: `[a, b, ..]`, or `[a, b, rest @ ..]`, which binds the rest to an array.
     Array {
         items: Vec<Pattern>,
         rest: bool,
+        rest_as: Option<String>,
     },
     /// `p | q`.
     Or(Vec<Pattern>),
@@ -219,9 +220,20 @@ pub enum PatternKind {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PatBody {
-    Record { fields: Vec<FieldPat>, rest: bool },
-    Tuple { args: Vec<ArgPat>, rest: bool },
-    Array { items: Vec<Pattern>, rest: bool },
+    Record {
+        fields: Vec<FieldPat>,
+        rest: bool,
+    },
+    Tuple {
+        args: Vec<ArgPat>,
+        rest: bool,
+    },
+    /// The elements of an array body, as for `PatternKind::Array`.
+    Array {
+        items: Vec<Pattern>,
+        rest: bool,
+        rest_as: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
