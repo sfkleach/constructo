@@ -411,15 +411,25 @@ impl Checker<'_> {
                 Ok(())
             }
             PatternKind::Or(alternatives) => {
+                // Every alternative binds the same names, which the untyped check made sure of. A name keeps a type
+                // only if every alternative gives it the same one; otherwise the value is checked when it arrives.
+                let before = self.scope.len();
+                let mut merged: Vec<(String, Option<Ty>)> = Vec::new();
                 for (i, p) in alternatives.iter().enumerate() {
-                    let before = self.scope.len();
                     self.pattern(p, ty)?;
-                    // Every alternative binds the same names, which the untyped check made sure of, so the first is
-                    // kept.
-                    if i > 0 {
-                        self.scope.truncate(before);
+                    let bound: Vec<(String, Option<Ty>)> = self.scope.drain(before..).collect();
+                    if i == 0 {
+                        merged = bound;
+                    } else {
+                        for (name, t) in &mut merged {
+                            let other = bound.iter().find(|(n, _)| n == name).and_then(|(_, t)| t.as_ref());
+                            if !matches!((&*t, other), (Some(x), Some(y)) if same(x, y)) {
+                                *t = None;
+                            }
+                        }
                     }
                 }
+                self.scope.extend(merged);
                 Ok(())
             }
             PatternKind::Ctor { name, body } => {
@@ -559,10 +569,27 @@ fn covers(pattern: &Pattern, covered: &mut Vec<String>) -> bool {
 
 /// Whether two types are the same, as far as their outermost form tells.
 fn same(a: &Ty, b: &Ty) -> bool {
+    agree(a, b, false)
+}
+
+/// Whether two types agree, comparing their arguments, elements and fields. A part that is not known agrees with
+/// anything when `lenient`, and with nothing otherwise.
+fn agree(a: &Ty, b: &Ty, lenient: bool) -> bool {
+    if !known(a) || !known(b) {
+        return lenient;
+    }
     match (a, b) {
-        (Ty::Enum(x, _), Ty::Enum(y, _)) => x == y,
-        (Ty::Array(x), Ty::Array(y)) => same(x, y),
-        (Ty::Record(_), Ty::Record(_)) => true,
+        (Ty::Enum(x, xs), Ty::Enum(y, ys)) => {
+            x == y && xs.len() == ys.len() && xs.iter().zip(ys.iter()).all(|(p, q)| agree(p, q, lenient))
+        }
+        (Ty::Array(x), Ty::Array(y)) => agree(x, y, lenient),
+        (Ty::Record(xs), Ty::Record(ys)) => {
+            xs.len() == ys.len()
+                && xs
+                    .iter()
+                    .zip(ys.iter())
+                    .all(|((n, p), (m, q))| n == m && agree(p, q, lenient))
+        }
         (x, y) => std::mem::discriminant(x) == std::mem::discriminant(y),
     }
 }
@@ -572,6 +599,6 @@ fn compatible(new: &Ty, at: &Ty) -> bool {
     match (new, at) {
         (Ty::Nat, Ty::Int | Ty::Float) | (Ty::Int, Ty::Float) => true,
         (x, y) if !known(x) || !known(y) => true,
-        (x, y) => same(x, y),
+        (x, y) => agree(x, y, true),
     }
 }

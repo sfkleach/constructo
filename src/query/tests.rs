@@ -612,3 +612,158 @@ fn typed_match_must_be_exhaustive() {
     );
     assert!(e.contains("No arm"), "{}", e);
 }
+
+// The review of the pull request.
+
+#[test]
+fn a_branch_takes_the_common_kind_of_the_branches() {
+    assert_eq!(
+        ok("1;", "@values.map(|v| (if true then 1 else (2.0 as Float) endif) / 2)"),
+        "0.5;"
+    );
+    assert_eq!(
+        ok("1;", "@values.map(|v| (match v { 1 => 1, _ => 2.0 as Float }) / 2)"),
+        "0.5;"
+    );
+}
+
+#[test]
+fn an_array_literal_takes_the_common_kind_of_its_elements() {
+    assert_eq!(
+        ok("0;", "@values.map(|v| [1, 2.0 as Float].iter().collect())"),
+        "[1.0, 2.0];"
+    );
+    let e = err("0;", "@values.map(|v| [1.5, 1, 0 as Nat])");
+    assert!(
+        e.starts_with("before any value") && e.contains("no common type"),
+        "{}",
+        e
+    );
+}
+
+#[test]
+fn methods_need_a_receiver_that_has_them() {
+    let e = err("0;", "@values.map(|v| 1.trim())");
+    assert!(
+        e.starts_with("before any value") && e.contains("A Nat has no method trim"),
+        "{}",
+        e
+    );
+    let e = err("0;", r#"@values.map(|v| "a".first())"#);
+    assert!(
+        e.starts_with("before any value") && e.contains("has no method first"),
+        "{}",
+        e
+    );
+}
+
+#[test]
+fn a_predicate_cannot_give_an_iterator() {
+    let e = err("0;", "@values.filter(|v| [1].iter()).count()");
+    assert!(
+        e.starts_with("before any value") && e.contains("must give a Bool"),
+        "{}",
+        e
+    );
+    let e = err("0;", "@values.filter_map(|v| [1].iter())");
+    assert!(
+        e.starts_with("before any value") && e.contains("must give an Option"),
+        "{}",
+        e
+    );
+}
+
+#[test]
+fn true_in_a_branch_fixes_a_bool() {
+    let e = err(
+        r#"{ ok: true, x: "s" };"#,
+        "@values.map(|v| if v.ok then v.x else true endif)",
+    );
+    assert!(e.contains("no common type"), "{}", e);
+}
+
+#[test]
+fn nesting_through_conditions_and_bindings_is_limited() {
+    // The parser is allowed the stack of a main thread, which a test thread is smaller than in a debug build.
+    crate::test_support::on_a_main_sized_stack(|| {
+        let mut deep = "true".to_string();
+        for _ in 0..300 {
+            deep = format!("if {} then true else false endif", deep);
+        }
+        let e = err("0;", &format!("@values.map(|v| {})", deep));
+        assert!(e.contains("nested more than"), "{}", e);
+        let e = err(
+            "0;",
+            &format!("@values.map(|v| match v with {}_ => 1 endmatch)", "a @ ".repeat(300)),
+        );
+        assert!(e.contains("nested more than"), "{}", e);
+    });
+}
+
+#[test]
+fn typed_collect_and_options_keep_the_kind_of_a_number() {
+    let types = "enum Unused = Unused;";
+    assert_eq!(
+        typed(types, "5; 2.0;", "@values.collect()", Some("Float")).unwrap(),
+        "[5, 2.0];"
+    );
+    assert_eq!(
+        typed(
+            types,
+            "5; 2.0;",
+            "@values.collect().iter().map(|n| n / 2)",
+            Some("Float")
+        )
+        .unwrap(),
+        "2.5; 1.0;"
+    );
+    assert_eq!(
+        typed(types, "5;", "@values.next().unwrap_or(0.0) / 2", Some("Float")).unwrap(),
+        "2.5;"
+    );
+}
+
+#[test]
+fn typed_a_scalar_const_is_seen_into_for_arithmetic() {
+    assert_eq!(typed_ok("const five = 5;", "five;", "@values.map(|n| n + 1)"), "6;");
+    assert_eq!(typed_ok("const five = 5;", "five;", "@values.map(|n| n as Int)"), "+5;");
+}
+
+#[test]
+fn typed_equality_uses_the_types_of_the_parts() {
+    let types = "enum M = M { a: [Float], b: [Float] };";
+    assert_eq!(
+        typed_ok(types, "M { a: [5], b: [5.0] };", "@values.map(|m| m.a == m.b)"),
+        "true;"
+    );
+}
+
+#[test]
+fn typed_fields_of_different_types_are_not_taken_to_be_the_first() {
+    let types = "enum W<T> = W(T);\nenum Choice = A { x: W<{ a: Nat }> }, B { x: W<{ b: Nat }> };";
+    assert_eq!(
+        typed(
+            types,
+            "B { x: W({ b: 1 }) };",
+            "@values.map(|v| v.x.0.b)",
+            Some("Choice")
+        )
+        .unwrap(),
+        "1;"
+    );
+}
+
+#[test]
+fn typed_alternatives_that_disagree_leave_a_binding_unknown() {
+    let types = "enum Choice = A({ a: Nat }), B({ b: Nat });";
+    assert_eq!(
+        typed(
+            types,
+            "B({ b: 1 });",
+            "@values.filter_match(|(A(x) | B(x))| x.b)",
+            Some("Choice")
+        )
+        .unwrap(),
+        "1;"
+    );
+}

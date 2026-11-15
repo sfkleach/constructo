@@ -22,6 +22,7 @@ pub fn parse_query(text: &str) -> Result<Expr> {
         index: 0,
         no_ctor_record: false,
         depth: 0,
+        too_deep: false,
     };
     let expr = parser.expr()?;
     if parser.peek() != &Tok::Eof {
@@ -38,6 +39,9 @@ struct Parser {
     no_ctor_record: bool,
     /// How deeply the expressions and patterns being read are nested, which keeps the recursion bounded.
     depth: u32,
+    /// Whether the nesting limit has been passed. Reading a condition again cannot help then, so it is not tried,
+    /// which would otherwise double the work at every level of a deeply nested query.
+    too_deep: bool,
 }
 
 impl Parser {
@@ -127,6 +131,7 @@ impl Parser {
     fn deeper(&mut self) -> Result<()> {
         self.depth += 1;
         if self.depth > MAX_DEPTH {
+            self.too_deep = true;
             return self.fail(
                 self.pos(),
                 format!("The query is nested more than {} levels deep", MAX_DEPTH),
@@ -474,8 +479,20 @@ impl Parser {
             Tok::Punct("||") => {
                 return self.fail(pos, "A closure here takes one parameter, as in |v| ...");
             }
-            Tok::Keyword("if") => self.if_expr()?,
-            Tok::Keyword("match") => self.match_expr()?,
+            // A condition or scrutinee can itself start with `if` or `match`, which reaches here without passing
+            // through `expr`, so the nesting is counted here as well.
+            Tok::Keyword("if") => {
+                self.deeper()?;
+                let kind = self.if_expr();
+                self.depth -= 1;
+                kind?
+            }
+            Tok::Keyword("match") => {
+                self.deeper()?;
+                let kind = self.match_expr();
+                self.depth -= 1;
+                kind?
+            }
             _ => return self.error("an expression"),
         };
         Ok(Expr { pos, kind })
@@ -612,6 +629,9 @@ impl Parser {
         let start = self.index;
         let depth = self.depth;
         let attempt = self.or_expr();
+        if self.too_deep {
+            return attempt.map(|cond| (cond, false));
+        }
         if let Ok(cond) = attempt {
             if self.is_keyword(outfix) {
                 self.bump();
@@ -802,7 +822,10 @@ impl Parser {
             Tok::Name(name) => {
                 self.bump();
                 if self.eat_punct("@") {
-                    PatternKind::At(name, Box::new(self.single_pattern()?))
+                    self.deeper()?;
+                    let inner = self.single_pattern();
+                    self.depth -= 1;
+                    PatternKind::At(name, Box::new(inner?))
                 } else {
                     PatternKind::Bind(name)
                 }
