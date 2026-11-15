@@ -7,7 +7,7 @@
 Rust-like expression over `#values`, the lazy stream of the input values, which extracts data and transforms it with one
 language. This task implements it, test first.
 
-The command is `constructo query EXPR FILES`, as settled below with its options.
+The command is `constructo query -e EXPR FILES`, as settled below with its options.
 
 The decision record is the specification. This file adds the examples that drive the implementation, the steps, the
 questions that are left open, and the notes from the exploration that led to the design.
@@ -120,11 +120,16 @@ were made while implementing it:
 
 ### The command line (2026-11-15)
 
-`constructo query [OPTIONS] <EXPR> [FILES]...`
+`constructo query [OPTIONS] <-e EXPR|--expr-file QUERY_FILE> [FILES]...`
 
 - **The name is `query`.** Like SQL, the word is already read loosely enough to include changes.
 - **The expression is the first positional argument,** as for `jq` and `grep`. Reading it from a file (`-f`) waits
   until it is needed.
+  - **Revised (2026-11-15):** a file was needed for the grammar's examples, and `--expr-file=QUERY_FILE` was first
+    added beside the positional `EXPR`. Clap could then not tell the two apart, since it took the first file for
+    `EXPR`, so the files had to be shifted back and their requirement checked by hand. The expression became an option,
+    `-e EXPR` or `--expr=EXPR`, as for `sed -e` and `grep -e`, in a required group with `--expr-file`, so that exactly
+    one is given and every positional argument is an input.
 - **The inputs are as for `convert --to=json-typed`:** types files may come among `FILES`, each file classified by its
   content; `--project` and `--stdin` mean what they mean for `check` and `convert`; and the settings options
   (`--prelude`, `--widening`, `--allow-refs`, the limits, `--config`, `--cache`, `--dev`) are shared.

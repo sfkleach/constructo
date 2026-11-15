@@ -2376,43 +2376,48 @@ for f in "$QUERY_EXAMPLES"/invalid/*.query; do
         "$QUERY_EXAMPLES/shapes.types" "$QUERY_EXAMPLES/shapes.values"
 done
 
-# A query given with --expr-file. The examples above are all given this way, with the files starting at the first
-# argument; these are the edges of the option.
+# The query is given with exactly one of -e/--expr and --expr-file. The examples above are all given with
+# --expr-file; these are the edges of the two options.
 expect_query_error "an error in a query file names the file" 2 "" \
     "ERROR: oops is not bound by any pattern, nor a const of the types ($QUERY_EXAMPLES/invalid/unbound-name.query," \
     --expr-file="$QUERY_EXAMPLES/invalid/unbound-name.query" "$QUERY_EXAMPLES/shapes.types" \
     "$QUERY_EXAMPLES/shapes.values"
-expect_query_error "a query file that cannot be read is exit code 2" 2 "" "ERROR: Cannot read $query_dir/missing.query" \
-    --expr-file="$query_dir/missing.query" "$query_dir/moves.values"
+expect_query_error "a query file that cannot be read is exit code 2" 2 "" \
+    "ERROR: Cannot read $query_dir/missing.query" --expr-file="$query_dir/missing.query" "$query_dir/moves.values"
 expect_query_error "a query file still needs something to read values from" 2 "" \
-    "ERROR: the query needs some files, --stdin or --project" --expr-file="$QUERY_EXAMPLES/valid/match.query"
+    "error: the following required arguments were not provided" --expr-file="$QUERY_EXAMPLES/valid/match.query"
+expect_query_error "a query is required" 2 "" "error: the following required arguments were not provided" \
+    "$query_dir/moves.values"
+expect_query_error "a query cannot be given both ways" 2 "" "error: the argument '--expr <EXPR>' cannot be used with" \
+    -e '#values' --expr-file="$QUERY_EXAMPLES/valid/match.query" "$query_dir/moves.values"
+expect_query "--expr is the long form of -e" "3;" --expr='#values.count()' "$query_dir/moves.values"
 expect_query "a query file with --stdin" "Move { x: 1, y: 2 }; Quit; Move { x: 3, y: 4 };" \
     --expr-file=<(printf '// Every value.\n#values\n') --stdin <"$query_dir/moves.values"
 
-expect_query "pass the input through" "Move { x: 1, y: 2 }; Quit; Move { x: 3, y: 4 };" '#values' \
+expect_query "pass the input through" "Move { x: 1, y: 2 }; Quit; Move { x: 3, y: 4 };" -e '#values' \
     "$query_dir/moves.values"
 expect_query "filter_match with field shorthand after a constructor" "Point { x: 1, y: 2 }; Point { x: 3, y: 4 };" \
-    '#values.filter_match(|Move { x, y, .. }| Point { x, y })' "$query_dir/moves.values"
-expect_query "a result that is not an iterator is one value" "1;" '#values.filter(|v| matches!(v, Quit)).count()' \
+    -e '#values.filter_match(|Move { x, y, .. }| Point { x, y })' "$query_dir/moves.values"
+expect_query "a result that is not an iterator is one value" "1;" -e '#values.filter(|v| matches!(v, Quit)).count()' \
     "$query_dir/moves.values"
-expect_query "collect, compact" "[[1, 2], [], [5, 6, 7]];" --compact '#values.collect()' "$query_dir/arrays.values"
-expect_query "take stops reading early" "Move { x: 1, y: 2 };" '#values.take(1)' "$query_dir/moves.values" \
+expect_query "collect, compact" "[[1, 2], [], [5, 6, 7]];" --compact -e '#values.collect()' "$query_dir/arrays.values"
+expect_query "take stops reading early" "Move { x: 1, y: 2 };" -e '#values.take(1)' "$query_dir/moves.values" \
     "$query_dir/missing.values"
-expect_query "a pipe among the files is read whole" "1;" '#values.count()' <(printf '1;\n')
-expect_query "update" "{ a: 10, b: { c: 20 } };" '#values.map(|v| v.update(|v| v.a = 10).update(|v| v.b.c = 20))' \
+expect_query "a pipe among the files is read whole" "1;" -e '#values.count()' <(printf '1;\n')
+expect_query "update" "{ a: 10, b: { c: 20 } };" -e '#values.map(|v| v.update(|v| v.a = 10).update(|v| v.b.c = 20))' \
     --stdin < <(printf '{ a: 1, b: { c: 2 } };\n')
 expect_query_error "an error at a value comes after the values before it" 1 "1;" \
     "ERROR: The index 0 is out of range for an array of 0 ($query_dir/arrays.values, line 2, col 1)" \
-    '#values.map(|a| a[0])' "$query_dir/arrays.values"
+    -e '#values.map(|a| a[0])' "$query_dir/arrays.values"
 expect_query_error "a mistake in the query is found before any value" 2 "" \
-    "ERROR: A bare record names its fields" '#values.map(|m| { x })' "$query_dir/moves.values"
+    "ERROR: A bare record names its fields" -e '#values.map(|m| { x })' "$query_dir/moves.values"
 expect_query_error "branches without a common type are refused" 2 "" \
     "ERROR: The branches give a Nat and a String, which have no common type" \
-    '#values.map(|v| if matches!(v, Quit) then 1 else "move" endif)' "$query_dir/moves.values"
+    -e '#values.map(|v| if matches!(v, Quit) then 1 else "move" endif)' "$query_dir/moves.values"
 expect_query_error "an input that cannot be read is exit code 2" 2 "Move { x: 1, y: 2 }; Quit; Move { x: 3, y: 4 };" \
-    "ERROR: Cannot read $query_dir/missing.values" '#values' "$query_dir/moves.values" "$query_dir/missing.values"
+    "ERROR: Cannot read $query_dir/missing.values" -e '#values' "$query_dir/moves.values" "$query_dir/missing.values"
 expect_query_error "an option for the types needs types" 2 "" "ERROR: --no-widening applies only to a typed query" \
-    --no-widening '#values' "$query_dir/moves.values"
+    --no-widening -e '#values' "$query_dir/moves.values"
 
 # A query is typed when it has types: here a types file among the files.
 printf 'enum R = Record(Bool, right: Bool);\nenum Shape = Circle { r: Float }, Dot;\nconst origin = Circle { r: 1 };\n' \
@@ -2420,20 +2425,21 @@ printf 'enum R = Record(Bool, right: Bool);\nenum Shape = Circle { r: Float }, D
 printf '[Record(true, right: false), Record(false, false)];\n' >"$query_dir/r.values"
 printf 'Circle { r: 5 };\norigin;\nDot;\n' >"$query_dir/shapes.values"
 expect_query "typed: a named argument given by position" "false; false;" \
-    '#values.flat_map(|rs| rs.iter().map(|r| r.right))' "$query_dir/r.types" "$query_dir/r.values"
+    -e '#values.flat_map(|rs| rs.iter().map(|r| r.right))' "$query_dir/r.types" "$query_dir/r.values"
 expect_query "typed: a Nat in a Float field is a Float, and a const is seen into" "2;" \
-    '#values.filter_match(|Circle { r }| r).filter(|r| r > 0.0).count()' "$query_dir/r.types" "$query_dir/shapes.values"
-expect_query "typed: --type checks every value" "Circle { r: 5 }; origin; Dot;" --type=Shape '#values' \
+    -e '#values.filter_match(|Circle { r }| r).filter(|r| r > 0.0).count()' "$query_dir/r.types" \
+    "$query_dir/shapes.values"
+expect_query "typed: --type checks every value" "Circle { r: 5 }; origin; Dot;" --type=Shape -e '#values' \
     "$query_dir/r.types" "$query_dir/shapes.values"
 expect_query_error "typed: an unknown constructor in the query" 2 "" "ERROR: Unknown constructor Square" \
-    '#values.map(|s| Square)' "$query_dir/r.types" "$query_dir/shapes.values"
+    -e '#values.map(|s| Square)' "$query_dir/r.types" "$query_dir/shapes.values"
 expect_query_error "typed: a value of the wrong type is found before the query runs" 1 "" "ERROR: Expected Shape" \
-    --type=Shape '#values' "$query_dir/r.types" "$query_dir/r.values"
+    --type=Shape -e '#values' "$query_dir/r.types" "$query_dir/r.values"
 expect_query_error "typed: --type finds a mistake before any value is read" 2 "" \
-    "ERROR: No constructor of Shape has a field or a parameter radius" --type=Shape '#values.map(|s| s.radius)' \
+    "ERROR: No constructor of Shape has a field or a parameter radius" --type=Shape -e '#values.map(|s| s.radius)' \
     "$query_dir/r.types" "$query_dir/shapes.values"
 expect_query_error "typed: a match must cover every constructor" 2 "" "ERROR: The match does not cover Dot of Shape" \
-    --type=Shape '#values.map(|s| match s with Circle { r } => r, endmatch)' "$query_dir/r.types" \
+    --type=Shape -e '#values.map(|s| match s with Circle { r } => r, endmatch)' "$query_dir/r.types" \
     "$query_dir/shapes.values"
 rm -f "$query_dir/out" "$query_dir/err" "$query_dir/moves.values" "$query_dir/arrays.values" "$query_dir/r.types" \
     "$query_dir/r.values" "$query_dir/shapes.values"

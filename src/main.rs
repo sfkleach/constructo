@@ -271,22 +271,23 @@ adaptors, such as map, filter, filter_map, flat_map, take, skip, nth, next, coun
 filter_match, whose closure takes a pattern that may not match. If the result is an iterator, each item is written \
 as a value; otherwise the one result is written. For example:
 
-    constructo query '#values.map(|m| m.x)' measurements.values
-    constructo query '#values.filter_match(|Move { x, .. }| x)' moves.values
-    constructo query '#values.map(|c| c.update(|c| c.server.port = 8080))' config.values
+    constructo query -e '#values.map(|m| m.x)' measurements.values
+    constructo query -e '#values.filter_match(|Move { x, .. }| x)' moves.values
+    constructo query -e '#values.map(|c| c.update(|c| c.server.port = 8080))' config.values
 
-A longer query can be kept in a file, which may have comments, and given with --expr-file=QUERY_FILE in place of the \
-expression; the files then start at the first argument:
+A longer query can be kept in a file, which may have comments, and given with --expr-file instead:
 
     constructo query --expr-file=moves.query moves.values
 
-The settings file is read for [global] and [experimental].")]
+The settings file is read for [global] and [experimental].",
+        group(ArgGroup::new("query_text").required(true).args(["expr", "expr_file"]))
+    )]
     Query {
-        /// The query, such as '#values.map(|m| m.x)'. It is left out when --expr-file is given
-        #[arg(value_name = "EXPR", required_unless_present = "expr_file")]
+        /// The query, such as '#values.map(|m| m.x)'
+        #[arg(short, long, value_name = "EXPR")]
         expr: Option<String>,
 
-        /// Read the query from a file instead of from EXPR, which is then left out
+        /// Read the query from a file, which may have comments, instead of giving it with --expr
         #[arg(long, value_name = "QUERY_FILE")]
         expr_file: Option<PathBuf>,
 
@@ -333,7 +334,7 @@ The settings file is read for [global] and [experimental].")]
         no_experimental: Vec<Feature>,
 
         /// The files whose values are queried
-        #[arg(value_name = "FILES", required_unless_present_any = ["stdin", "project", "expr_file"])]
+        #[arg(value_name = "FILES", required_unless_present_any = ["stdin", "project"])]
         files: Vec<PathBuf>,
     },
 
@@ -679,7 +680,7 @@ fn main() -> ExitCode {
             typing,
             experimental: _,
             no_experimental: _,
-            mut files,
+            files,
         } => {
             let query_matches = matches
                 .subcommand_matches("query")
@@ -689,28 +690,16 @@ fn main() -> ExitCode {
             // The query is read before any input is looked at, so a mistake in it is reported at once. It is checked
             // once it is known whether it is typed, since a typed query may refer to the consts of its types; telling
             // that reads only the first token of a regular file, and reports nothing.
-            // With --expr-file there is no EXPR, so what clap took for it is the first of the files.
             let (text, query_name) = match expr_file {
-                Some(path) => {
-                    if let Some(first) = expr {
-                        files.insert(0, PathBuf::from(first));
-                    }
-                    // Clap cannot require the files only when EXPR is absent, since it takes the first of them for
-                    // EXPR, so the requirement is checked here.
-                    if files.is_empty() && !stdin && typing.project.is_none() {
-                        eprintln!("ERROR: the query needs some files, --stdin or --project to read values from");
+                Some(path) => match std::fs::read_to_string(&path) {
+                    Ok(text) => (text, path.display().to_string()),
+                    Err(e) => {
+                        eprintln!("ERROR: Cannot read {}: {}", path.display(), e);
                         return ExitCode::from(EXIT_USAGE);
                     }
-                    match std::fs::read_to_string(&path) {
-                        Ok(text) => (text, path.display().to_string()),
-                        Err(e) => {
-                            eprintln!("ERROR: Cannot read {}: {}", path.display(), e);
-                            return ExitCode::from(EXIT_USAGE);
-                        }
-                    }
-                }
+                },
                 None => (
-                    expr.expect("clap requires EXPR without --expr-file"),
+                    expr.expect("clap requires --expr or --expr-file"),
                     query::parser::QUERY_NAME.to_string(),
                 ),
             };
