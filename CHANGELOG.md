@@ -208,7 +208,7 @@ Following the style in https://keepachangelog.com/en/1.0.0/
   indentation, and spreads it over lines otherwise.
 - A diagnostic has a severity. A warning is written as `WARNING: <message> (<file>, line L, col C)` and does not change
   the exit code. The library has `Severity` and `Diagnostic::warning`.
-- `constructo query EXPR FILES` extracts and transforms values with a Rust-like expression over `#values`, the lazy
+- `constructo query -e EXPR FILES` extracts and transforms values with a Rust-like expression over `#values`, the lazy
   stream of the input values, such as `#values.filter_match(|Move { x, .. }| x)` or
   `#values.map(|c| c.update(|c| c.server.port = 8080))`. It has Rust's iterator adaptors, `filter_match`, field,
   position and index access, patterns, `if` and `match` in an outfix form and in Rust's, struct update, `update`, and
@@ -217,7 +217,7 @@ Following the style in https://keepachangelog.com/en/1.0.0/
   It is typed with a project, `--type` or a types file: every value is checked first, and the types find named
   arguments however they were given, defaults, consts, the kind of a number, and, with `--type`, mistakes in the query
   before the query runs on any value. A typed query may also name the consts of its types in its expressions. The
-  query can be read from a file with `--expr-file=QUERY_FILE` in place of `EXPR`. See
+  query can instead be read from a file with `--expr-file=QUERY_FILE`. See
   `docs/specs/query-command.md`, decision 44, and the query grammar in `syntax/grammar.md`, with its examples in
   `syntax/examples/query/`. The library has the `query` module and `query_typed`, and depends on `num-bigint`.
 

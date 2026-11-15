@@ -100,7 +100,8 @@ The diagrams are also available as a [PDF](dv_grammar.pdf).
 
 ## Query grammar
 
-A query is one expression, given on the command line of `constructo query`, as in `#values.map(|m| m.x)`. It is Rust's
+A query is one expression, given to `constructo query` with `-e` or in a file with `--expr-file`, as in
+`#values.map(|m| m.x)`. It is Rust's
 expressions with the changes that [decision 44][decision-44] makes, and what the language means is in the [specification
 of the query command](../docs/specs/query-command.md). This section says only how a query is written.
 
