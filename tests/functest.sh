@@ -2368,13 +2368,26 @@ expect_query_error() {
 # and an invalid one names its error in a "// expect: ..." line, so that neither can pass for some other reason.
 QUERY_EXAMPLES="$(dirname "$0")/../syntax/examples/query"
 for f in "$QUERY_EXAMPLES"/valid/*.query; do
-    expect_query "example valid/$(basename "$f")" "$(sed -n 's|^// output: ||p' "$f")" --compact "$(cat "$f")" \
+    expect_query "example valid/$(basename "$f")" "$(sed -n 's|^// output: ||p' "$f")" --compact --expr-file="$f" \
         "$QUERY_EXAMPLES/shapes.types" "$QUERY_EXAMPLES/shapes.values"
 done
 for f in "$QUERY_EXAMPLES"/invalid/*.query; do
-    expect_query_error "example invalid/$(basename "$f")" 2 "" "$(sed -n 's|^// expect: ||p' "$f")" "$(cat "$f")" \
+    expect_query_error "example invalid/$(basename "$f")" 2 "" "$(sed -n 's|^// expect: ||p' "$f")" --expr-file="$f" \
         "$QUERY_EXAMPLES/shapes.types" "$QUERY_EXAMPLES/shapes.values"
 done
+
+# A query given with --expr-file. The examples above are all given this way, with the files starting at the first
+# argument; these are the edges of the option.
+expect_query_error "an error in a query file names the file" 2 "" \
+    "ERROR: oops is not bound by any pattern, nor a const of the types ($QUERY_EXAMPLES/invalid/unbound-name.query," \
+    --expr-file="$QUERY_EXAMPLES/invalid/unbound-name.query" "$QUERY_EXAMPLES/shapes.types" \
+    "$QUERY_EXAMPLES/shapes.values"
+expect_query_error "a query file that cannot be read is exit code 2" 2 "" "ERROR: Cannot read $query_dir/missing.query" \
+    --expr-file="$query_dir/missing.query" "$query_dir/moves.values"
+expect_query_error "a query file still needs something to read values from" 2 "" \
+    "ERROR: the query needs some files, --stdin or --project" --expr-file="$QUERY_EXAMPLES/valid/match.query"
+expect_query "a query file with --stdin" "Move { x: 1, y: 2 }; Quit; Move { x: 3, y: 4 };" \
+    --expr-file=<(printf '// Every value.\n#values\n') --stdin <"$query_dir/moves.values"
 
 expect_query "pass the input through" "Move { x: 1, y: 2 }; Quit; Move { x: 3, y: 4 };" '#values' \
     "$query_dir/moves.values"

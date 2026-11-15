@@ -11,6 +11,7 @@ writes, and what its exit code means. The design is [decision 44][decision], and
 ```text
 constructo query [--compact] [-x] [--stdin] EXPR [FILES]...
 constructo query [--compact] [--type=TYPE] [--project=FOLDER] [OPTIONS] EXPR [FILES]...
+constructo query [OPTIONS] --expr-file=QUERY_FILE [FILES]...
 ```
 
 For example:
@@ -20,12 +21,16 @@ constructo query '#values.map(|m| m.x)' measurements.values
 constructo query '#values.filter_match(|Move { x, .. }| x)' moves.values
 constructo query '#values.map(|c| c.update(|c| c.server.port = 8080))' config.values
 constructo query --type=Config '#values.map(|c| Config { port: 8080, ..c })' config.types config.values
+constructo query --expr-file=moves.query moves.values
 ```
 
 ## Inputs
 
-`EXPR` is the query. The inputs are the `FILES`, in order, and then the standard input if `--stdin` is given, named
-`<stdin>`. A run needs at least one of `FILES`, `--stdin` and `--project`.
+`EXPR` is the query. Instead, `--expr-file=QUERY_FILE` reads the query from a file, which suits a longer query with
+`//` comments; `EXPR` is then left out, so the `FILES` start at the first argument, and a diagnostic about the query
+names `QUERY_FILE` where it would otherwise name `<query>`. A query file that cannot be read is exit code 2. The inputs
+are the `FILES`, in order, and then the standard input if `--stdin` is given, named `<stdin>`. A run needs at least one
+of `FILES`, `--stdin` and `--project`.
 
 A query is **typed** when it has types: a `--project`, a `--type`, or a types file among the `FILES`, which is told by
 the first token of each file. Otherwise it is **untyped**. The options for the types (`--project`, `--no-prelude`,
