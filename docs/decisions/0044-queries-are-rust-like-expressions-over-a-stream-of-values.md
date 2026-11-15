@@ -7,8 +7,8 @@ Exploring it showed that selecting and transforming are one problem: pulling a f
 field while keeping the rest need the same paths. The decision is what kind of language a user writes to extract data
 from a stream of values and to transform it.
 
-This record settles the shape of the language. The command's name, the command line and the remaining details are
-left to the implementation task. The working name for the command is `query`.
+This record settles the shape of the language. The command is `query`. Its command line and the remaining details of
+the language are settled in the implementation task, `docs/tasks/todo/2026-11-15-query-subcommand/query-subcommand.md`.
 
 ## Factors
 
@@ -56,24 +56,38 @@ of its own, so a Rust programmer is never misled by a familiar name with a new m
   value that does not match is dropped, and the body's result is kept: `@values.filter_match(|Move { x, .. }| x)`.
   In every Rust-named method a closure parameter must always match, as in Rust, so `filter_map` keeps exactly Rust's
   meaning.
-- **`{` always starts a record,** and there are no blocks. Constructo's records are anonymous, so `{ x: 1 }` is the
-  value syntax; Rust can read a bare `{` as a block only because its struct literals are named. Patterns bind names, so
-  `let` is not needed, and Rust's field shorthand comes free: `|Move { x, y, .. }| { x, y }`.
+- **Braces need only ever denote records.** It is always possible to write a query in which braces denote only
+  records, bare or after a constructor, and never blocks. Constructo's records are anonymous, so `{ x: 1 }` is the
+  value syntax; Rust can read a bare `{` as a block only because its struct literals are named. There are no blocks,
+  and patterns bind names, so `let` is not needed.
+- **`if` and `match` have outfix forms,** `if TEST then A elseif TEST then B else C endif` and
+  `match EXPR with ARMS endmatch`, in which every brace is a record. Rust's braced forms, `if TEST { A } else { C }`
+  and `match EXPR { ARMS }`, are accepted too, so a Rust programmer's first guess works, but no one is forced to use
+  braces for anything but records. A new construct with a braced Rust form needs an outfix form as well.
+- **Field shorthand only after a constructor name,** as in Rust: `Move { x, y }` is `Move { x: x, y: y }`, and a bare
+  record names its fields, `{ x: x }`. A Rust programmer who writes `|m| { m }` out of habit gets an error, not a
+  record that quietly wraps the value. Patterns keep Rust's shorthand, as in `Move { x, .. }`.
 - There are no anonymous tuples, as Constructo has none: a pair of fields is a record.
 
 ### Types are optional: two modes
 
-- **Untyped,** a query works on the values alone, since they describe their own structure.
+- **Untyped** means only that there are no types: the query works on the values alone, since they describe their own
+  structure. The expression is still type-checked. What it fixes is checked before any data is read, so
+  `if v.ok then 1 else "failed" endif` is refused; what comes from the data is checked as each value arrives, by its
+  kind (`Nat`, `Int`, `Float`, `String`, record, array or constructor), and a mismatch is an error at the value.
 - **Typed,** with `--type` or a project, the query is checked before any data is read (`m.z` is refused up front),
   omitted named arguments take their defaults, references to consts are resolved, names are resolved to their
   constructors, and the type of the result is known.
-- **The principle:** the types never change the meaning of a query that works without them. They only find errors
-  earlier and supply what the text leaves out. Where the text alone cannot answer, the untyped mode reports an error
-  that says to supply the types, and does not guess. For example, untyped `v.0` is the first argument written by
-  position and typed `v.0` is the first parameter however it was written; positional arguments bind a prefix of the
-  parameters, so the two always agree when both answer.
-- **Untyped, constructor names match by their exact text,** since without types `Circle` and `shapes::Circle` cannot be
-  known to be the same constructor.
+- **The principle:** checked and unchecked processing give the same result whenever both succeed. Either may fail
+  where the other succeeds: the types find errors that the values alone cannot show, such as mixing constructors of
+  different enums, and supply what the text leaves out, such as defaults, consts and widening. Where the text alone
+  cannot answer, the untyped mode reports an error that says to supply the types, and does not guess. For example,
+  untyped `v.0` is the first argument written by position and typed `v.0` is the first parameter however it was
+  written; positional arguments bind a prefix of the parameters, so the two always agree when both answer.
+- **Untyped, constructor names match by their exact text:** the same text is the same constructor and different text
+  a different one. Unchecked processing is obliged to assume the distinctions that the text shows, so the principle
+  is strictly true only when the types agree with them. They may not: `Circle` and `shapes::Circle`, or a name and its
+  renaming in an import, can be one constructor, and then supplying the types gives the right answer.
 
 ### Numbers
 
@@ -115,12 +129,12 @@ of its own, so a Rust programmer is never misled by a familiar name with a new m
 ## Consequences
 
 - A Rust programmer can read a query without learning a new language, and anyone who knows a language with closures
-  and method chains can guess it. The deviations (`@values`, `filter_match`, `update`, `{` for records, `as` with
-  Constructo's types) are few and named.
+  and method chains can guess it. The deviations (`@values`, `filter_match`, `update`, `{` for records, the outfix
+  `if` and `match`, `as` with Constructo's types) are few and named.
 - Queries can be checked against the types before reading any data, and a typed transformation cannot produce a value
   that the types refuse. No untyped tool can offer that.
-- The same query works with or without the types, and adding the types can only turn an error into an earlier error or
-  into an answer.
+- The same query works with or without the types, and where both succeed they agree, given types that agree with the
+  distinctions the text shows.
 - Strict numbers mean that, untyped, a field that is spelled `5` in one value and `5.0` in another fails only when the
   odd value is reached, which may be late. The message suggests the cast, and a cast written to be safe avoids it.
 - Expressions are longer than jq's for the simplest cases (`@values.map(|m| m.x)` against `.x`), in exchange for
@@ -130,14 +144,9 @@ of its own, so a Rust programmer is never misled by a familiar name with a new m
 
 ### Still open
 
-These are left to the implementation task:
-- The command's name (`query` is preferred: like SQL, the word is already read loosely enough to include changes),
-  and its options for the expression, the inputs, `--type`, `--project` and `--stdin`.
-- Whether a leading `.` is shorthand for `@values.`, as in `.take(1)`.
-- Whether a narrowing cast that is exact, such as `5.0 as Nat` giving `5`, is allowed.
-- Whether a query inside a project uses its types without being told.
-- The rest of the expression language: `if`/`else`, the details of `match`, the boolean operators, and any string
-  methods.
+The command line, casts, `match`, the operators and the string methods are settled in the implementation task. Left
+open there:
+- A way to update every location that a predicate selects, as jq's `|=` does, if real use shows the need.
 - Errors and exit codes, following `docs/specs/exit-codes.md`.
 
 ## Options and Outcome
