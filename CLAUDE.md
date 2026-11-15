@@ -31,6 +31,8 @@ The goal is to build robust, well-designed software, not to avoid technical disa
 - EXCEPT in folders starting with an underscore, such as  `_build/`.
 - Tasks live in `docs/tasks/todo/` until work on them starts. Before starting work on a task, move its folder up to
   `docs/tasks/`, and when it is finished move it to `docs/tasks/done/`. Update any links to the task when moving it.
+  A task is finished when its PR is ready to merge, not when the PR is opened: the work of answering the review belongs
+  to the task, so the move to `docs/tasks/done/` is the last commit before the merge.
 - Design decisions should be documents in the `docs/decisions/` folder using
   the established template. However you do not need to precisely follow the template.
 - In some cases there were not multiple options considered so the pros-and-cons

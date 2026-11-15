@@ -6,7 +6,7 @@ writes, and what its exit code means. The design is [decision 44][decision], and
 [the task][task].
 
 [decision]: ../decisions/0044-queries-are-rust-like-expressions-over-a-stream-of-values.md
-[task]: ../tasks/done/2026-11-15-query-subcommand/query-subcommand.md
+[task]: ../tasks/2026-11-15-query-subcommand/query-subcommand.md
 
 ```text
 constructo query [--compact] [-x] [--stdin] EXPR [FILES]...
