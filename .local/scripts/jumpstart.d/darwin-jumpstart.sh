@@ -9,7 +9,8 @@ if ! command -v brew >/dev/null 2>&1; then
     exit 1
 fi
 
-# The Xcode command line tools provide git, and curl comes with macOS.
+# The Xcode command line tools provide git, python3, and the C compiler and linker that rustc links with; curl comes
+# with macOS.
 if ! xcode-select -p >/dev/null 2>&1; then
     echo "ERROR: Install the Xcode command line tools first, with: xcode-select --install" >&2
     exit 1
@@ -28,3 +29,6 @@ fi
 
 # Install the Python version required by the syntax project.
 uv python install 3.12
+
+# Install the Rust toolchain, just and cargo-audit.
+bash "$(dirname "${BASH_SOURCE[0]}")/rust-toolchain.sh"
