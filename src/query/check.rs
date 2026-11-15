@@ -2,7 +2,7 @@
 //!
 //! Without the types, a query is still type-checked: what the expression itself fixes is checked here, so that
 //! `if v.ok then 1 else "failed" endif` is refused up front, and what comes from the data is checked by the evaluator
-//! as each value arrives. This also checks the rules of the language that do not depend on types: where `@values`, a
+//! as each value arrives. This also checks the rules of the language that do not depend on types: where `#values`, a
 //! closure and an assignment may be, that the names are bound, and that a closure's parameter must always match except
 //! in `filter_match`.
 
@@ -260,10 +260,10 @@ impl Checker {
         match &expr.kind {
             ExprKind::Values => {
                 if self.closures > 0 {
-                    return fail(pos, "@values cannot be used inside a closure");
+                    return fail(pos, "#values cannot be used inside a closure");
                 }
                 if self.values_used {
-                    return fail(pos, "@values can only be used once, as it is read only once");
+                    return fail(pos, "#values can only be used once, as it is read only once");
                 }
                 self.values_used = true;
                 Ok(K::Iter)

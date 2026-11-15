@@ -4,7 +4,7 @@
 
 `docs/vision.md` lists, for later, selecting sub-values from a file or stdin. The design is settled in
 [decision 44](../../../decisions/0044-queries-are-rust-like-expressions-over-a-stream-of-values.md): a query is a
-Rust-like expression over `@values`, the lazy stream of the input values, which extracts data and transforms it with one
+Rust-like expression over `#values`, the lazy stream of the input values, which extracts data and transforms it with one
 language. This task implements it, test first.
 
 The command is `constructo query EXPR FILES`, as settled below with its options.
@@ -21,77 +21,77 @@ unit tests too. The values are written as a values file would have them.
 
 | # | Purpose | Input | Expression | Output |
 |---|---|---|---|---|
-| 1 | Pass the input through | `1; "a"; Quit;` | `@values` | `1; "a"; Quit;` |
-| 2 | Delete the whole input | `1; 2; 3;` | `@values.take(0)` | nothing |
-| 3 | The first item | `10; 20; 30;` | `@values.take(1)` | `10;` |
-| 3a | The first item as an `Option` | `10; 20; 30;` | `@values.next()` | `Some(10);` |
-| 3b | No first item | (empty) | `@values.take(1)` / `@values.next()` | nothing / `None;` |
-| 4 | The 3rd item, if it exists | `10; 20; 30;` | `@values.skip(2).take(1)` | `30;` |
-| 4a | The 3rd item as an `Option` | `10; 20; 30;` | `@values.nth(2)` | `Some(30);` |
-| 4b | No 3rd item | `10; 20;` | `@values.skip(2).take(1)` / `@values.nth(2)` | nothing / `None;` |
-| 5 | A field of records | `{ x: 1, y: 2 }; { x: 3, y: 4 };` | `@values.map(\|r\| r.x)` | `1; 3;` |
-| 6 | A pair of fields | `{ x: 1, y: 2, z: 9 }; { x: 3, y: 4, z: 9 };` | `@values.map(\|r\| { x: r.x, y: r.y })` | `{ x: 1, y: 2 }; { x: 3, y: 4 };` |
-| 7 | Lengths of arrays | `[1, 2]; []; [5, 6, 7];` | `@values.map(\|a\| a.len())` | `2; 0; 3;` |
-| 8 | First elements, an error when empty | `[1, 2]; []; [5, 6, 7];` | `@values.map(\|a\| a[0])` | `1;` then an error at the empty array |
-| 8a | First elements, skipping empty arrays | `[1, 2]; []; [5, 6, 7];` | `@values.filter_map(\|a\| a.first())` | `1; 5;` |
-| 9 | Third elements | `[1, 2]; []; [5, 6, 7];` | `@values.filter_map(\|a\| a.get(2))` | `7;` |
-| 10 | Fields from arrays of records, as one stream | `[Pair { left: true, right: false }, Pair { left: false, right: true }]; [];` | `@values.flat_map(\|ps\| ps.iter().map(\|p\| p.right))` | `false; true;` |
-| 10a | The same, one array per value | as 10 | `@values.map(\|ps\| ps.iter().map(\|p\| p.right).collect())` | `[false, true]; [];` |
-| 11 | Positional arguments | `[Record(true, right: false), Record(false, false)];` | `@values.flat_map(\|rs\| rs.iter().map(\|r\| r.0))` | `true; false;` |
-| 11a | A named argument, untyped | as 11 | `@values.flat_map(\|rs\| rs.iter().map(\|r\| r.right))` | `false;` then an error at `Record(false, false)` saying to supply the types |
+| 1 | Pass the input through | `1; "a"; Quit;` | `#values` | `1; "a"; Quit;` |
+| 2 | Delete the whole input | `1; 2; 3;` | `#values.take(0)` | nothing |
+| 3 | The first item | `10; 20; 30;` | `#values.take(1)` | `10;` |
+| 3a | The first item as an `Option` | `10; 20; 30;` | `#values.next()` | `Some(10);` |
+| 3b | No first item | (empty) | `#values.take(1)` / `#values.next()` | nothing / `None;` |
+| 4 | The 3rd item, if it exists | `10; 20; 30;` | `#values.skip(2).take(1)` | `30;` |
+| 4a | The 3rd item as an `Option` | `10; 20; 30;` | `#values.nth(2)` | `Some(30);` |
+| 4b | No 3rd item | `10; 20;` | `#values.skip(2).take(1)` / `#values.nth(2)` | nothing / `None;` |
+| 5 | A field of records | `{ x: 1, y: 2 }; { x: 3, y: 4 };` | `#values.map(\|r\| r.x)` | `1; 3;` |
+| 6 | A pair of fields | `{ x: 1, y: 2, z: 9 }; { x: 3, y: 4, z: 9 };` | `#values.map(\|r\| { x: r.x, y: r.y })` | `{ x: 1, y: 2 }; { x: 3, y: 4 };` |
+| 7 | Lengths of arrays | `[1, 2]; []; [5, 6, 7];` | `#values.map(\|a\| a.len())` | `2; 0; 3;` |
+| 8 | First elements, an error when empty | `[1, 2]; []; [5, 6, 7];` | `#values.map(\|a\| a[0])` | `1;` then an error at the empty array |
+| 8a | First elements, skipping empty arrays | `[1, 2]; []; [5, 6, 7];` | `#values.filter_map(\|a\| a.first())` | `1; 5;` |
+| 9 | Third elements | `[1, 2]; []; [5, 6, 7];` | `#values.filter_map(\|a\| a.get(2))` | `7;` |
+| 10 | Fields from arrays of records, as one stream | `[Pair { left: true, right: false }, Pair { left: false, right: true }]; [];` | `#values.flat_map(\|ps\| ps.iter().map(\|p\| p.right))` | `false; true;` |
+| 10a | The same, one array per value | as 10 | `#values.map(\|ps\| ps.iter().map(\|p\| p.right).collect())` | `[false, true]; [];` |
+| 11 | Positional arguments | `[Record(true, right: false), Record(false, false)];` | `#values.flat_map(\|rs\| rs.iter().map(\|r\| r.0))` | `true; false;` |
+| 11a | A named argument, untyped | as 11 | `#values.flat_map(\|rs\| rs.iter().map(\|r\| r.right))` | `false;` then an error at `Record(false, false)` saying to supply the types |
 | 11b | A named argument, typed | as 11, with `enum R = Record(Bool, right: Bool);` | as 11a | `false; false;` |
 
 ### Patterns and constructors
 
 | # | Purpose | Input | Expression | Output |
 |---|---|---|---|---|
-| 12 | `filter_match` skips other constructors | `Move { x: 1, y: 2 }; Quit; Move { x: 3, y: 4 };` | `@values.filter_match(\|Move { x, .. }\| x)` | `1; 3;` |
-| 13 | Field shorthand after a constructor name | as 12 | `@values.filter_match(\|Move { x, y, .. }\| Point { x, y })` | `Point { x: 1, y: 2 }; Point { x: 3, y: 4 };` |
-| 13a | A bare record names its fields | as 12 | `@values.filter_match(\|Move { x, .. }\| { x })` | an error before any value: write `x` for the value, or `{ x: x }` for a record |
-| 14 | `matches!` | as 12 | `@values.filter(\|v\| matches!(v, Quit)).count()` | `1;` |
-| 15 | A refutable pattern in `map` is refused | as 12 | `@values.map(\|Move { x, .. }\| x)` | an error before any value: the parameter must always match |
-| 16 | Untyped names match by exact text | `shapes::Circle { r: 1.0 }; Circle { r: 2.0 };` | `@values.filter_match(\|Circle { r }\| r)` | `2.0;` |
+| 12 | `filter_match` skips other constructors | `Move { x: 1, y: 2 }; Quit; Move { x: 3, y: 4 };` | `#values.filter_match(\|Move { x, .. }\| x)` | `1; 3;` |
+| 13 | Field shorthand after a constructor name | as 12 | `#values.filter_match(\|Move { x, y, .. }\| Point { x, y })` | `Point { x: 1, y: 2 }; Point { x: 3, y: 4 };` |
+| 13a | A bare record names its fields | as 12 | `#values.filter_match(\|Move { x, .. }\| { x })` | an error before any value: write `x` for the value, or `{ x: x }` for a record |
+| 14 | `matches!` | as 12 | `#values.filter(\|v\| matches!(v, Quit)).count()` | `1;` |
+| 15 | A refutable pattern in `map` is refused | as 12 | `#values.map(\|Move { x, .. }\| x)` | an error before any value: the parameter must always match |
+| 16 | Untyped names match by exact text | `shapes::Circle { r: 1.0 }; Circle { r: 2.0 };` | `#values.filter_match(\|Circle { r }\| r)` | `2.0;` |
 
 ### Numbers
 
 | # | Purpose | Input | Expression | Output |
 |---|---|---|---|---|
-| 17 | A literal adapts | `{ y: 1.5 }; { y: -2.0 };` | `@values.filter(\|m\| m.y > 0.0).count()` | `1;` |
-| 18 | Mixed kinds need a cast, untyped | `{ y: 1.5 }; { y: 5 };` | `@values.filter(\|m\| m.y > 0.0).count()` | an error at `5`, suggesting `m.y as Float` |
-| 19 | The cast works on every spelling | `{ y: 1.5 }; { y: 5 };` | `@values.filter(\|m\| m.y as Float > 0.0).count()` | `2;` |
+| 17 | A literal adapts | `{ y: 1.5 }; { y: -2.0 };` | `#values.filter(\|m\| m.y > 0.0).count()` | `1;` |
+| 18 | Mixed kinds need a cast, untyped | `{ y: 1.5 }; { y: 5 };` | `#values.filter(\|m\| m.y > 0.0).count()` | an error at `5`, suggesting `m.y as Float` |
+| 19 | The cast works on every spelling | `{ y: 1.5 }; { y: 5 };` | `#values.filter(\|m\| m.y as Float > 0.0).count()` | `2;` |
 | 20 | Typed, `5` in a `Float` field is a `Float` | as 18, with `y: Float` | as 18 | `2;` |
-| 21 | A narrowing cast that changes the number | `-1;` | `@values.map(\|n\| n as Nat)` | an error at `-1` |
-| 22 | `Nat` arithmetic | `{ port: 8080 };` | `@values.map(\|c\| c.port + 1)` | `8081;` |
-| 23 | `Nat` below zero | `3;` | `@values.map(\|n\| n - 5)` | an error at `3` |
-| 24 | `Int` results are signed | `3;` | `@values.map(\|n\| n as Int - 5)` | `-2;` |
-| 25 | Integers are unbounded | `18446744073709551615;` | `@values.map(\|n\| n + 1)` | `18446744073709551616;` |
-| 26 | Integer division truncates | `7;` | `@values.map(\|n\| n / 2)` / `@values.map(\|n\| n % 2)` | `3;` / `1;` |
-| 27 | `Float` arithmetic is `f64` | `0.1;` | `@values.map(\|x\| x + 0.2)` | `0.30000000000000004;` |
-| 28 | A new `Float` always reads back as a `Float` | `1.5;` | `@values.map(\|x\| x * 2.0)` | `3.0;` |
-| 29 | Untouched literals keep their text | `{ a: 1.50, b: +5 };` | `@values.map(\|r\| r)` | `{ a: 1.50, b: +5 };` |
+| 21 | A narrowing cast that changes the number | `-1;` | `#values.map(\|n\| n as Nat)` | an error at `-1` |
+| 22 | `Nat` arithmetic | `{ port: 8080 };` | `#values.map(\|c\| c.port + 1)` | `8081;` |
+| 23 | `Nat` below zero | `3;` | `#values.map(\|n\| n - 5)` | an error at `3` |
+| 24 | `Int` results are signed | `3;` | `#values.map(\|n\| n as Int - 5)` | `-2;` |
+| 25 | Integers are unbounded | `18446744073709551615;` | `#values.map(\|n\| n + 1)` | `18446744073709551616;` |
+| 26 | Integer division truncates | `7;` | `#values.map(\|n\| n / 2)` / `#values.map(\|n\| n % 2)` | `3;` / `1;` |
+| 27 | `Float` arithmetic is `f64` | `0.1;` | `#values.map(\|x\| x + 0.2)` | `0.30000000000000004;` |
+| 28 | A new `Float` always reads back as a `Float` | `1.5;` | `#values.map(\|x\| x * 2.0)` | `3.0;` |
+| 29 | Untouched literals keep their text | `{ a: 1.50, b: +5 };` | `#values.map(\|r\| r)` | `{ a: 1.50, b: +5 };` |
 
 ### Transformation
 
 | # | Purpose | Input | Expression | Output |
 |---|---|---|---|---|
-| 30 | Struct update | `Config { name: "h", port: 80 };` | `@values.map(\|c\| Config { port: 8080, ..c })` | `Config { name: "h", port: 8080 };` |
-| 31 | Struct update of a bare record | `{ a: 1, b: 2 };` | `@values.map(\|r\| { b: 3, ..r })` | `{ a: 1, b: 3 };` |
-| 32 | A deep `update` | `{ server: { tls: { port: 1 }, host: "x" } };` | `@values.map(\|c\| c.update(\|c\| c.server.tls.port = 443))` | `{ server: { tls: { port: 443 }, host: "x" } };` |
-| 33 | Chained updates | `{ a: 1, b: { c: 2 } };` | `@values.map(\|v\| v.update(\|v\| v.a = 10).update(\|v\| v.b.c = 20))` | `{ a: 10, b: { c: 20 } };` |
-| 34 | Compound assignment | `{ count: 4 };` | `@values.map(\|v\| v.update(\|v\| v.count += 1))` | `{ count: 5 };` |
-| 35 | Updating an array element | `{ items: [1, 2, 3] };` | `@values.map(\|v\| v.update(\|v\| v.items[1] = 9))` | `{ items: [1, 9, 3] };` |
-| 36 | Updating a missing field | `{ a: 1 };` | `@values.map(\|v\| v.update(\|v\| v.z = 1))` | an error at the value |
-| 37 | Typed, a value of the wrong type | `Config { name: "h", port: 80 };`, typed | `@values.map(\|c\| c.update(\|c\| c.port = "x"))` | an error before any value is read |
-| 38 | Removing array elements | `[1, 5, 2, 8];` | `@values.map(\|a\| a.iter().filter(\|n\| n > 3).collect())` | `[5, 8];` |
-| 39 | The whole stream as one value | `1; 2; 3;` | `@values.collect()` | `[1, 2, 3];` |
+| 30 | Struct update | `Config { name: "h", port: 80 };` | `#values.map(\|c\| Config { port: 8080, ..c })` | `Config { name: "h", port: 8080 };` |
+| 31 | Struct update of a bare record | `{ a: 1, b: 2 };` | `#values.map(\|r\| { b: 3, ..r })` | `{ a: 1, b: 3 };` |
+| 32 | A deep `update` | `{ server: { tls: { port: 1 }, host: "x" } };` | `#values.map(\|c\| c.update(\|c\| c.server.tls.port = 443))` | `{ server: { tls: { port: 443 }, host: "x" } };` |
+| 33 | Chained updates | `{ a: 1, b: { c: 2 } };` | `#values.map(\|v\| v.update(\|v\| v.a = 10).update(\|v\| v.b.c = 20))` | `{ a: 10, b: { c: 20 } };` |
+| 34 | Compound assignment | `{ count: 4 };` | `#values.map(\|v\| v.update(\|v\| v.count += 1))` | `{ count: 5 };` |
+| 35 | Updating an array element | `{ items: [1, 2, 3] };` | `#values.map(\|v\| v.update(\|v\| v.items[1] = 9))` | `{ items: [1, 9, 3] };` |
+| 36 | Updating a missing field | `{ a: 1 };` | `#values.map(\|v\| v.update(\|v\| v.z = 1))` | an error at the value |
+| 37 | Typed, a value of the wrong type | `Config { name: "h", port: 80 };`, typed | `#values.map(\|c\| c.update(\|c\| c.port = "x"))` | an error before any value is read |
+| 38 | Removing array elements | `[1, 5, 2, 8];` | `#values.map(\|a\| a.iter().filter(\|n\| n > 3).collect())` | `[5, 8];` |
+| 39 | The whole stream as one value | `1; 2; 3;` | `#values.collect()` | `[1, 2, 3];` |
 
 ## Steps
 
 1. Settle the questions that the first examples need. Done: see the settled questions below.
 2. Parse expressions: closures, method calls, field and index access, patterns, `as`, the operators, `if` and `match`
-   in both forms, record and array literals with struct update, and `@values`. Reuse the lexer and the value grammar
+   in both forms, record and array literals with struct update, and `#values`. Reuse the lexer and the value grammar
    where they apply. Outside the braced forms of `if` and `match`, `{` always starts a record.
-3. Type-check the expression, and evaluate untyped: `@values` as a lazy iterator over the inputs, the adaptors, access, `filter_match`, numbers and
+3. Type-check the expression, and evaluate untyped: `#values` as a lazy iterator over the inputs, the adaptors, access, `filter_match`, numbers and
    `update`, writing the results with the existing rendering of values. Drive it with the examples, one at a time.
 4. Add the typed mode: check the expression against the types before reading, then supply defaults, resolve consts
    and names, and widen numbers, as the principle in the decision requires.
@@ -130,13 +130,13 @@ were made while implementing it:
   (`--prelude`, `--widening`, `--allow-refs`, the limits, `--config`, `--cache`, `--dev`) are shared.
 - **Types and `--type`.** Having types, from a project or from types files, makes the run typed: each value is typed by
   its constructor, as `check` does, and errors that the types can find are found value by value. `--type T` adds that
-  every value is a `T`, so `@values` is an iterator of `T` and the expression is checked before any data is read.
+  every value is a `T`, so `#values` is an iterator of `T` and the expression is checked before any data is read.
 - **The output** is values text, with `--compact` as for `convert`. Other formats wait, since piping into
   `convert --from` covers them.
 
-### No leading `.` for `@values.` (2026-11-15)
+### No leading `.` for `#values.` (2026-11-15)
 
-A leading `.` is not shorthand for `@values.`. It makes the easiest queries trivial without generalising or fitting
+A leading `.` is not shorthand for `#values.`. It makes the easiest queries trivial without generalising or fitting
 the design: `jq` users would read `.x` as the field of each value, and get an error about an iterator instead. The
 Rust-like principle already accepts Rust's level of verbosity, and a shorthand can be added later but never removed.
 
@@ -192,7 +192,7 @@ nothing else needs braces: closures have none, `update` takes a closure, and `ma
 ### `match` (2026-11-15)
 
 ```
-@values.map(|s| match s with
+#values.map(|s| match s with
     Circle { r } => 3.14159 * r * r,
     Rect { w, h } if w == h => w * w,
     Rect { w, h } => w * h,
@@ -269,7 +269,7 @@ missing is knowledge of the data.
   tell whether two constructors belong to the same enum, so untyped that is not checked.
 - **`.collect()` needs a common type,** so collecting values of different kinds is an error at the value where the
   kinds part. This replaces the earlier note that untyped `.collect()` may make a mixed array. A stream is not an
-  array, so `@values` on `1; "a"; Quit;` still writes all three.
+  array, so `#values` on `1; "a"; Quit;` still writes all three.
 
 **The principle, restated:** checked and unchecked processing give the same result whenever both succeed. Either may
 fail where the other succeeds: checked finds errors that unchecked cannot see, such as mixing constructors of
@@ -325,11 +325,11 @@ adds what jq lacks: types.
   language with comprehensions, and a library only. The decision record compares them.
 - **The first experiment** was extracting the `x` of a stream of `Measurement { x: Float, y: Float }`, written
   `|m| m.x`. It raised whether the closure applies to each value or to the stream, which led to the stream as a value
-  (`@values.map(|m| m.x)`), so that the first item or the whole stream can be processed.
-- **The name `@values`** was chosen from `@values`, `$values`, `@input`, `$input`, a leading `.`, a keyword, `self`
+  (`#values.map(|m| m.x)`), so that the first item or the whole stream can be processed.
+- **The name `#values`** was chosen from `#values`, `$values`, `@input`, `$input`, a leading `.`, a keyword, `self`
   and `_`. Lower-case names are consts and capitalised ones constructors, so a plain word could clash; `$` is expanded
   inside a shell's double quotes; `values` is Constructo's own word and plural, like a stream, where jq's `input` is
-  one value. `@` is also Rust's pattern binding (`m @ Measurement { .. }`); that is infix where `@values` is prefix,
+  one value. `@` is also Rust's pattern binding (`m @ Measurement { .. }`); that is infix where `#values` is prefix,
   but worth watching if bindings are adopted.
 - **Types optional** was chosen over requiring them, because requiring them is too big a price in usefulness.
 - **Numbers.** Comparing by value with a warning in typed mode was suggested and not taken: the user preferred Rust's

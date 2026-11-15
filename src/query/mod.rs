@@ -1,4 +1,4 @@
-//! Queries: Rust-like expressions over `@values`, the lazy stream of the input values, which extract data and
+//! Queries: Rust-like expressions over `#values`, the lazy stream of the input values, which extract data and
 //! transform it. See `docs/decisions/0044-queries-are-rust-like-expressions-over-a-stream-of-values.md` and the task,
 //! `docs/tasks/2026-11-15-query-subcommand/query-subcommand.md`, which settles the details.
 
@@ -32,7 +32,7 @@ pub fn prepare(text: &str) -> Result<Expr, Diagnostic> {
 }
 
 /// The values of the sources, in order, as a lazy stream. Each source is only read, and parsed, when the stream
-/// reaches it, so that `@values.take(1)` stops reading early. A source is given by a function, so that reading it is
+/// reaches it, so that `#values.take(1)` stops reading early. A source is given by a function, so that reading it is
 /// also left until it is needed; its error is a message about how the input is found.
 pub fn stream_of(
     sources: impl Iterator<Item = Box<dyn FnOnce() -> Result<Source, String>>> + 'static,

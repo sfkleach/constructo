@@ -264,20 +264,20 @@ settings file is read for [global] and [experimental]."
         files: Vec<PathBuf>,
     },
 
-    /// Extract and transform values with a Rust-like expression over @values, the stream of the input values
+    /// Extract and transform values with a Rust-like expression over #values, the stream of the input values
     #[command(after_help = "\
-The expression is Rust-like: @values is a lazy iterator over the values of every input, in order, with Rust's \
+The expression is Rust-like: #values is a lazy iterator over the values of every input, in order, with Rust's \
 adaptors, such as map, filter, filter_map, flat_map, take, skip, nth, next, count and collect, and our own \
 filter_match, whose closure takes a pattern that may not match. If the result is an iterator, each item is written \
 as a value; otherwise the one result is written. For example:
 
-    constructo query '@values.map(|m| m.x)' measurements.values
-    constructo query '@values.filter_match(|Move { x, .. }| x)' moves.values
-    constructo query '@values.map(|c| c.update(|c| c.server.port = 8080))' config.values
+    constructo query '#values.map(|m| m.x)' measurements.values
+    constructo query '#values.filter_match(|Move { x, .. }| x)' moves.values
+    constructo query '#values.map(|c| c.update(|c| c.server.port = 8080))' config.values
 
 The settings file is read for [global] and [experimental].")]
     Query {
-        /// The query, such as '@values.map(|m| m.x)'
+        /// The query, such as '#values.map(|m| m.x)'
         #[arg(value_name = "EXPR")]
         expr: String,
 

@@ -121,7 +121,7 @@ impl Parser {
             Tok::Invalid(c) => format!("'{}'", c),
             Tok::TypeName(s) | Tok::Name(s) => format!("'{}'", s),
             Tok::Keyword(k) => format!("'{}'", k),
-            Tok::Sigil(s) => format!("'@{}'", s),
+            Tok::Sigil(s) => format!("'#{}'", s),
             Tok::Nat(s) | Tok::Float(s) => format!("'{}'", s),
             Tok::Str(_) => "a string".to_string(),
             Tok::Punct(p) => format!("'{}'", p),
@@ -462,7 +462,7 @@ impl Parser {
                 self.bump();
                 ExprKind::Values
             }
-            Tok::Sigil(word) => return self.fail(pos, format!("@{} is not known; the stream is @values", word)),
+            Tok::Sigil(word) => return self.fail(pos, format!("#{} is not known; the stream is #values", word)),
             Tok::Name(name) if name == "matches" && self.peek_at(1) == &Tok::Punct("!") => {
                 self.bump();
                 self.bump();
@@ -807,11 +807,13 @@ impl Parser {
     fn pattern(&mut self, alternatives: bool) -> Result<Pattern> {
         self.deeper()?;
         let first = self.single_pattern()?;
+        self.refuse_double_bar(alternatives)?;
         let result = if alternatives && self.is_punct("|") {
             let pos = first.pos;
             let mut all = vec![first];
             while self.eat_punct("|") {
                 all.push(self.single_pattern()?);
+                self.refuse_double_bar(alternatives)?;
             }
             Pattern {
                 pos,
@@ -822,6 +824,15 @@ impl Parser {
         };
         self.depth -= 1;
         Ok(result)
+    }
+
+    /// Refuses `||` after a pattern where alternatives are allowed, which the lexer reads as one token, so that the
+    /// mistake is named, as Rust names it, rather than reported as a token that was not expected.
+    fn refuse_double_bar(&self, alternatives: bool) -> Result<()> {
+        if alternatives && self.is_punct("||") {
+            return self.fail(self.pos(), "Alternatives are separated by a single '|', not '||'");
+        }
+        Ok(())
     }
 
     fn single_pattern(&mut self) -> Result<Pattern> {
@@ -991,7 +1002,7 @@ mod tests {
 
     #[test]
     fn parses_a_method_chain() {
-        let e = parses("@values.filter(|m| m.y > 0.0).map(|m| m.x)");
+        let e = parses("#values.filter(|m| m.y > 0.0).map(|m| m.x)");
         let ExprKind::Method { name, receiver, .. } = e.kind else {
             panic!()
         };
@@ -1064,7 +1075,7 @@ mod tests {
 
     #[test]
     fn patterns() {
-        parses("@values.filter_match(|Move { x, .. }| x)");
+        parses("#values.filter_match(|Move { x, .. }| x)");
         parses("matches!(v, Quit)");
         parses("match v with Record(a, right: b, ..) => a, n @ [1, ..] => n, _ => 0 endmatch");
         parses("match v with shapes::Circle { r } => r, true => 1, endmatch");
@@ -1085,6 +1096,16 @@ mod tests {
     }
 
     #[test]
+    fn alternatives_are_separated_by_a_single_bar() {
+        let message = "Alternatives are separated by a single '|', not '||'";
+        assert!(error("match v { Dot||Circle => 1 }").contains(message));
+        assert!(error("match v { Dot | Box||Circle => 1 }").contains(message));
+        assert!(error("matches!(v, Dot||Circle)").contains(message));
+        // The `|` of a closure's parameters is not an alternative, so `||` after one is left to the usual message.
+        assert!(!error("v.map(|x||)").contains(message));
+    }
+
+    #[test]
     fn comparisons_do_not_chain() {
         assert!(error("a < b < c").contains("cannot be chained"));
     }
@@ -1092,9 +1113,9 @@ mod tests {
     #[test]
     fn errors_say_what_was_expected() {
         assert_eq!(
-            error("@values."),
+            error("#values."),
             "Expected a field, a position or a method after '.' but found the end of the query"
         );
-        assert!(error("@input").contains("@values"));
+        assert!(error("#input").contains("#values"));
     }
 }

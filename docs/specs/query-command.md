@@ -1,7 +1,7 @@
 # The query command
 
 `constructo query` extracts data from a stream of values and transforms it, with a Rust-like expression over
-`@values`, the stream of the input values. This document says what it reads, what the expression can say, what it
+`#values`, the stream of the input values. This document says what it reads, what the expression can say, what it
 writes, and what its exit code means. The design is [decision 44][decision], and the details were settled in
 [the task][task].
 
@@ -16,10 +16,10 @@ constructo query [--compact] [--type=TYPE] [--project=FOLDER] [OPTIONS] EXPR [FI
 For example:
 
 ```text
-constructo query '@values.map(|m| m.x)' measurements.values
-constructo query '@values.filter_match(|Move { x, .. }| x)' moves.values
-constructo query '@values.map(|c| c.update(|c| c.server.port = 8080))' config.values
-constructo query --type=Config '@values.map(|c| Config { port: 8080, ..c })' config.types config.values
+constructo query '#values.map(|m| m.x)' measurements.values
+constructo query '#values.filter_match(|Move { x, .. }| x)' moves.values
+constructo query '#values.map(|c| c.update(|c| c.server.port = 8080))' config.values
+constructo query --type=Config '#values.map(|c| Config { port: 8080, ..c })' config.types config.values
 ```
 
 ## Inputs
@@ -32,8 +32,8 @@ the first token of each file. Otherwise it is **untyped**. The options for the t
 `--no-widening` and the others of `check`) are refused, with exit code 2, by an untyped query, since they would do
 nothing.
 
-- **Untyped,** the inputs are read lazily: a file is only read, and parsed, when `@values` reaches it, so that
-  `@values.take(1)` stops reading early, and a later file that cannot be read is never noticed.
+- **Untyped,** the inputs are read lazily: a file is only read, and parsed, when `#values` reaches it, so that
+  `#values.take(1)` stops reading early, and a later file that cannot be read is never noticed.
 - **Typed,** the inputs are those of [the check command](check-command.md), read in the same way. The types and every
   value are checked, as `check` checks them, before the query runs, and the first error ends the run. With
   `--type=TYPE`, every value is checked against the type, which is any type of the root project, such as `Shape`,
@@ -48,7 +48,7 @@ The query is read and checked before any input.
 A query is an expression. It is Rust's expressions with the changes that decision 44 makes; where it deviates from
 Rust, the deviation has a name of its own.
 
-- **`@values`** is a lazy iterator over the values of every input, in order. It may be used once, and not inside a
+- **`#values`** is a lazy iterator over the values of every input, in order. It may be used once, and not inside a
   closure.
 - **Iterators** have Rust's adaptors, with Rust's meanings: `map`, `filter`, `filter_map`, `flat_map`, `take`,
   `skip`, `nth`, `next`, `last`, `count`, `collect`, `any`, `all` and `find`. `next`, `nth`, `last` and `find` give an

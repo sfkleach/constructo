@@ -11,7 +11,7 @@ fields" and "a lookup table with these keys", and a reader cannot tell which. Co
 never has a field deleted. That leaves a real question about how a lookup table should be written, typed and
 processed.
 
-The question came up while exploring the query language for `@values` (path extraction and transformation): deleting
+The question came up while exploring the query language for `#values` (path extraction and transformation): deleting
 a field was set aside as not a Constructo operation, and deleting an entry belongs to maps instead.
 
 This task is to design the model. Its implementation will be a separate task.
@@ -34,7 +34,7 @@ This task is to design the model. Its implementation will be a separate task.
   it interacts with generics and widening.
 - **The formats.** How a map is written by `json-exact`, `json-typed` (a JSON object when the keys are strings, and
   otherwise?), `jsonl-*` and `xml`, and read back by `--from`.
-- **The query language.** How a map is read and changed in `@values` expressions: lookup (`m["key"]` and `m.get(k)`,
+- **The query language.** How a map is read and changed in `#values` expressions: lookup (`m["key"]` and `m.get(k)`,
   as in Rust's `HashMap`), iteration over entries without anonymous tuples (which Constructo does not have), and
   inserting and removing entries with `update`.
 
@@ -43,12 +43,12 @@ This task is to design the model. Its implementation will be a separate task.
 1. Survey how other data formats model maps, and how they keep them apart from records: for example TOML tables,
    YAML mappings, EDN maps, Dhall's `Map` (a list of `{ mapKey, mapValue }`), Protocol Buffers' `map<K, V>`, and
    serde's handling of maps against structs.
-2. Write examples of maps in values files, in types files and in `@values` expressions, including the awkward cases:
+2. Write examples of maps in values files, in types files and in `#values` expressions, including the awkward cases:
    an empty map, non-string keys, a repeated key, and a map inside a record.
 3. Choose between a new kind of value and a convention, and settle the questions above.
 4. Record the decision in `docs/decisions/`, and write the implementation task with its TDD-style examples.
 
 ## Dependencies
 
-None, but the outcome affects the query language for `@values`, which is being explored at the same time, and the
+None, but the outcome affects the query language for `#values`, which is being explored at the same time, and the
 design of `convert` for every format.
