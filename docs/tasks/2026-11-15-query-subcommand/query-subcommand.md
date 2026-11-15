@@ -326,11 +326,12 @@ adds what jq lacks: types.
 - **The first experiment** was extracting the `x` of a stream of `Measurement { x: Float, y: Float }`, written
   `|m| m.x`. It raised whether the closure applies to each value or to the stream, which led to the stream as a value
   (`#values.map(|m| m.x)`), so that the first item or the whole stream can be processed.
-- **The name `#values`** was chosen from `#values`, `$values`, `@input`, `$input`, a leading `.`, a keyword, `self`
+- **The name `@values`** was chosen from `@values`, `$values`, `@input`, `$input`, a leading `.`, a keyword, `self`
   and `_`. Lower-case names are consts and capitalised ones constructors, so a plain word could clash; `$` is expanded
   inside a shell's double quotes; `values` is Constructo's own word and plural, like a stream, where jq's `input` is
-  one value. `@` is also Rust's pattern binding (`m @ Measurement { .. }`); that is infix where `#values` is prefix,
-  but worth watching if bindings are adopted.
+  one value. `@` is also Rust's pattern binding (`m @ Measurement { .. }`); that is infix where `@values` is prefix,
+  but worth watching if bindings are adopted. Bindings were adopted, and the lexer took `p@Poly` for the sigil
+  `@Poly`, so the stream became `#values`, as decision 44 records.
 - **Types optional** was chosen over requiring them, because requiring them is too big a price in usefulness.
 - **Numbers.** Comparing by value with a warning in typed mode was suggested and not taken: the user preferred Rust's
   strictness, since a cast does useful work when a source writes `5` for a `Float`. `as Float` was preferred to

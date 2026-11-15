@@ -169,6 +169,7 @@ impl Checker<'_> {
         match &expr.kind {
             ExprKind::Values => Ok(TK::Iter(self.target.clone())),
             ExprKind::Var(name) => val(self.lookup(name)),
+            ExprKind::Const(name) => val(self.types.constant(name).and_then(|(_, ty)| ty.clone())),
             ExprKind::Lit(lit) => val(Some(match lit {
                 Lit::Str(_) => Ty::Str,
                 // A number literal adapts to the kind it meets, so it fixes no type here.

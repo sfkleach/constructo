@@ -124,9 +124,10 @@ The `Nat`, `Float`, `String`, `TypeName` and `Qualifier` of the diagrams are tho
 [data-values grammar](#data-values-grammar), and a constructor is named as in a values file, as `Circle`,
 `shapes::Circle` or `acme.shapes::Circle`. A `name` starts with a lower-case letter or `_`, like a field name, but the
 reserved words are different. The keywords of a query are `if`, `then`, `elseif`, `else`, `endif`, `match`, `with`,
-`endmatch`, `as` and `_`, so none of them can be a variable, while `enum` and `const` can. A name must be bound by a
-closure or a pattern, except `true`, `false` and `null`, which are the consts of the prelude; no other const can be
-named in a query.
+`endmatch`, `as` and `_`, so none of them can be a variable, while `enum` and `const` can. A name that a closure or a
+pattern binds is a variable. Any other name is a const of the types, which only a typed query may refer to, and which
+may have a `Qualifier` in front, as in `shapes::origin`; `true`, `false` and `null` of the prelude are always known. In
+a pattern a lower-case `name` always binds, except those three, and never compares with a const: a guard does that.
 
 The tokens differ from those of a values file in three ways:
 

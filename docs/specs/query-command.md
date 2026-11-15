@@ -103,7 +103,16 @@ argument cannot be known, and asking for one is an error that says to supply the
 Typed, a named argument is found however it was written, an omitted one takes its default, a const is seen into, a
 number takes the kind of its place, so a `5` in a `Float` field is a `Float`, and the constructor names of the query
 are resolved as a values file of the root project would resolve them, so an unknown one is an error. `update` checks
-that the new value fits, and an omitted argument that it changes is written by name. With `--type`, more is checked
+that the new value fits, and an omitted argument that it changes is written by name.
+
+A typed query may also name a const of the types in an expression, as `origin` or `shapes::origin`: a name that no
+pattern binds is a const, and a binding hides a const of the same name, so `#values.map(|origin| origin)` gives each
+value. A name that is neither is an error, `oops is not bound by any pattern, nor a const of the types`. A pattern
+never compares with a const: a lower-case name in a pattern always binds, so that a pattern means the same typed and
+untyped, and a const is compared in a guard, `match p { q if q == origin => ..., _ => ... }`. Untyped, a name that no
+pattern binds is an error that says to supply the types. `true`, `false` and `null` are values of the query in both.
+
+With `--type`, more is checked
 before the query runs on any value: a field or parameter that no constructor of the type has, a pattern whose constructor is of
 another type, a new value that cannot fit where `update` puts it, and a `match` that does not cover every constructor
 of its enum.

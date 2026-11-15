@@ -24,11 +24,123 @@ use syntax::Expr;
 
 pub use eval::Failure as QueryFailure;
 
-/// Reads a query and checks what it fixes, before any data is read.
-pub fn prepare(text: &str) -> Result<Expr, Diagnostic> {
-    let expr = parser::parse_query(text)?;
-    check::check_query(&expr)?;
+/// Reads a query and checks what it fixes, before any data is read. In a typed query, a name that no pattern binds is
+/// a const of the types.
+pub fn prepare(text: &str, typed: bool) -> Result<Expr, Diagnostic> {
+    check(parser::parse_query(text)?, typed)
+}
+
+/// Checks a query that has been read, once it is known whether it is typed, as `prepare` does.
+pub fn check(mut expr: Expr, typed: bool) -> Result<Expr, Diagnostic> {
+    if typed {
+        free_names_are_consts(&mut expr, &mut Vec::new());
+    }
+    check::check_query(&expr, typed)?;
     Ok(expr)
+}
+
+/// Makes each name that no pattern binds a `Const`, except the consts of the prelude, which the query treats as values
+/// of its own. A pattern always binds a lower-case name, so a const is never compared in a pattern, which would make a
+/// pattern mean one thing typed and another untyped; a guard compares with one instead. `bound` holds the names that
+/// the enclosing patterns bind, innermost last, so that a binding hides a const of the same name.
+fn free_names_are_consts(expr: &mut Expr, bound: &mut Vec<String>) {
+    use syntax::*;
+    fn walk(expr: &mut Expr, bound: &mut Vec<String>) {
+        free_names_are_consts(expr, bound)
+    }
+    match &mut expr.kind {
+        ExprKind::Var(name) => {
+            if !bound.contains(name) && !matches!(name.as_str(), "true" | "false" | "null") {
+                expr.kind = ExprKind::Const(name.clone());
+            }
+        }
+        ExprKind::Values | ExprKind::Lit(_) | ExprKind::Const(_) => {}
+        ExprKind::Ctor { body, .. } => match body {
+            None => {}
+            Some(CtorBody::Record { fields, base }) => {
+                fields.iter_mut().for_each(|f| walk(&mut f.value, bound));
+                if let Some(base) = base {
+                    walk(base, bound);
+                }
+            }
+            Some(CtorBody::Tuple(args)) => args.iter_mut().for_each(|a| walk(&mut a.value, bound)),
+            Some(CtorBody::Array(items)) => items.iter_mut().for_each(|e| walk(e, bound)),
+        },
+        ExprKind::Record { fields, base } => {
+            fields.iter_mut().for_each(|f| walk(&mut f.value, bound));
+            if let Some(base) = base {
+                walk(base, bound);
+            }
+        }
+        ExprKind::Array(items) => items.iter_mut().for_each(|e| walk(e, bound)),
+        ExprKind::Field(of, _) | ExprKind::Position(of, _) | ExprKind::Cast(of, _) | ExprKind::Unary(_, of) => {
+            walk(of, bound)
+        }
+        ExprKind::Index(of, index) => {
+            walk(of, bound);
+            walk(index, bound);
+        }
+        ExprKind::Method { receiver, args, .. } => {
+            walk(receiver, bound);
+            args.iter_mut().for_each(|a| walk(a, bound));
+        }
+        ExprKind::Closure(closure) => {
+            let closure = Rc::make_mut(closure);
+            let mark = bound.len();
+            closure.params.iter().for_each(|p| pattern_names(p, bound));
+            walk(&mut closure.body, bound);
+            bound.truncate(mark);
+        }
+        ExprKind::Binary(_, a, b)
+        | ExprKind::Assign {
+            target: a, value: b, ..
+        } => {
+            walk(a, bound);
+            walk(b, bound);
+        }
+        ExprKind::If { branches, otherwise } => {
+            for (cond, then) in branches {
+                walk(cond, bound);
+                walk(then, bound);
+            }
+            walk(otherwise, bound);
+        }
+        ExprKind::Match { scrutinee, arms } => {
+            walk(scrutinee, bound);
+            for arm in arms {
+                let mark = bound.len();
+                pattern_names(&arm.pattern, bound);
+                if let Some(guard) = &mut arm.guard {
+                    walk(guard, bound);
+                }
+                walk(&mut arm.body, bound);
+                bound.truncate(mark);
+            }
+        }
+        ExprKind::Matches(subject, _) => walk(subject, bound),
+    }
+}
+
+/// Adds the names that a pattern binds to `names`.
+fn pattern_names(p: &syntax::Pattern, names: &mut Vec<String>) {
+    use syntax::*;
+    match &p.kind {
+        PatternKind::Wild | PatternKind::Lit(_) => {}
+        PatternKind::Bind(name) => names.push(name.clone()),
+        PatternKind::At(name, inner) => {
+            names.push(name.clone());
+            pattern_names(inner, names);
+        }
+        PatternKind::Or(all) => all.iter().for_each(|p| pattern_names(p, names)),
+        PatternKind::Ctor { body, .. } => match body {
+            None => {}
+            Some(PatBody::Record { fields, .. }) => fields.iter().for_each(|f| pattern_names(&f.pattern, names)),
+            Some(PatBody::Tuple { args, .. }) => args.iter().for_each(|a| pattern_names(&a.pattern, names)),
+            Some(PatBody::Array { items, .. }) => items.iter().for_each(|p| pattern_names(p, names)),
+        },
+        PatternKind::Record { fields, .. } => fields.iter().for_each(|f| pattern_names(&f.pattern, names)),
+        PatternKind::Array { items, .. } => items.iter().for_each(|p| pattern_names(p, names)),
+    }
 }
 
 /// The values of the sources, in order, as a lazy stream. Each source is only read, and parsed, when the stream
@@ -170,6 +282,7 @@ fn visit_names(expr: &mut Expr, visit: &mut dyn FnMut(&mut String, crate::diagno
     let pos = expr.pos;
     match &mut expr.kind {
         ExprKind::Values | ExprKind::Var(_) | ExprKind::Lit(_) => {}
+        ExprKind::Const(name) => visit(name, pos),
         ExprKind::Ctor { name, body } => {
             visit(name, pos);
             match body {

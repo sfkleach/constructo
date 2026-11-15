@@ -316,6 +316,8 @@ pub fn eval(expr: &Expr, env: &Env, values: &mut Option<Stream>) -> R<Val> {
             }
             None => at_query(pos, format!("{} is not bound", name)),
         },
+        // A const of the query is followed as a const in the data is, to its value and its type.
+        ExprKind::Const(name) => one(deref(&made(tagged(name, None), pos, &query_src(), false))?),
         ExprKind::Lit(lit) => {
             let kind = match lit {
                 Lit::Nat(t) => ValueKind::Nat(t.clone()),

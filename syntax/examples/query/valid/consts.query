@@ -1,0 +1,3 @@
+// A typed query names the consts of its types; origin is declared in shapes.types.
+// output: { last: origin, is_origin: true, moved: Point { x: +5, y: +0 } };
+#values.filter_match(|Poly[_, p]| { last: p, is_origin: p == origin, moved: Point { x: +5, ..origin } })

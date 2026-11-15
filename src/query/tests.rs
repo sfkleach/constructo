@@ -7,7 +7,7 @@ use crate::values_text::render;
 /// Runs a query over the values in `input`, and gives the output with each value compacted and on a line, or the
 /// first error with what was written before it.
 fn query(input: &str, text: &str) -> Result<String, String> {
-    let expr = prepare(text).map_err(|d| format!("before any value: {}", d))?;
+    let expr = prepare(text, false).map_err(|d| format!("before any value: {}", d))?;
     let input = input.to_string();
     let source: Box<dyn FnOnce() -> Result<Source, String>> = Box::new(move || {
         Ok(Source {
@@ -399,7 +399,7 @@ fn a_const_reference_needs_the_types() {
 
 /// Runs a typed query over the values in `input`, with the declarations in `types`, as `query` does.
 fn typed(types: &str, input: &str, text: &str, type_text: Option<&str>) -> Result<String, String> {
-    let expr = prepare(text).map_err(|d| format!("before any value: {}", d))?;
+    let expr = prepare(text, true).map_err(|d| format!("before any value: {}", d))?;
     let sources = vec![
         crate::prelude_source(),
         Source {
@@ -881,4 +881,63 @@ fn a_type_that_is_given_still_wins() {
         typed(types, "Pair(1.5);", "#values.map(|p| p.other)", Some("Pair<Float>")).unwrap(),
         "0.0;"
     );
+}
+
+// The consts of the types, which a typed query may name in its expressions.
+
+#[test]
+fn a_typed_query_names_a_const() {
+    assert_eq!(typed_ok(SHAPES, "Dot;", "#values.map(|s| origin)"), "T(a: 3);");
+    assert_eq!(
+        typed_ok(SHAPES, "Dot;", "#values.map(|s| origin.b)"),
+        "Circle { r: 0.0 };"
+    );
+    assert_eq!(
+        typed_ok(SHAPES, "origin; T(a: 4);", "#values.map(|t| t == origin)"),
+        "true; false;"
+    );
+}
+
+#[test]
+fn a_generic_const_is_named_for_its_use() {
+    let types = "enum Box<T> = Box(T);\nconst nothing<T>: Option<T> = None;";
+    assert_eq!(
+        typed_ok(types, "Box(1);", "#values.map(|b| nothing.is_none())"),
+        "true;"
+    );
+}
+
+#[test]
+fn a_binding_hides_a_const_of_the_same_name() {
+    assert_eq!(typed_ok(SHAPES, "Dot;", "#values.map(|origin| origin)"), "Dot;");
+    assert_eq!(
+        typed_ok(SHAPES, "Dot;", "#values.map(|s| match s { origin => origin })"),
+        "Dot;"
+    );
+}
+
+#[test]
+fn a_const_is_compared_with_a_guard_not_a_pattern() {
+    // A lower-case name in a pattern always binds, so that a pattern means the same typed and untyped.
+    assert_eq!(
+        typed_ok(
+            SHAPES,
+            "origin; T(a: 4);",
+            "#values.map(|t| match t { u if u == origin => 1, _ => 2 })"
+        ),
+        "1; 2;"
+    );
+}
+
+#[test]
+fn a_name_that_is_neither_bound_nor_a_const_is_an_error() {
+    assert!(typed_err(SHAPES, "Dot;", "#values.map(|s| oops)")
+        .contains("oops is not bound by any pattern, nor a const of the types"));
+}
+
+#[test]
+fn an_untyped_query_cannot_name_a_const() {
+    assert!(err("Dot;", "#values.map(|s| origin)")
+        .contains("origin is not bound by any pattern; if it is a const, supply the types that declare it"));
+    assert!(err("Dot;", "#values.map(|s| shapes::origin)").contains("shapes::origin is a const, which needs the types"));
 }

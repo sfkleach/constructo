@@ -676,9 +676,11 @@ fn main() -> ExitCode {
                 .expect("the query subcommand was given");
             let from_file = config.check_options();
             let experimental = experimental(from_file.experimental, &feature_changes(query_matches));
-            // The query is read and checked before any input is looked at, so a mistake in it is reported at once.
-            let parsed = match query::prepare(&expr) {
-                Ok(parsed) => parsed,
+            // The query is read before any input is looked at, so a mistake in it is reported at once. It is checked
+            // once it is known whether it is typed, since a typed query may refer to the consts of its types; telling
+            // that reads only the first token of a regular file, and reports nothing.
+            let read = match query::parser::parse_query(&expr) {
+                Ok(read) => read,
                 Err(diagnostic) => {
                     eprintln!("{}", diagnostic);
                     return ExitCode::from(EXIT_USAGE);
@@ -700,6 +702,13 @@ fn main() -> ExitCode {
                     Err(_) => break,
                 }
             }
+            let parsed = match query::check(read, typed) {
+                Ok(parsed) => parsed,
+                Err(diagnostic) => {
+                    eprintln!("{}", diagnostic);
+                    return ExitCode::from(EXIT_USAGE);
+                }
+            };
             if !typed {
                 // The options for the types are refused and not ignored, since they would do nothing without a word.
                 let given = TYPING_OPTIONS
