@@ -8,7 +8,7 @@ field while keeping the rest need the same paths. The decision is what kind of l
 from a stream of values and to transform it.
 
 This record settles the shape of the language. The command is `query`. Its command line and the remaining details of
-the language are settled in the implementation task, `docs/tasks/2026-11-15-query-subcommand/query-subcommand.md`.
+the language are settled in the implementation task, `docs/tasks/done/2026-11-15-query-subcommand/query-subcommand.md`.
 
 ## Factors
 

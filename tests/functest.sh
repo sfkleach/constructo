@@ -2329,7 +2329,7 @@ rmdir "$conv_dir"
 echo ""
 
 echo "--- query ---"
-# `query` runs a Rust-like expression over #values. See docs/tasks/2026-11-15-query-subcommand/query-subcommand.md.
+# `query` runs a Rust-like expression over #values. See docs/tasks/done/2026-11-15-query-subcommand/query-subcommand.md.
 query_dir="$(mktemp -d)"
 printf 'Move { x: 1, y: 2 };\nQuit;\nMove { x: 3, y: 4 };\n' >"$query_dir/moves.values"
 printf '[1, 2];\n[];\n[5, 6, 7];\n' >"$query_dir/arrays.values"
