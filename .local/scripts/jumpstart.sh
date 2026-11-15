@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Installation script for setting up the development environment. It finds the operating system and runs the matching
-# script from jumpstart.d/, whose name is <os>-jumpstart.sh.
+# script from jumpstart.d/, whose name is <os>-jumpstart.sh. Each of those installs the packages of its operating
+# system and then runs jumpstart.d/rust-toolchain.sh, which is shared.
 
 set -e
 
