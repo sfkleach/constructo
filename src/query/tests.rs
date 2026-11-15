@@ -807,3 +807,24 @@ fn typed_update_checks_the_parts_of_the_new_value() {
     .unwrap_err();
     assert!(e.starts_with("before any value"), "{}", e);
 }
+
+#[test]
+fn long_chains_are_limited_as_nesting_is() {
+    crate::test_support::on_a_main_sized_stack(|| {
+        for chain in [
+            format!("1{}", " + 1".repeat(300)),
+            format!("v{}", ".x".repeat(300)),
+            format!("v{}", "[0]".repeat(300)),
+            format!("v{}", " as Nat".repeat(300)),
+        ] {
+            let e = err("0;", &format!("@values.map(|v| {})", chain));
+            assert!(
+                e.starts_with("before any value") && e.contains("nested more than"),
+                "{}",
+                e
+            );
+        }
+        // A chain within the limit is fine.
+        assert_eq!(ok("0;", &format!("@values.map(|v| v{})", " + 1".repeat(150))), "150;");
+    });
+}
