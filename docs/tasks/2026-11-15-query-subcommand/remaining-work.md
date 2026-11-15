@@ -21,26 +21,17 @@ probed for being a types file.
 
 ## To do
 
-### Keep the generic arguments that the type check solves (`src/query/types.rs` line 96)
+### Done since: keep the generic arguments that the type check solves (`src/query/types.rs` line 96)
 
-With `enum Pair<T> = Pair(T, other: T);` and the input `Pair(1)`, the check infers `T = Nat`. Without `--type`, a typed
-query then rebuilds the value's type from its constructor alone, as `Pair<?>`, so `@values.map(|p| p.other)` fails in
-`default_value` instead of giving `0`.
-
-The recommended fix, which was proposed but not yet agreed:
-
-1. In `run_query` (`src/lib.rs`), load each value with `check_value_typed`, as `convert --to=json-typed` does, instead
-   of `check_value`, and take its type from `Typed::scheme(value, infer_limit)`, with the open types (`Ty::Gen`) filled
-   with `query::types::unknown()`.
-2. Carry that type in `QueryInputs::values`, as `(usize, Value, Option<Ty>)`, and use it in `run_typed` in place of
-   `types.type_of(&value)`. `--type`, when given, still wins.
-3. Add a test that `Pair(1)` gives `0` for `p.other`, and one that a part of an `Option<Float>` field is a `Float`.
-
-The alternative, inferring the arguments again in the query from the value's parts, was rejected as duplicating the
-type checker. The cost of the fix is that `check_value_typed` records the type of every part of each value while it
-checks it, which is freed after each value.
+Without `--type`, `run_query` (`src/lib.rs`) now checks each value with `check_value_typed` and carries the type that
+`Typed::scheme` infers, with its open types unknown, in `QueryInputs::values`. `run_typed` takes `--type` first, then
+that type, and only then the type that the constructor tells. So `Pair(1)` of `enum Pair<T> = Pair(T, other: T);` gives
+`0` for `p.other`, a part of an `Option<Float>` field is a `Float`, and a bare `[1, 2.5]` is a `[Float]`. A field
+that is misspelt in a bare record is still found only when the query reaches it, since the query is checked statically
+only against `--type`. The spec says how a value's type is decided.
 
 ### Then
 
-- Run `just test`, push `query_subcommand`, and reply to each of CodeRabbit's comments on the PR, saying what was done
+- Push `query_subcommand`, and reply to each of CodeRabbit's comments on the PR, saying what was done
   and, for the FIFO comment, that the quick win covered it.
+- Move this task folder to `docs/tasks/done/`, as the last commit before the merge.

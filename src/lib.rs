@@ -952,24 +952,28 @@ fn run_query(
             continue;
         }
         for (position, value) in found.iter().enumerate() {
-            let failure = match unresolved(index, position) {
-                Some(diagnostic) => Some(diagnostic),
+            let checked = match unresolved(index, position) {
+                Some(diagnostic) => Err(diagnostic),
                 None => {
                     let checked = match &target {
-                        Some(target) => typecheck::check_value_against(env, options.widening, value, target),
-                        None => check_value(env, options.widening, value),
+                        // The type that --type gives is the type of every value, so nothing is kept from the check.
+                        Some(target) => {
+                            typecheck::check_value_against(env, options.widening, value, target).map(|_| None)
+                        }
+                        None => check_value_typed(env, options.widening, value)
+                            .map(|typed| inferred_type(&typed, value, options.infer_limit)),
                     };
-                    checked
-                        .err()
-                        .map(|e| Diagnostic::new(&sources[index].name, e.pos, e.message))
+                    checked.map_err(|e| Diagnostic::new(&sources[index].name, e.pos, e.message))
                 }
             };
-            if let Some(diagnostic) = failure {
-                outcomes[index] = Outcome::Failed;
-                diagnostics.push((index, diagnostic));
-                return;
+            match checked {
+                Ok(ty) => values.push((index, value.clone(), ty)),
+                Err(diagnostic) => {
+                    outcomes[index] = Outcome::Failed;
+                    diagnostics.push((index, diagnostic));
+                    return;
+                }
             }
-            values.push((index, value.clone()));
         }
     }
     let types = query::types::Types::from_parsed(parsed_sources, everything);
@@ -985,6 +989,17 @@ fn run_query(
     if let Err(e) = (querying.run)(inputs) {
         querying.failure = Some(e);
     }
+}
+
+/// The type that the check inferred for a top-level value, with the types that the value leaves open, such as the `T` of
+/// `None`, as the unknown type of a query. It is `None` if the type is too large to work out, and the query then makes
+/// do with what the value tells of its type.
+fn inferred_type(typed: &typecheck::Typed, value: &ast::Value, infer_limit: usize) -> Option<Ty> {
+    let scheme = typed.scheme(value, infer_limit)?;
+    Some(typecheck::fill(
+        &scheme.ty,
+        &vec![query::types::unknown(); scheme.arity],
+    ))
 }
 
 /// Describes the type of each const that has one: the declared types, and the inferred ones that could be worked out.

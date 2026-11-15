@@ -846,3 +846,39 @@ fn conditions_within_conditions_are_read_in_reasonable_time() {
         start.elapsed()
     );
 }
+
+// The types that the check infers for a value are kept, so that the arguments of a generic enum are known.
+
+#[test]
+fn the_arguments_that_the_check_infers_are_kept() {
+    let types = "enum Pair<T> = Pair(T, other: T);";
+    assert_eq!(typed_ok(types, "Pair(1);", "@values.map(|p| p.other)"), "0;");
+}
+
+#[test]
+fn a_part_of_an_option_of_a_float_is_a_float() {
+    let types = "enum Holder<T> = Holder { a: T, b: Option<T> };";
+    assert_eq!(
+        typed_ok(
+            types,
+            "Holder { a: 1.5, b: Some(2) };",
+            "@values.filter_map(|h| h.b).filter(|f| f > 1.5)"
+        ),
+        "2;"
+    );
+}
+
+#[test]
+fn a_bare_value_has_the_type_that_the_check_infers() {
+    // The elements of an array are widened to Float together, so the Nat at its start is a Float.
+    assert_eq!(typed_ok("", "[1, 2.5];", "@values.map(|a| a[0] > 0.5)"), "true;");
+}
+
+#[test]
+fn a_type_that_is_given_still_wins() {
+    let types = "enum Pair<T> = Pair(T, other: T);";
+    assert_eq!(
+        typed(types, "Pair(1.5);", "@values.map(|p| p.other)", Some("Pair<Float>")).unwrap(),
+        "0.0;"
+    );
+}
