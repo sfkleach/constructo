@@ -100,8 +100,8 @@ cache and never touches the network, so a tag that is moved later is noticed and
 
 ## Later
 
-Selecting sub-values from a file or stdin, which needs a path notation. Files
-that hold both types and values may also be considered.
+Files that hold both types and values may be considered. Selecting sub-values from a file or stdin, which was
+listed here, is done by `constructo query`: see `docs/specs/query-command.md`.
 
 Syntax: see `syntax/dt_grammar_tabatkins.txt`, `syntax/dv_grammar_tabatkins.txt`
 and `syntax/examples/`.

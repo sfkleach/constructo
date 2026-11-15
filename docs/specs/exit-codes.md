@@ -101,6 +101,23 @@ the same errors have the same codes.
   projects are found, as for `check`. As for `check`, an unreadable input ends the run at once, and a syntax error in an
   input that comes before it is found first.
 
+## `constructo query`
+
+[The query command](query-command.md) judges the inputs and the values that the query meets, so what gives 1 is in the
+data, and 2 is the query, the command and the setup. A typed query judges the types and the values as `check` does,
+and the same errors have the same codes.
+
+- **Exit code 0:** the query ran to the end, whatever it wrote, and `--help`.
+- **Exit code 1:** a syntax error in an input, a types file among the values of an untyped query, the errors of `check`
+  for a typed query, and an error at a value as the query runs, such as a missing field, an index out of range, a
+  number of the wrong kind or a `Nat` below zero. The values before an error at a value have been written.
+- **Exit code 2:** a mistake in the query, which is found before any input is read: its syntax, a name that is not
+  bound, a closure's parameter that may not match, branches with no common type, and, typed, an unknown constructor,
+  a `--type` that is not a type, and what `--type` lets the types find, such as a field that the type does not have.
+  Also an option or an argument that is not understood, an option for the types in an untyped query, an input that
+  cannot be read, an output that cannot be written, and, typed, the problems with a project-file or with how projects
+  are found, as for `check`.
+
 ## `constructo project`
 
 - `constructo project update` exits with 0 when it has written the lock or found it up to date, and with 2 for any
