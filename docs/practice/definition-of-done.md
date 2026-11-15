@@ -9,7 +9,8 @@
 - The grammars in `syntax/`, the examples in `syntax/examples/` and the
   documents in `docs/` agree with each other and with the implementation.
 - Design decisions made during the task are recorded in `docs/decisions/`.
-- The task document is moved to `docs/tasks/done/`.
+- The task document is moved to `docs/tasks/done/`, in the last commit before the PR is merged, after its review has
+  been answered, and not when the PR is opened, since the review is part of the task.
 
 ### Automated testing
 

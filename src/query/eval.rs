@@ -2,7 +2,7 @@
 //!
 //! What the query itself fixes has been checked by `check` before this runs. Here every value is checked as it
 //! arrives, by its kind, and a mismatch is an error at that value. See the settled questions of
-//! `docs/tasks/done/2026-11-15-query-subcommand/query-subcommand.md`.
+//! `docs/tasks/2026-11-15-query-subcommand/query-subcommand.md`.
 
 use super::check::Fixed;
 use super::number::{self, kind_of};

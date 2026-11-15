@@ -1,5 +1,5 @@
 //! The syntax tree of a query. See `docs/decisions/0044-queries-are-rust-like-expressions-over-a-stream-of-values.md`
-//! and the settled questions of `docs/tasks/done/2026-11-15-query-subcommand/query-subcommand.md`.
+//! and the settled questions of `docs/tasks/2026-11-15-query-subcommand/query-subcommand.md`.
 
 use crate::diagnostics::Pos;
 use std::rc::Rc;
