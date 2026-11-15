@@ -12,8 +12,9 @@ use constructo::typed_files::{first_token, types_end, FirstToken};
 use constructo::values_text::render;
 use constructo::verify::{read_lock, update_lock_with, verify_lock_with};
 use constructo::{
-    check_in_projects, convert_typed, convert_typed_back, convert_typed_lines, source_kind, syntax_error, CheckOptions,
-    Config, Experimental, ImportInfo, InputFile, Layout, Outcome, Project, ProjectInfo, ProjectSet, Source, SourceKind,
+    check_in_projects, convert_typed, convert_typed_back, convert_typed_lines, query_typed, source_kind, syntax_error,
+    CheckOptions, Config, Experimental, ImportInfo, InputFile, Layout, Outcome, Project, ProjectInfo, ProjectSet,
+    QueryTypedError, Source, SourceKind,
 };
 use std::collections::{HashSet, VecDeque};
 use std::ffi::OsString;
@@ -665,7 +666,7 @@ fn main() -> ExitCode {
             type_expr,
             compact,
             stdin,
-            typing: _,
+            typing,
             experimental: _,
             no_experimental: _,
             files,
@@ -673,23 +674,69 @@ fn main() -> ExitCode {
             let query_matches = matches
                 .subcommand_matches("query")
                 .expect("the query subcommand was given");
-            // The typed mode is still to come, so its options are refused rather than ignored without a word.
-            let typing_given = TYPING_OPTIONS
-                .iter()
-                .find(|id| query_matches.value_source(id) == Some(clap::parser::ValueSource::CommandLine));
-            if let Some(id) = typing_given {
-                eprintln!(
-                    "ERROR: --{} is not available yet: queries are untyped for now",
-                    id.replace('_', "-")
-                );
-                return ExitCode::from(EXIT_USAGE);
+            let from_file = config.check_options();
+            let experimental = experimental(from_file.experimental, &feature_changes(query_matches));
+            // The query is typed when there are types: a project, a type for the values, or a types file among the
+            // files. Only the start of each file is read to tell.
+            let mut typed = typing.project.is_some() || type_expr.is_some();
+            for path in &files {
+                match first_token_of(path) {
+                    Ok(FirstToken::Types) => typed = true,
+                    Ok(_) => {}
+                    // The file is reported when it is read, after the query is checked.
+                    Err(_) => break,
+                }
             }
-            if type_expr.is_some() {
-                eprintln!("ERROR: --type is not available yet: queries are untyped for now");
-                return ExitCode::from(EXIT_USAGE);
+            if !typed {
+                // The options for the types are refused and not ignored, since they would do nothing without a word.
+                let given = TYPING_OPTIONS
+                    .iter()
+                    .find(|id| query_matches.value_source(id) == Some(clap::parser::ValueSource::CommandLine));
+                if let Some(id) = given {
+                    eprintln!(
+                        "ERROR: --{} applies only to a typed query, which has a project, --type or a types file",
+                        id.replace('_', "-")
+                    );
+                    return ExitCode::from(EXIT_USAGE);
+                }
+                return query_files(&expr, compact, stdin, experimental, &files);
             }
-            let experimental = experimental(config.check_options().experimental, &feature_changes(query_matches));
-            query_files(&expr, compact, stdin, experimental, &files)
+            let TypingArgs {
+                prelude,
+                no_prelude,
+                widening,
+                no_widening,
+                allow_refs,
+                no_allow_refs,
+                infer_limit,
+                default_limit,
+                dev,
+                no_dev,
+                project,
+            } = typing;
+            let options = CheckOptions {
+                type_check: true,
+                widening: setting(widening, no_widening, from_file.widening),
+                continue_after_error: false,
+                allow_refs: setting(allow_refs, no_allow_refs, from_file.allow_refs),
+                infer_limit: infer_limit.unwrap_or(from_file.infer_limit),
+                default_limit: default_limit.unwrap_or(from_file.default_limit),
+                experimental,
+            };
+            let load_prelude = setting(prelude, no_prelude, config.prelude());
+            let dev = setting(dev, no_dev, config.dev());
+            let parsed = match query::prepare(&expr) {
+                Ok(parsed) => parsed,
+                Err(diagnostic) => {
+                    eprintln!("{}", diagnostic);
+                    return ExitCode::from(EXIT_USAGE);
+                }
+            };
+            let set = match load_projects(project.as_deref(), load_prelude, dev, cache.as_deref()) {
+                Ok(set) => set,
+                Err(code) => return code,
+            };
+            query_typed_files(&parsed, type_expr.as_deref(), compact, stdin, &options, &set, &files)
         }
         Command::Check {
             stdin,
@@ -985,6 +1032,63 @@ fn query_files(text: &str, compact: bool, stdin: bool, experimental: Experimenta
             }
         }
         Err(RunError::Write(e)) => write_failure(&e),
+    }
+}
+
+/// Runs a typed query. The inputs are those of `check`, read in the same way, and every value is checked against the
+/// types before the query runs, so an error in the inputs is reported before anything is written.
+fn query_typed_files(
+    expr: &query::syntax::Expr,
+    type_text: Option<&str>,
+    compact: bool,
+    stdin: bool,
+    options: &CheckOptions,
+    set: &ProjectSet,
+    files: &[PathBuf],
+) -> ExitCode {
+    let sources = match read_sources(set, files, stdin, options.experimental) {
+        Ok(sources) => sources,
+        Err(code) => return code,
+    };
+    let layout = layout(set, sources.len());
+    let names = query::constructor_names(expr);
+    let mut out = std::io::BufWriter::new(std::io::stdout().lock());
+    let result = query_typed(&sources, &layout, options, &names, type_text, &mut |inputs| {
+        query::run_typed(expr, inputs, &mut |value| {
+            out.write_all(render(value, compact).as_bytes())
+        })
+    });
+    match result {
+        Ok(()) => match out.flush() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => write_failure(&e),
+        },
+        Err(QueryTypedError::Invalid(diagnostics)) => {
+            for diagnostic in &diagnostics {
+                eprintln!("{}", diagnostic);
+            }
+            ExitCode::from(EXIT_ERRORS)
+        }
+        Err(QueryTypedError::Query(diagnostic)) => {
+            eprintln!("{}", diagnostic);
+            ExitCode::from(EXIT_USAGE)
+        }
+        Err(QueryTypedError::Run(RunError::Failed(failure))) => {
+            // The error is about the inputs or the query, so a failure to write what came before it is not reported
+            // over it.
+            let _ = out.flush();
+            match failure {
+                QueryFailure::Error(diagnostic) => {
+                    eprintln!("{}", diagnostic);
+                    ExitCode::from(EXIT_ERRORS)
+                }
+                QueryFailure::Input(message) => {
+                    eprintln!("ERROR: {}", message);
+                    ExitCode::from(EXIT_USAGE)
+                }
+            }
+        }
+        Err(QueryTypedError::Run(RunError::Write(e))) => write_failure(&e),
     }
 }
 

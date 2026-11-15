@@ -7,8 +7,11 @@
 use super::number::{self, kind_of};
 use super::parser::QUERY_NAME;
 use super::syntax::*;
+use super::types::{known, Types};
 use crate::ast::{Argument, Member, TaggedBody, Value, ValueKind};
 use crate::diagnostics::{Diagnostic, Pos};
+use crate::typecheck::{bind_arguments, Ty};
+use std::cell::RefCell;
 use std::rc::Rc;
 
 /// A value with where it came from: the name of its source and, through its position, where it is in that source.
@@ -19,6 +22,33 @@ pub struct Item {
     /// Whether the value is a literal of the query, or made only from literals, which adapts to the kind of number it
     /// meets, as `1` does in `m.count + 1`.
     pub lit: bool,
+    /// The type of the value, when the query is typed and the type is known.
+    pub ty: Option<Ty>,
+    /// The index of the source that the value is in, which says how its names are shown. A value that the query makes
+    /// is shown as if it were in the source of the query's names.
+    pub file: usize,
+}
+
+/// What a typed query knows of the types, while it runs.
+pub struct Typing {
+    pub types: Types,
+    pub names_source: usize,
+}
+
+thread_local! {
+    static TYPING: RefCell<Option<Rc<Typing>>> = const { RefCell::new(None) };
+}
+
+/// Runs `f` with the types that a typed query knows, or with none for an untyped one.
+pub fn with_typing<T>(typing: Option<Rc<Typing>>, f: impl FnOnce() -> T) -> T {
+    let saved = TYPING.with(|t| std::mem::replace(&mut *t.borrow_mut(), typing));
+    let result = f();
+    TYPING.with(|t| *t.borrow_mut() = saved);
+    result
+}
+
+fn typing() -> Option<Rc<Typing>> {
+    TYPING.with(|t| t.borrow().clone())
 }
 
 /// Why a query stopped.
@@ -90,15 +120,24 @@ fn made(kind: ValueKind, pos: Pos, src: &Rc<str>, lit: bool) -> Item {
         value: Value { pos, kind },
         src: src.clone(),
         lit,
+        ty: None,
+        file: typing().map_or(0, |t| t.names_source),
     }
 }
 
 /// A part of an item, which comes from the same source.
 fn part(of: &Item, value: &Value) -> Item {
+    typed_part(of, value, None)
+}
+
+/// A part of an item, with its type if that is known.
+fn typed_part(of: &Item, value: &Value, ty: Option<Ty>) -> Item {
     Item {
         value: value.clone(),
         src: of.src.clone(),
         lit: of.lit,
+        ty,
+        file: of.file,
     }
 }
 
@@ -116,12 +155,15 @@ fn boolean(b: bool, pos: Pos) -> Item {
 fn some(item: Item) -> Item {
     let pos = item.value.pos;
     let src = item.src.clone();
+    let file = item.file;
     let arg = Argument {
         name: None,
         pos,
         value: item.value,
     };
-    made(tagged("Some", Some(TaggedBody::Tuple(vec![arg]))), pos, &src, false)
+    let mut result = made(tagged("Some", Some(TaggedBody::Tuple(vec![arg]))), pos, &src, false);
+    result.file = file;
+    result
 }
 
 fn none(pos: Pos) -> Item {
@@ -131,12 +173,17 @@ fn none(pos: Pos) -> Item {
 /// The name of a constructor or const of the prelude, with `true` and `True` made one, and `null` and `None`, since
 /// the prelude declares each const as the other.
 pub fn canonical(name: &str) -> &str {
-    match name {
+    match name.strip_suffix("@constructo.prelude").unwrap_or(name) {
         "True" => "true",
         "False" => "false",
         "null" => "None",
         other => other,
     }
+}
+
+/// A name as a message shows it, without the project that a typed query resolved it to.
+fn shown(name: &str) -> &str {
+    name.split('@').next().unwrap_or(name)
 }
 
 /// Describes the kind of a value for a message.
@@ -149,8 +196,17 @@ pub fn describe(value: &Value) -> String {
         ValueKind::Array(_) => "an array".to_string(),
         ValueKind::Record(_) => "a record".to_string(),
         ValueKind::Tagged { name, .. } if matches!(canonical(name), "true" | "false") => "a Bool".to_string(),
-        ValueKind::Tagged { name, .. } if crate::convert::is_const_name(name) => format!("the const {}", name),
-        ValueKind::Tagged { name, .. } => format!("the constructor {}", name),
+        ValueKind::Tagged { name, .. } if crate::convert::is_const_name(name) => format!("the const {}", shown(name)),
+        ValueKind::Tagged { name, .. } => format!("the constructor {}", shown(name)),
+    }
+}
+
+/// Describes an item, with the kind of a number that its type gives it.
+fn describe_item(item: &Item) -> String {
+    match num(item) {
+        Some((NumKind::Int, _)) => "an Int".to_string(),
+        Some((kind, _)) => format!("a {}", kind.name()),
+        None => describe(&item.value),
     }
 }
 
@@ -166,10 +222,23 @@ fn as_bool(item: &Item) -> R<bool> {
 }
 
 fn number(item: &Item) -> Option<&str> {
-    match &item.value.kind {
-        ValueKind::Nat(t) | ValueKind::Int(t) | ValueKind::Float(t) => Some(t),
-        _ => None,
-    }
+    num(item).map(|(_, text)| text)
+}
+
+/// The kind and text of a number. The kind is the one that the type gives it, if that is known, so that a `5` in a
+/// `Float` field is a `Float`, and otherwise the one that its text gives it.
+fn num(item: &Item) -> Option<(NumKind, &str)> {
+    let text = match &item.value.kind {
+        ValueKind::Nat(t) | ValueKind::Int(t) | ValueKind::Float(t) => t.as_str(),
+        _ => return None,
+    };
+    let kind = match &item.ty {
+        Some(Ty::Nat) => NumKind::Nat,
+        Some(Ty::Int) => NumKind::Int,
+        Some(Ty::Float) => NumKind::Float,
+        _ => kind_of(text),
+    };
+    Some((kind, text))
 }
 
 fn num_value(text: String, pos: Pos, src: &Rc<str>, lit: bool) -> Item {
@@ -192,8 +261,7 @@ fn widens(from: NumKind, to: NumKind) -> bool {
 /// Brings two numbers to one kind, adapting a literal to the other's kind. Two values of different kinds are an error
 /// at the value that is not a literal, which suggests the cast.
 fn unify(a: &Item, b: &Item, verb: &str) -> R<(NumKind, String, String)> {
-    let (ta, tb) = (number(a).expect("checked"), number(b).expect("checked"));
-    let (ka, kb) = (kind_of(ta), kind_of(tb));
+    let ((ka, ta), (kb, tb)) = (num(a).expect("checked"), num(b).expect("checked"));
     if ka == kb {
         return Ok((ka, ta.to_string(), tb.to_string()));
     }
@@ -305,17 +373,17 @@ pub fn eval(expr: &Expr, env: &Env, values: &mut Option<Stream>) -> R<Val> {
             match op {
                 UnOp::Not => one(boolean(!as_bool(&operand)?, pos)),
                 UnOp::Neg => {
-                    let Some(text) = number(&operand) else {
+                    let Some((kind, text)) = num(&operand) else {
                         return at_item(
                             &operand,
                             format!("Expected a number but found {}", describe(&operand.value)),
                         );
                     };
                     // A literal Nat that is negated is an Int literal, as `- 5` is `-5`.
-                    let text = if operand.lit && kind_of(text) == NumKind::Nat {
+                    let text = if operand.lit && kind == NumKind::Nat {
                         format!("-{}", text)
                     } else {
-                        number::negate(text).map_err(num_error(&operand))?
+                        number::negate(text, kind).map_err(num_error(&operand))?
                     };
                     one(num_value(text, operand.value.pos, &operand.src, operand.lit))
                 }
@@ -324,12 +392,16 @@ pub fn eval(expr: &Expr, env: &Env, values: &mut Option<Stream>) -> R<Val> {
         ExprKind::Binary(op, left, right) => binary(*op, left, right, pos, env, values),
         ExprKind::Cast(operand, to) => {
             let operand = item(operand, env, values)?;
-            let Some(text) = number(&operand) else {
+            let Some((kind, text)) = num(&operand) else {
                 return at_item(
                     &operand,
                     format!("Only a number can be cast, and this is {}", describe(&operand.value)),
                 );
             };
+            // A cast to the same kind does nothing, so the number keeps its text and its type.
+            if kind == *to {
+                return one(Item { lit: false, ..operand });
+            }
             let text = number::cast(text, *to).map_err(num_error(&operand))?;
             one(num_value(text, operand.value.pos, &operand.src, false))
         }
@@ -500,23 +572,123 @@ fn record(
 
 /// Whether a value is a reference to a const other than those of the prelude, which cannot be seen into without the
 /// types.
-fn const_reference(item: &Item) -> R<()> {
-    if let ValueKind::Tagged { name, body: None } = &item.value.kind {
-        if crate::convert::is_const_name(name) && !matches!(name.as_str(), "true" | "false" | "null") {
+fn deref(item: &Item) -> R<Item> {
+    let mut at = item.clone();
+    // A const can refer to another, but not to itself, so the chain ends; the limit is a defensive check.
+    for _ in 0..crate::limits::MAX_TYPED_NESTING {
+        let ValueKind::Tagged { name, body: None } = &at.value.kind else {
+            return Ok(at);
+        };
+        if !crate::convert::is_const_name(name) || matches!(canonical(name), "true" | "false" | "None") {
+            return Ok(at);
+        }
+        let Some(typing) = typing() else {
             return at_item(
-                item,
+                &at,
                 format!(
                     "{} is a const, which cannot be seen into without the types; supply the types",
-                    name
+                    shown(name)
                 ),
             );
+        };
+        let Some((value, ty)) = typing.types.constant(name) else {
+            return at_item(&at, format!("{} is not a const that the types declare", shown(name)));
+        };
+        at = Item {
+            value: value.clone(),
+            src: at.src.clone(),
+            lit: false,
+            ty: ty.clone(),
+            file: at.file,
+        };
+    }
+    at_item(item, "The chain of consts is too long to follow")
+}
+
+/// Which parameter of a tuple is wanted: by position, or by name.
+#[derive(Clone, Copy)]
+enum Param<'a> {
+    At(usize),
+    Named(&'a str),
+}
+
+/// An argument of a tuple constructor. Untyped, only what the text shows can be found: a positional argument by its
+/// position, and a named one by its name. Typed, the parameter is found however it was written, and the default is
+/// given for one that was left out.
+fn argument(of: &Item, ctor: &str, args: &[Argument], param: Param) -> R<Item> {
+    if let Some(typing) = typing() {
+        if let Some((params, tys)) = typing.types.tuple_params(ctor, of.ty.as_ref()) {
+            let index = match param {
+                Param::At(n) if n < params.len() => n,
+                Param::At(n) => return at_item(of, format!("{} has no parameter {}", shown(ctor), n)),
+                Param::Named(name) => match params.iter().position(|p| p.name.as_deref() == Some(name)) {
+                    Some(index) => index,
+                    None => return at_item(of, format!("{} has no parameter {}", shown(ctor), name)),
+                },
+            };
+            let (targets, _) = bind_arguments(of.value.pos, ctor, &params, args).or_else(|e| at_item(of, e.message))?;
+            let ty = Some(tys[index].clone()).filter(known);
+            return match targets.iter().position(|t| *t == index) {
+                Some(at) => Ok(typed_part(of, &args[at].value, ty)),
+                None => {
+                    let default = typing
+                        .types
+                        .default_value(&tys[index], of.value.pos)
+                        .or_else(|m| at_item(of, m))?;
+                    Ok(typed_part(of, &default, ty))
+                }
+            };
         }
     }
-    Ok(())
+    let positional: Vec<&Argument> = args.iter().filter(|a| a.name.is_none()).collect();
+    match param {
+        Param::At(n) => match positional.get(n) {
+            Some(a) => Ok(part(of, &a.value)),
+            None if args.iter().any(|a| a.name.is_some()) => at_item(
+                of,
+                format!(
+                    "This {} has {} positional argument(s), and without the types it cannot be known which \
+                     parameter is {}; supply the types",
+                    shown(ctor),
+                    positional.len(),
+                    n
+                ),
+            ),
+            None => at_item(of, format!("This {} has no argument {}", shown(ctor), n)),
+        },
+        Param::Named(name) => match args.iter().find(|a| a.name.as_deref() == Some(name)) {
+            Some(a) => Ok(part(of, &a.value)),
+            None => at_item(
+                of,
+                format!(
+                    "This {} does not give {} by name, and without the types it cannot be known whether it is \
+                     given by position or left to its default; supply the types",
+                    shown(ctor),
+                    name
+                ),
+            ),
+        },
+    }
+}
+
+/// The type of a field of a record, if the types give it.
+fn field_type(of: &Item, name: &str) -> Option<Ty> {
+    let typing = typing()?;
+    let fields = typing.types.record_fields(&of.value, of.ty.as_ref())?;
+    fields
+        .into_iter()
+        .find(|(n, _)| n == name)
+        .map(|(_, ty)| ty)
+        .filter(known)
+}
+
+/// The type of the elements of an array, if the types give it.
+fn element_type(of: &Item) -> Option<Ty> {
+    typing()?.types.element_type(&of.value, of.ty.as_ref()).filter(known)
 }
 
 fn field(of: &Item, name: &str) -> R<Item> {
-    const_reference(of)?;
+    let of = &deref(of)?;
     let members = match &of.value.kind {
         ValueKind::Record(ms) => ms,
         ValueKind::Tagged {
@@ -526,35 +698,23 @@ fn field(of: &Item, name: &str) -> R<Item> {
         ValueKind::Tagged {
             name: ctor,
             body: Some(TaggedBody::Tuple(args)),
-        } => {
-            return match args.iter().find(|a| a.name.as_deref() == Some(name)) {
-                Some(a) => Ok(part(of, &a.value)),
-                None => at_item(
-                    of,
-                    format!(
-                        "This {} does not give {} by name, and without the types it cannot be known whether it is \
-                         given by position or left to its default; supply the types",
-                        ctor, name
-                    ),
-                ),
-            };
-        }
+        } => return argument(of, ctor, args, Param::Named(name)),
         ValueKind::Tagged { name: ctor, body: None } => {
-            return at_item(of, format!("{} has no body, so it has no field {}", ctor, name))
+            return at_item(of, format!("{} has no body, so it has no field {}", shown(ctor), name))
         }
         _ => {
             return at_item(
                 of,
                 format!(
                     "{} has no fields, so it has no field {}",
-                    capitalised(&describe(&of.value)),
+                    capitalised(&describe_item(of)),
                     name
                 ),
             )
         }
     };
     match members.iter().find(|m| m.name == name) {
-        Some(m) => Ok(part(of, &m.value)),
+        Some(m) => Ok(typed_part(of, &m.value, field_type(of, name))),
         None => at_item(of, format!("This record has no field {}", name)),
     }
 }
@@ -568,35 +728,21 @@ fn capitalised(text: &str) -> String {
 }
 
 fn position(of: &Item, n: usize) -> R<Item> {
-    const_reference(of)?;
+    let of = &deref(of)?;
     let ValueKind::Tagged { name, body } = &of.value.kind else {
         return at_item(
             of,
             format!(
                 "{} has no arguments, so it has no argument {}",
-                capitalised(&describe(&of.value)),
+                capitalised(&describe_item(of)),
                 n
             ),
         );
     };
     let Some(TaggedBody::Tuple(args)) = body else {
-        return at_item(of, format!("{} has no tuple, so it has no argument {}", name, n));
+        return at_item(of, format!("{} has no tuple, so it has no argument {}", shown(name), n));
     };
-    let positional: Vec<&Argument> = args.iter().filter(|a| a.name.is_none()).collect();
-    match positional.get(n) {
-        Some(a) => Ok(part(of, &a.value)),
-        None if args.iter().any(|a| a.name.is_some()) => at_item(
-            of,
-            format!(
-                "This {} has {} positional argument(s), and without the types it cannot be known which parameter \
-                 is {}; supply the types",
-                name,
-                positional.len(),
-                n
-            ),
-        ),
-        None => at_item(of, format!("This {} has no argument {}", name, n)),
-    }
+    argument(of, name, args, Param::At(n))
 }
 
 /// The elements of an array, bare or as a constructor's body.
@@ -624,19 +770,19 @@ fn index_of(index: &Item) -> R<usize> {
 }
 
 fn element(of: &Item, index: &Item) -> R<Item> {
-    const_reference(of)?;
+    let of = &deref(of)?;
     let Some(items) = elements(of) else {
         return at_item(
             of,
             format!(
                 "{} is not an array, so it cannot be indexed",
-                capitalised(&describe(&of.value))
+                capitalised(&describe_item(of))
             ),
         );
     };
     let i = index_of(index)?;
     match items.get(i) {
-        Some(v) => Ok(part(of, v)),
+        Some(v) => Ok(typed_part(of, v, element_type(of))),
         None => at_item(
             of,
             format!("The index {} is out of range for an array of {}", i, items.len()),
@@ -698,7 +844,7 @@ fn into_stream(val: Val) -> R<Stream> {
         Val::Many(stream) => Ok(stream),
         Val::One(of) => match elements(&of) {
             Some(items) => {
-                let items: Vec<Item> = items.iter().map(|v| part(&of, v)).collect();
+                let items: Vec<Item> = items.iter().map(|v| typed_part(&of, v, element_type(&of))).collect();
                 Ok(Box::new(items.into_iter().map(Ok)))
             }
             None => at_item(
@@ -921,7 +1067,7 @@ fn value_method(of: Item, name: &str, args: &[Expr], pos: Pos, env: &Env, values
         let c = closure_arg(args, 0, name, pos)?;
         return one(update(c, env, of)?);
     }
-    const_reference(&of)?;
+    let of = deref(&of)?;
     if let Some(text) = string(&of) {
         let text = text.to_string();
         return match name {
@@ -961,14 +1107,26 @@ fn value_method(of: Item, name: &str, args: &[Expr], pos: Pos, env: &Env, values
         return match name {
             "len" => one(nat(items.len())),
             "is_empty" => one(boolean(items.is_empty(), pos)),
-            "first" => one(items.first().map(|v| some(part(&of, v))).unwrap_or_else(|| none(pos))),
-            "last" => one(items.last().map(|v| some(part(&of, v))).unwrap_or_else(|| none(pos))),
+            "first" => one(items
+                .first()
+                .map(|v| some(typed_part(&of, v, element_type(&of))))
+                .unwrap_or_else(|| none(pos))),
+            "last" => one(items
+                .last()
+                .map(|v| some(typed_part(&of, v, element_type(&of))))
+                .unwrap_or_else(|| none(pos))),
             "get" => {
                 let i = nat_arg(args, name, pos, env, values)?;
-                one(items.get(i).map(|v| some(part(&of, v))).unwrap_or_else(|| none(pos)))
+                one(items
+                    .get(i)
+                    .map(|v| some(typed_part(&of, v, element_type(&of))))
+                    .unwrap_or_else(|| none(pos)))
             }
             "iter" => {
-                let items: Vec<R<Item>> = items.iter().map(|v| Ok(part(&of, v))).collect();
+                let items: Vec<R<Item>> = items
+                    .iter()
+                    .map(|v| Ok(typed_part(&of, v, element_type(&of))))
+                    .collect();
                 Ok(Val::Many(Box::new(items.into_iter())))
             }
             _ => at_query(pos, format!("An array has no method {}", name)),
@@ -1046,29 +1204,46 @@ fn update(closure: &Closure, env: &Env, of: Item) -> R<Item> {
     let new = match op {
         None => new,
         Some(op) => {
-            let current = eval(target, &inner, &mut None)?;
-            let Val::One(current) = current else {
-                unreachable!("a path gives one value")
+            let Val::One(current) = eval(target, &inner, &mut None)? else {
+                return at_query(target.pos, "The target of an assignment must be one value");
             };
             arithmetic(*op, &current, &new, closure.body.pos)?
         }
     };
     let mut result = of.clone();
-    set_path(&mut result.value, &steps, new.value, &of)?;
+    set_path(&mut result.value, of.ty.clone(), &steps, &new, &of, closure.body.pos)?;
     result.lit = false;
     Ok(result)
 }
 
-fn set_path(at: &mut Value, steps: &[Step], new: Value, whole: &Item) -> R<()> {
-    let Some((step, rest)) = steps.split_first() else {
-        *at = new;
-        return Ok(());
-    };
+fn set_path(at: &mut Value, ty: Option<Ty>, steps: &[Step], new: &Item, whole: &Item, pos: Pos) -> R<()> {
     let here = Item {
         value: at.clone(),
         src: whole.src.clone(),
         lit: false,
+        ty: ty.clone(),
+        file: whole.file,
     };
+    let Some((step, rest)) = steps.split_first() else {
+        if let Some(ty) = ty.filter(known) {
+            if !fits(&ty, new) {
+                return at_query(
+                    pos,
+                    format!(
+                        "The new value is {}, which does not fit where it goes, which is {}",
+                        describe_item(new),
+                        ty_text(&ty)
+                    ),
+                );
+            }
+        }
+        *at = new.value.clone();
+        return Ok(());
+    };
+    // A const is changed by changing a copy of its value, so the reference is replaced by the value.
+    let here = deref(&here)?;
+    *at = here.value.clone();
+    let child_ty: Option<Ty>;
     let slot: &mut Value = match (step, &mut at.kind) {
         (Step::Field(name), ValueKind::Record(ms))
         | (
@@ -1077,36 +1252,46 @@ fn set_path(at: &mut Value, steps: &[Step], new: Value, whole: &Item) -> R<()> {
                 body: Some(TaggedBody::Record(ms)),
                 ..
             },
-        ) => match ms.iter_mut().find(|m| &m.name == name) {
-            Some(m) => &mut m.value,
-            None => return at_item(&here, format!("This record has no field {}", name)),
-        },
-        (
-            Step::Field(name),
-            ValueKind::Tagged {
-                body: Some(TaggedBody::Tuple(args)),
-                ..
-            },
-        ) => match args.iter_mut().find(|a| a.name.as_deref() == Some(name)) {
-            Some(a) => &mut a.value,
-            None => {
-                field(&here, name)?;
-                unreachable!("field fails when the argument is not given by name")
+        ) => {
+            child_ty = field_type(&here, name);
+            match ms.iter_mut().find(|m| &m.name == name) {
+                Some(m) => &mut m.value,
+                None => return at_item(&here, format!("This record has no field {}", name)),
             }
-        },
+        }
         (
-            Step::Position(n),
+            Step::Field(_) | Step::Position(_),
             ValueKind::Tagged {
+                name: ctor,
                 body: Some(TaggedBody::Tuple(args)),
-                ..
             },
-        ) => match args.iter_mut().filter(|a| a.name.is_none()).nth(*n) {
-            Some(a) => &mut a.value,
-            None => {
-                position(&here, *n)?;
-                unreachable!("position fails when there is no such argument")
+        ) => {
+            let param = match step {
+                Step::Field(name) => Param::Named(name),
+                Step::Position(n) => Param::At(*n),
+                Step::Index(_) => unreachable!("matched above"),
+            };
+            // Finding the argument reports a parameter that is missing, or one that cannot be found without the
+            // types, and gives the type of the parameter.
+            let found = argument(&here, ctor, args, param)?;
+            child_ty = found.ty.clone();
+            let index = tuple_slot(&here, ctor, args, param);
+            match index {
+                Some(index) => &mut args[index].value,
+                None => {
+                    // A named parameter that was left out is given, by name, with the value of its default.
+                    let Some(name) = param_name(&here, ctor, param) else {
+                        return at_item(&here, "This argument cannot be changed");
+                    };
+                    args.push(Argument {
+                        name: Some(name),
+                        pos: here.value.pos,
+                        value: found.value,
+                    });
+                    &mut args.last_mut().expect("an argument was just added").value
+                }
             }
-        },
+        }
         (Step::Index(i), ValueKind::Array(items))
         | (
             Step::Index(i),
@@ -1115,6 +1300,7 @@ fn set_path(at: &mut Value, steps: &[Step], new: Value, whole: &Item) -> R<()> {
                 ..
             },
         ) => {
+            child_ty = element_type(&here);
             let len = items.len();
             match items.get_mut(*i) {
                 Some(v) => v,
@@ -1127,24 +1313,106 @@ fn set_path(at: &mut Value, steps: &[Step], new: Value, whole: &Item) -> R<()> {
             }
         }
         (Step::Field(name), _) => {
-            field(&here, name)?;
-            unreachable!("field fails on a value without fields")
+            return at_item(
+                &here,
+                format!("{} has no field {}", capitalised(&describe_item(&here)), name),
+            )
         }
         (Step::Position(n), _) => {
-            position(&here, *n)?;
-            unreachable!("position fails on a value without a tuple")
+            return at_item(
+                &here,
+                format!("{} has no argument {}", capitalised(&describe_item(&here)), n),
+            )
         }
         (Step::Index(_), _) => {
             return at_item(
                 &here,
                 format!(
                     "{} is not an array, so it cannot be indexed",
-                    capitalised(&describe(&here.value))
+                    capitalised(&describe_item(&here))
                 ),
             )
         }
     };
-    set_path(slot, rest, new, whole)
+    set_path(slot, child_ty, rest, new, whole, pos)
+}
+
+/// The index of the argument that is for a parameter, if one was given.
+fn tuple_slot(of: &Item, ctor: &str, args: &[Argument], param: Param) -> Option<usize> {
+    if let Some(typing) = typing() {
+        if let Some((params, _)) = typing.types.tuple_params(ctor, of.ty.as_ref()) {
+            let index = match param {
+                Param::At(n) => n,
+                Param::Named(name) => params.iter().position(|p| p.name.as_deref() == Some(name))?,
+            };
+            let (targets, _) = bind_arguments(of.value.pos, ctor, &params, args).ok()?;
+            return targets.iter().position(|t| *t == index);
+        }
+    }
+    match param {
+        Param::At(n) => args
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| a.name.is_none())
+            .nth(n)
+            .map(|(i, _)| i),
+        Param::Named(name) => args.iter().position(|a| a.name.as_deref() == Some(name)),
+    }
+}
+
+/// The name of a parameter, which an argument that is added must be given by.
+fn param_name(of: &Item, ctor: &str, param: Param) -> Option<String> {
+    match param {
+        Param::Named(name) => Some(name.to_string()),
+        Param::At(n) => typing()?
+            .types
+            .tuple_params(ctor, of.ty.as_ref())?
+            .0
+            .get(n)?
+            .name
+            .clone(),
+    }
+}
+
+/// Whether a value fits where a type is expected, as far as its kind can tell, with the widening of numbers.
+fn fits(ty: &Ty, item: &Item) -> bool {
+    match (ty, &item.value.kind) {
+        (Ty::Nat, ValueKind::Nat(_)) => true,
+        (Ty::Int, ValueKind::Int(_) | ValueKind::Nat(_)) => true,
+        (Ty::Float, ValueKind::Float(_) | ValueKind::Int(_) | ValueKind::Nat(_)) => true,
+        (Ty::Str, ValueKind::Str(_)) => true,
+        (Ty::Array(_), ValueKind::Array(_)) => true,
+        (Ty::Record(_), ValueKind::Record(_)) => true,
+        (Ty::Enum(name, _), ValueKind::Tagged { name: ctor, .. }) => {
+            match (canonical(shown(name)), canonical(ctor)) {
+                ("Bool", "true" | "false") | ("Option", "Some" | "None") => return true,
+                _ => {}
+            }
+            match typing() {
+                Some(typing) => match typing.types.ctor(ctor) {
+                    Some((decl, _)) => decl.name == *name,
+                    // A const of the right type fits too, which its type would say; it is taken on trust here.
+                    None => crate::convert::is_const_name(ctor),
+                },
+                None => true,
+            }
+        }
+        (ty, _) => !known(ty),
+    }
+}
+
+/// A type as a message shows it.
+fn ty_text(ty: &Ty) -> String {
+    match ty {
+        Ty::Nat => "a Nat".to_string(),
+        Ty::Int => "an Int".to_string(),
+        Ty::Float => "a Float".to_string(),
+        Ty::Str => "a String".to_string(),
+        Ty::Array(_) => "an array".to_string(),
+        Ty::Record(_) => "a record".to_string(),
+        Ty::Enum(name, _) => format!("a {}", shown(name)),
+        _ => "not known".to_string(),
+    }
 }
 
 fn arithmetic(op: BinOp, a: &Item, b: &Item, pos: Pos) -> R<Item> {
@@ -1228,15 +1496,20 @@ fn binary(op: BinOp, left: &Expr, right: &Expr, pos: Pos, env: &Env, values: &mu
 /// Whether two values are equal, structurally. Numbers must be of one kind, a literal adapting, and values of
 /// different kinds are an error, as they have no common type.
 fn equal(a: &Item, x: &Value, b: &Item, y: &Value) -> R<bool> {
+    // The types are known only at the top, where the values are the items themselves.
     let ia = Item {
         value: x.clone(),
         src: a.src.clone(),
         lit: a.lit,
+        ty: a.ty.clone().filter(|_| std::ptr::eq(x, &a.value)),
+        file: a.file,
     };
     let ib = Item {
         value: y.clone(),
         src: b.src.clone(),
         lit: b.lit,
+        ty: b.ty.clone().filter(|_| std::ptr::eq(y, &b.value)),
+        file: b.file,
     };
     let mismatch = || {
         let blamed = if ia.lit && !ib.lit { &ib } else { &ia };
@@ -1352,7 +1625,7 @@ pub fn bind(pattern: &Pattern, of: &Item, env: &Env) -> R<Option<Env>> {
             Ok(equal(of, &of.value, &lit_item, &lit_item.value)?.then(|| env.clone()))
         }
         PatternKind::Ctor { name, body } => {
-            const_reference(of)?;
+            let of = &deref(of)?;
             let ValueKind::Tagged {
                 name: found,
                 body: value_body,
@@ -1388,11 +1661,11 @@ pub fn bind(pattern: &Pattern, of: &Item, env: &Env) -> R<Option<Env>> {
                 ),
             }
         }
-        PatternKind::Record { fields, rest } => match &of.value.kind {
+        PatternKind::Record { fields, rest } => match &deref(of)?.value.kind {
             ValueKind::Record(ms) => bind_members(fields, *rest, ms, of, env),
             _ => wrong("a record"),
         },
-        PatternKind::Array { items, rest } => match &of.value.kind {
+        PatternKind::Array { items, rest } => match &deref(of)?.value.kind {
             ValueKind::Array(vs) => bind_items(items, *rest, vs, of, env),
             _ => wrong("an array"),
         },
@@ -1416,7 +1689,7 @@ fn bind_members(fields: &[FieldPat], rest: bool, ms: &[Member], of: &Item, env: 
         let Some(m) = ms.iter().find(|m| m.name == f.name) else {
             return at_item(of, format!("This has no field {}", f.name));
         };
-        match bind(&f.pattern, &part(of, &m.value), &env)? {
+        match bind(&f.pattern, &typed_part(of, &m.value, field_type(of, &f.name)), &env)? {
             Some(e) => env = e,
             None => return Ok(None),
         }
@@ -1428,9 +1701,10 @@ fn bind_items(items: &[Pattern], rest: bool, vs: &[Value], of: &Item, env: &Env)
     if vs.len() < items.len() || (!rest && vs.len() != items.len()) {
         return Ok(None);
     }
+    let ty = element_type(of);
     let mut env = env.clone();
     for (p, v) in items.iter().zip(vs) {
-        match bind(p, &part(of, v), &env)? {
+        match bind(p, &typed_part(of, v, ty.clone()), &env)? {
             Some(e) => env = e,
             None => return Ok(None),
         }
@@ -1439,44 +1713,41 @@ fn bind_items(items: &[Pattern], rest: bool, vs: &[Value], of: &Item, env: &Env)
 }
 
 fn bind_args(args: &[ArgPat], rest: bool, vs: &[Argument], ctor: &str, of: &Item, env: &Env) -> R<Option<Env>> {
-    let positional: Vec<&Argument> = vs.iter().filter(|a| a.name.is_none()).collect();
-    let pattern_positional = args.iter().filter(|a| a.name.is_none()).count();
-    if !rest && (pattern_positional != positional.len() || args.len() != vs.len()) {
-        return at_item(
-            of,
-            format!(
-                "The pattern does not mention every argument of this {}; add .. to ignore the rest",
-                ctor
-            ),
-        );
+    // Typed, the pattern is against the parameters, however the arguments were written; untyped, against the
+    // arguments as they are written.
+    let typed_count = typing().and_then(|t| t.types.tuple_params(ctor, of.ty.as_ref()).map(|(p, _)| p.len()));
+    if !rest {
+        let mentioned = args.len();
+        let all = match typed_count {
+            Some(count) => mentioned == count,
+            None => {
+                let positional = vs.iter().filter(|a| a.name.is_none()).count();
+                let pattern_positional = args.iter().filter(|a| a.name.is_none()).count();
+                pattern_positional == positional && mentioned == vs.len()
+            }
+        };
+        if !all {
+            return at_item(
+                of,
+                format!(
+                    "The pattern does not mention every argument of this {}; add .. to ignore the rest",
+                    shown(ctor)
+                ),
+            );
+        }
     }
     let mut env = env.clone();
     let mut next_position = 0;
     for a in args {
-        let value = match &a.name {
+        let param = match &a.name {
             None => {
-                let found = positional.get(next_position).map(|a| &a.value);
                 next_position += 1;
-                match found {
-                    Some(v) => v,
-                    None => return at_item(of, format!("This {} has no argument {}", ctor, next_position - 1)),
-                }
+                Param::At(next_position - 1)
             }
-            Some(name) => match vs.iter().find(|v| v.name.as_deref() == Some(name)) {
-                Some(v) => &v.value,
-                None => {
-                    return at_item(
-                        of,
-                        format!(
-                            "This {} does not give {} by name, and without the types it cannot be known whether it \
-                             is given by position or left to its default; supply the types",
-                            ctor, name
-                        ),
-                    )
-                }
-            },
+            Some(name) => Param::Named(name),
         };
-        match bind(&a.pattern, &part(of, value), &env)? {
+        let value = argument(of, ctor, vs, param)?;
+        match bind(&a.pattern, &value, &env)? {
             Some(e) => env = e,
             None => return Ok(None),
         }

@@ -2385,9 +2385,26 @@ expect_query_error "branches without a common type are refused" 2 "" \
     '@values.map(|v| if matches!(v, Quit) then 1 else "move" endif)' "$query_dir/moves.values"
 expect_query_error "an input that cannot be read is exit code 2" 2 "Move { x: 1, y: 2 }; Quit; Move { x: 3, y: 4 };" \
     "ERROR: Cannot read $query_dir/missing.values" '@values' "$query_dir/moves.values" "$query_dir/missing.values"
-expect_query_error "the typed mode is not available yet" 2 "" "ERROR: --type is not available yet" --type=Shape \
-    '@values' "$query_dir/moves.values"
-rm -f "$query_dir/out" "$query_dir/err" "$query_dir/moves.values" "$query_dir/arrays.values"
+expect_query_error "an option for the types needs types" 2 "" "ERROR: --no-widening applies only to a typed query" \
+    --no-widening '@values' "$query_dir/moves.values"
+
+# A query is typed when it has types: here a types file among the files.
+printf 'enum R = Record(Bool, right: Bool);\nenum Shape = Circle { r: Float }, Dot;\nconst origin = Circle { r: 1 };\n' \
+    >"$query_dir/r.types"
+printf '[Record(true, right: false), Record(false, false)];\n' >"$query_dir/r.values"
+printf 'Circle { r: 5 };\norigin;\nDot;\n' >"$query_dir/shapes.values"
+expect_query "typed: a named argument given by position" "false; false;" \
+    '@values.flat_map(|rs| rs.iter().map(|r| r.right))' "$query_dir/r.types" "$query_dir/r.values"
+expect_query "typed: a Nat in a Float field is a Float, and a const is seen into" "2;" \
+    '@values.filter_match(|Circle { r }| r).filter(|r| r > 0.0).count()' "$query_dir/r.types" "$query_dir/shapes.values"
+expect_query "typed: --type checks every value" "Circle { r: 5 }; origin; Dot;" --type=Shape '@values' \
+    "$query_dir/r.types" "$query_dir/shapes.values"
+expect_query_error "typed: an unknown constructor in the query" 2 "" "ERROR: Unknown constructor Square" \
+    '@values.map(|s| Square)' "$query_dir/r.types" "$query_dir/shapes.values"
+expect_query_error "typed: a value of the wrong type is found before the query runs" 1 "" "ERROR: Expected Shape" \
+    --type=Shape '@values' "$query_dir/r.types" "$query_dir/r.values"
+rm -f "$query_dir/out" "$query_dir/err" "$query_dir/moves.values" "$query_dir/arrays.values" "$query_dir/r.types" \
+    "$query_dir/r.values" "$query_dir/shapes.values"
 rmdir "$query_dir"
 echo ""
 

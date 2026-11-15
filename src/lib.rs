@@ -458,6 +458,110 @@ enum ValueMode<'m, 'w> {
     Convert(&'m mut Conversion<'w>),
     /// Hand the checked declarations to a function that reads the values from somewhere else, and check no value.
     Read(&'m mut Reading<'w>),
+    /// Check every value, and then hand them, resolved, to a function that runs a query over them.
+    Query(&'m mut Querying<'w>),
+}
+
+/// The function of the caller that runs a query, with the sources that the query adds to those of the run.
+struct Querying<'w> {
+    run: &'w mut dyn FnMut(query::types::QueryInputs) -> Result<(), query::RunError>,
+    failure: Option<query::RunError>,
+    /// The index of the source that holds the declaration of the type of every value, if `--type` was given.
+    target_source: Option<usize>,
+    /// The index of the source that holds the constructor names of the query, if it has any.
+    names_source: Option<usize>,
+}
+
+/// The name of the source that holds the constructor names of a query, so that they are resolved as a values file of
+/// the root project would resolve them. Each name is on a line of its own.
+pub const QUERY_NAMES_SOURCE: &str = "<query names>";
+
+/// Why a typed query did not run to the end.
+#[derive(Debug)]
+pub enum QueryTypedError {
+    /// The inputs have errors, which are the errors of the checks: exit code 1.
+    Invalid(Vec<Diagnostic>),
+    /// The query, or the type that `--type` gives, has an error that only the types could find: exit code 2.
+    Query(Diagnostic),
+    /// The query stopped while it ran.
+    Run(query::RunError),
+}
+
+/// Runs a query with the types. The sources are checked as `check_in_projects` checks them, and the first error ends
+/// the run before the query starts. Then every value is handed to `run`, resolved, with the declarations, the type of
+/// every value if `type_text` gives one, and the constructor names of the query, which are `names`, resolved as a values
+/// file of the root project would resolve them.
+pub fn query_typed(
+    sources: &[Source],
+    layout: &Layout,
+    options: &CheckOptions,
+    names: &[(String, Pos)],
+    type_text: Option<&str>,
+    run: &mut dyn FnMut(query::types::QueryInputs) -> Result<(), query::RunError>,
+) -> Result<(), QueryTypedError> {
+    let options = CheckOptions {
+        type_check: true,
+        continue_after_error: false,
+        ..*options
+    };
+    let mut all = Vec::new();
+    let mut layout = layout.clone();
+    let mut target_source = None;
+    if let Some(type_text) = type_text {
+        // As for `convert_typed_back`, the name is one that no source mentions. The source comes first, since a types
+        // file must come before the values files.
+        let mut name = String::from("ConstructoTarget");
+        while sources.iter().any(|source| source.text.contains(&name)) || type_text.contains(&name) {
+            name.push('_');
+        }
+        all.push(Source {
+            name: TARGET_SOURCE.to_string(),
+            text: format!("enum {name} = {name}(\n{type_text}\n);\n"),
+        });
+        layout.owners.insert(0, layout.root);
+        target_source = Some(0);
+    }
+    all.extend(sources.iter().cloned());
+    let mut names_source = None;
+    if !names.is_empty() {
+        let text: String = names.iter().map(|(name, _)| format!("{};\n", name)).collect();
+        all.push(Source {
+            name: QUERY_NAMES_SOURCE.to_string(),
+            text,
+        });
+        layout.owners.push(layout.root);
+        names_source = Some(all.len() - 1);
+    }
+    let mut querying = Querying {
+        run,
+        failure: None,
+        target_source,
+        names_source,
+    };
+    let report = check_with_layout(&all, Some(&layout), &options, &mut ValueMode::Query(&mut querying));
+    if let Some(e) = querying.failure {
+        return Err(QueryTypedError::Run(e));
+    }
+    let mut invalid = Vec::new();
+    for mut diagnostic in report.diagnostics {
+        if diagnostic.file == TARGET_SOURCE {
+            // The expression is on the second line of its source, which the user never sees.
+            diagnostic.pos.line = diagnostic.pos.line.saturating_sub(1).max(1);
+            return Err(QueryTypedError::Query(diagnostic));
+        }
+        if diagnostic.file == QUERY_NAMES_SOURCE {
+            let at = names.get(diagnostic.pos.line as usize - 1).map(|(_, pos)| *pos);
+            diagnostic.file = query::parser::QUERY_NAME.to_string();
+            diagnostic.pos = at.unwrap_or(Pos { line: 1, col: 1 });
+            return Err(QueryTypedError::Query(diagnostic));
+        }
+        invalid.push(diagnostic);
+    }
+    if invalid.is_empty() {
+        Ok(())
+    } else {
+        Err(QueryTypedError::Invalid(invalid))
+    }
 }
 
 /// What the reader of typed JSON is given, once the types have been checked: the declarations, the type to read as, and
@@ -682,6 +786,23 @@ fn type_check_values(
         types_files.iter().flat_map(|(_, file)| &file.consts),
     )
     .with_inferred_from(&everything);
+    if let ValueMode::Query(querying) = mode {
+        if !stopped {
+            run_query(
+                sources,
+                parsed_sources,
+                value_errors,
+                options,
+                &env,
+                &everything,
+                querying,
+                show,
+                outcomes,
+                diagnostics,
+            );
+        }
+        return infos;
+    }
     if let ValueMode::Read(reading) = mode {
         // The values are somewhere else, and so are read by the caller, if the consts were all right.
         if !stopped {
@@ -726,6 +847,7 @@ fn type_check_values(
                     let failure = match (unresolved, &mut *mode) {
                         (Some(diagnostic), _) => Some(diagnostic),
                         (None, ValueMode::Read(_)) => unreachable!("a reading returns before the values are met"),
+                        (None, ValueMode::Query(_)) => unreachable!("a query returns before the values are met"),
                         (None, ValueMode::Check) => check_value(&env, options.widening, value)
                             .err()
                             .map(|e| Diagnostic::new(&sources[index].name, e.pos, e.message)),
@@ -768,6 +890,101 @@ fn type_check_values(
         }
     }
     infos
+}
+
+/// Checks every value, with the names of the query first, and then runs the query over the values, resolved. The first
+/// error ends the run, and the query is not run.
+#[allow(clippy::too_many_arguments)]
+fn run_query(
+    sources: &[Source],
+    parsed_sources: &[Parsed],
+    value_errors: &[(usize, usize, Diagnostic)],
+    options: &CheckOptions,
+    env: &Env,
+    everything: &Env,
+    querying: &mut Querying,
+    show: &dyn Fn(usize, &str) -> String,
+    outcomes: &mut [Outcome],
+    diagnostics: &mut Vec<(usize, Diagnostic)>,
+) {
+    let unresolved = |index: usize, position: usize| {
+        value_errors
+            .iter()
+            .find(|(source, at, _)| *source == index && *at == position)
+            .map(|(_, _, diagnostic)| diagnostic.clone())
+    };
+    // The names of the query are only resolved, not checked, since a constructor on its own may need a body.
+    let mut names = Vec::new();
+    if let Some(index) = querying.names_source {
+        if let Parsed::Values(values) = &parsed_sources[index] {
+            for (position, value) in values.iter().enumerate() {
+                if let Some(diagnostic) = unresolved(index, position) {
+                    outcomes[index] = Outcome::Failed;
+                    diagnostics.push((index, diagnostic));
+                    return;
+                }
+                if let ast::ValueKind::Tagged { name, .. } = &value.kind {
+                    if env.constructor(name).is_none() {
+                        let message = format!("Unknown constructor {}", show(index, name));
+                        outcomes[index] = Outcome::Failed;
+                        diagnostics.push((index, Diagnostic::new(QUERY_NAMES_SOURCE, value.pos, message)));
+                        return;
+                    }
+                    names.push(name.clone());
+                }
+            }
+        }
+    }
+    let target = match querying.target_source {
+        Some(index) => match target_of(&parsed_sources[index]) {
+            Ok(target) => Some(target),
+            Err(diagnostic) => {
+                diagnostics.push((index, diagnostic));
+                return;
+            }
+        },
+        None => None,
+    };
+    let mut values = Vec::new();
+    for (index, parsed) in parsed_sources.iter().enumerate() {
+        let Parsed::Values(found) = parsed else { continue };
+        if Some(index) == querying.names_source {
+            continue;
+        }
+        for (position, value) in found.iter().enumerate() {
+            let failure = match unresolved(index, position) {
+                Some(diagnostic) => Some(diagnostic),
+                None => {
+                    let checked = match &target {
+                        Some(target) => typecheck::check_value_against(env, options.widening, value, target),
+                        None => check_value(env, options.widening, value),
+                    };
+                    checked
+                        .err()
+                        .map(|e| Diagnostic::new(&sources[index].name, e.pos, e.message))
+                }
+            };
+            if let Some(diagnostic) = failure {
+                outcomes[index] = Outcome::Failed;
+                diagnostics.push((index, diagnostic));
+                return;
+            }
+            values.push((index, value.clone()));
+        }
+    }
+    let types = query::types::Types::from_parsed(parsed_sources, everything);
+    let inputs = query::types::QueryInputs {
+        types,
+        values,
+        target,
+        names,
+        names_source: querying.names_source.unwrap_or(sources.len()),
+        source_names: sources.iter().map(|source| source.name.clone()).collect(),
+        show,
+    };
+    if let Err(e) = (querying.run)(inputs) {
+        querying.failure = Some(e);
+    }
 }
 
 /// Describes the type of each const that has one: the declared types, and the inferred ones that could be worked out.

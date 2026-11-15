@@ -228,9 +228,9 @@ pub fn arithmetic(op: BinOp, kind: NumKind, a: &str, b: &str) -> Result<String, 
     }
 }
 
-/// Negates a number. A `Nat` cannot be negated, except zero.
-pub fn negate(text: &str) -> Result<String, NumError> {
-    match kind_of(text) {
+/// Negates a number of a kind. A `Nat` cannot be negated, except zero.
+pub fn negate(text: &str, kind: NumKind) -> Result<String, NumError> {
+    match kind {
         NumKind::Float => Ok(float_text(-to_f64(text)?)),
         NumKind::Int => Ok(int_text(&-big(text))),
         NumKind::Nat if big(text).is_zero() => Ok(text.to_string()),

@@ -139,6 +139,20 @@ pub fn check_value(env: &Env, widening: bool, value: &Value) -> Result<()> {
     checker.check_omitted()
 }
 
+/// Checks one top-level value against a type that is known and has no open parts, such as the type that `--type`
+/// gives.
+pub fn check_value_against(env: &Env, widening: bool, value: &Value, expected: &Ty) -> Result<()> {
+    let mut checker = Checker {
+        env,
+        widening,
+        slots: Vec::new(),
+        omitted: Vec::new(),
+        notes: None,
+    };
+    checker.check(value, expected)?;
+    checker.check_omitted()
+}
+
 /// A value that has been checked, with what the check found out about it: the type that each of its parts was checked
 /// against. It is for a caller that needs the types and not only a verdict, such as the conversion of a value to a
 /// notation that depends on the types.
