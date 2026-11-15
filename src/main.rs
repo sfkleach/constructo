@@ -275,11 +275,20 @@ as a value; otherwise the one result is written. For example:
     constructo query '#values.filter_match(|Move { x, .. }| x)' moves.values
     constructo query '#values.map(|c| c.update(|c| c.server.port = 8080))' config.values
 
+A longer query can be kept in a file, which may have comments, and given with --expr-file=QUERY_FILE in place of the \
+expression; the files then start at the first argument:
+
+    constructo query --expr-file=moves.query moves.values
+
 The settings file is read for [global] and [experimental].")]
     Query {
-        /// The query, such as '#values.map(|m| m.x)'
-        #[arg(value_name = "EXPR")]
-        expr: String,
+        /// The query, such as '#values.map(|m| m.x)'. It is left out when --expr-file is given
+        #[arg(value_name = "EXPR", required_unless_present = "expr_file")]
+        expr: Option<String>,
+
+        /// Read the query from a file instead of from EXPR, which is then left out
+        #[arg(long, value_name = "QUERY_FILE")]
+        expr_file: Option<PathBuf>,
 
         /// The type of every value, such as Shape, which is resolved in the types that are given
         #[arg(long = "type", value_name = "TYPE")]
@@ -324,7 +333,7 @@ The settings file is read for [global] and [experimental].")]
         no_experimental: Vec<Feature>,
 
         /// The files whose values are queried
-        #[arg(value_name = "FILES", required_unless_present_any = ["stdin", "project"])]
+        #[arg(value_name = "FILES", required_unless_present_any = ["stdin", "project", "expr_file"])]
         files: Vec<PathBuf>,
     },
 
@@ -663,13 +672,14 @@ fn main() -> ExitCode {
         }
         Command::Query {
             expr,
+            expr_file,
             type_expr,
             compact,
             stdin,
             typing,
             experimental: _,
             no_experimental: _,
-            files,
+            mut files,
         } => {
             let query_matches = matches
                 .subcommand_matches("query")
@@ -679,10 +689,35 @@ fn main() -> ExitCode {
             // The query is read before any input is looked at, so a mistake in it is reported at once. It is checked
             // once it is known whether it is typed, since a typed query may refer to the consts of its types; telling
             // that reads only the first token of a regular file, and reports nothing.
-            let read = match query::parser::parse_query(&expr) {
+            // With --expr-file there is no EXPR, so what clap took for it is the first of the files.
+            let (text, query_name) = match expr_file {
+                Some(path) => {
+                    if let Some(first) = expr {
+                        files.insert(0, PathBuf::from(first));
+                    }
+                    // Clap cannot require the files only when EXPR is absent, since it takes the first of them for
+                    // EXPR, so the requirement is checked here.
+                    if files.is_empty() && !stdin && typing.project.is_none() {
+                        eprintln!("ERROR: the query needs some files, --stdin or --project to read values from");
+                        return ExitCode::from(EXIT_USAGE);
+                    }
+                    match std::fs::read_to_string(&path) {
+                        Ok(text) => (text, path.display().to_string()),
+                        Err(e) => {
+                            eprintln!("ERROR: Cannot read {}: {}", path.display(), e);
+                            return ExitCode::from(EXIT_USAGE);
+                        }
+                    }
+                }
+                None => (
+                    expr.expect("clap requires EXPR without --expr-file"),
+                    query::parser::QUERY_NAME.to_string(),
+                ),
+            };
+            let read = match query::parser::parse_query(&text) {
                 Ok(read) => read,
                 Err(diagnostic) => {
-                    eprintln!("{}", diagnostic);
+                    eprintln!("{}", of_query(diagnostic, &query_name));
                     return ExitCode::from(EXIT_USAGE);
                 }
             };
@@ -702,10 +737,10 @@ fn main() -> ExitCode {
                     Err(_) => break,
                 }
             }
-            let parsed = match query::check(read, typed) {
-                Ok(parsed) => parsed,
+            let checked = match query::check(read, typed) {
+                Ok(expr) => GivenQuery { expr, name: query_name },
                 Err(diagnostic) => {
-                    eprintln!("{}", diagnostic);
+                    eprintln!("{}", of_query(diagnostic, &query_name));
                     return ExitCode::from(EXIT_USAGE);
                 }
             };
@@ -721,7 +756,7 @@ fn main() -> ExitCode {
                     );
                     return ExitCode::from(EXIT_USAGE);
                 }
-                return query_files(&parsed, compact, stdin, experimental, &files);
+                return query_files(&checked, compact, stdin, experimental, &files);
             }
             let TypingArgs {
                 prelude,
@@ -751,7 +786,7 @@ fn main() -> ExitCode {
                 Ok(set) => set,
                 Err(code) => return code,
             };
-            query_typed_files(&parsed, type_expr.as_deref(), compact, stdin, &options, &set, &files)
+            query_typed_files(&checked, type_expr.as_deref(), compact, stdin, &options, &set, &files)
         }
         Command::Check {
             stdin,
@@ -982,11 +1017,17 @@ fn convert_files(stdin: bool, options: &ConvertOptions, files: &[PathBuf]) -> Ex
     }
 }
 
+/// A query that has been read and checked, with the name that diagnostics give to where it came from.
+struct GivenQuery {
+    expr: query::syntax::Expr,
+    name: String,
+}
+
 /// Runs a query, which has been read and checked, over the values of the files and then of the standard input. The
 /// inputs are read only as the query reaches them, and each value of the result is written as soon as it is made, so an
 /// error at a value comes after the values before it have been written.
 fn query_files(
-    expr: &query::syntax::Expr,
+    query: &GivenQuery,
     compact: bool,
     stdin: bool,
     experimental: Experimental,
@@ -1021,7 +1062,7 @@ fn query_files(
     }
     let values = query::stream_of(reads.into_iter(), experimental);
     let mut out = std::io::BufWriter::new(std::io::stdout().lock());
-    let result = query::run(expr, values, &mut |value| {
+    let result = query::run(&query.expr, values, &mut |value| {
         out.write_all(render(value, compact).as_bytes())
     });
     match result {
@@ -1035,7 +1076,7 @@ fn query_files(
             let _ = out.flush();
             match failure {
                 QueryFailure::Error(diagnostic) => {
-                    eprintln!("{}", diagnostic);
+                    eprintln!("{}", of_query(diagnostic, &query.name));
                     ExitCode::from(EXIT_ERRORS)
                 }
                 QueryFailure::Input(message) => {
@@ -1046,7 +1087,7 @@ fn query_files(
         }
         Err(RunError::Write(e)) => write_failure(&e),
         Err(RunError::Query(diagnostic)) => {
-            eprintln!("{}", diagnostic);
+            eprintln!("{}", of_query(diagnostic, &query.name));
             ExitCode::from(EXIT_USAGE)
         }
     }
@@ -1055,7 +1096,7 @@ fn query_files(
 /// Runs a typed query. The inputs are those of `check`, read in the same way, and every value is checked against the
 /// types before the query runs, so an error in the inputs is reported before anything is written.
 fn query_typed_files(
-    expr: &query::syntax::Expr,
+    query: &GivenQuery,
     type_text: Option<&str>,
     compact: bool,
     stdin: bool,
@@ -1068,10 +1109,10 @@ fn query_typed_files(
         Err(code) => return code,
     };
     let layout = layout(set, sources.len());
-    let names = query::constructor_names(expr);
+    let names = query::constructor_names(&query.expr);
     let mut out = std::io::BufWriter::new(std::io::stdout().lock());
     let result = query_typed(&sources, &layout, options, &names, type_text, &mut |inputs| {
-        query::run_typed(expr, inputs, &mut |value| {
+        query::run_typed(&query.expr, inputs, &mut |value| {
             out.write_all(render(value, compact).as_bytes())
         })
     });
@@ -1081,13 +1122,13 @@ fn query_typed_files(
             Err(e) => write_failure(&e),
         },
         Err(QueryTypedError::Invalid(diagnostics)) => {
-            for diagnostic in &diagnostics {
-                eprintln!("{}", diagnostic);
+            for diagnostic in diagnostics {
+                eprintln!("{}", of_query(diagnostic, &query.name));
             }
             ExitCode::from(EXIT_ERRORS)
         }
         Err(QueryTypedError::Query(diagnostic)) => {
-            eprintln!("{}", diagnostic);
+            eprintln!("{}", of_query(diagnostic, &query.name));
             ExitCode::from(EXIT_USAGE)
         }
         Err(QueryTypedError::Run(RunError::Failed(failure))) => {
@@ -1096,7 +1137,7 @@ fn query_typed_files(
             let _ = out.flush();
             match failure {
                 QueryFailure::Error(diagnostic) => {
-                    eprintln!("{}", diagnostic);
+                    eprintln!("{}", of_query(diagnostic, &query.name));
                     ExitCode::from(EXIT_ERRORS)
                 }
                 QueryFailure::Input(message) => {
@@ -1106,11 +1147,20 @@ fn query_typed_files(
             }
         }
         Err(QueryTypedError::Run(RunError::Query(diagnostic))) => {
-            eprintln!("{}", diagnostic);
+            eprintln!("{}", of_query(diagnostic, &query.name));
             ExitCode::from(EXIT_USAGE)
         }
         Err(QueryTypedError::Run(RunError::Write(e))) => write_failure(&e),
     }
+}
+
+/// Names a diagnostic about the query after where the query came from, which is its file when it was given with
+/// --expr-file.
+fn of_query(mut diagnostic: Diagnostic, query_name: &str) -> Diagnostic {
+    if diagnostic.file == query::parser::QUERY_NAME {
+        diagnostic.file = query_name.to_string();
+    }
+    diagnostic
 }
 
 /// What the reading of values back from JSON is given by the command line.
