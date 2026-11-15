@@ -1,0 +1,8 @@
+// The outfix form of if, in which every brace is a record.
+// output: { round: true }; { round: null }; { round: false }; { round: null };
+#values.map(|s|
+    if matches!(s, Circle { .. }) then { round: true }
+    elseif s == Dot then { round: false }
+    else { round: null }
+    endif
+)

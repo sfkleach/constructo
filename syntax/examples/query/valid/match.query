@@ -1,0 +1,9 @@
+// Rust's form of match, with a guard, alternatives, a binding with @, and .. in a record and an array.
+// output: "big circle"; "two wide"; "small"; "poly";
+#values.map(|s| match s {
+    Circle { r } if r > 1.0 => "big circle",
+    Circle { .. } | Dot => "small",
+    Rect(w: 2.0, ..) => "two wide",
+    p @ Poly[first, ..] => "poly",
+    _ => "other",
+})

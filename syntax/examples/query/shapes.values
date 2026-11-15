@@ -1,0 +1,5 @@
+// The values that the query examples are run against.
+Circle { r: 1.5 };
+Rect(2, h: 3.5);
+Dot;
+Poly[Point { x: +1, y: -2 }, origin];

@@ -1,0 +1,3 @@
+// Operators bind as in Rust: as before *, and * before + and -. A - that touches a number is part of it, as in -1.5.
+// output: 16.5;
+#values.filter_match(|Rect(w, h)| 1.0 + w * h as Float * 2.0 - -1.5)

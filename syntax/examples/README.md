@@ -84,3 +84,7 @@
   (`Float`) and `options.jsonl` (`Option<Shape>`). `unknown-key.json`, `missing-field.json`,
   `unknown-constructor.json`, `late-error.jsonl` and `not-a-nat.jsonl` (`Nat`) must be rejected, and the last two write
   the values before the problem first.
+- `query`: queries for `constructo query`, which are run against `query/shapes.types` and `query/shapes.values`. Each
+  `valid/*.query` must give the output in its `// output: ...` line, written with `--compact`, and each
+  `invalid/*.query` must be refused before any value is read, with exit code 2 and the error in its `// expect: ...`
+  line. They show the forms of the [query grammar](../grammar.md#query-grammar).

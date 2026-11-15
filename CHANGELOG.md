@@ -216,7 +216,8 @@ Following the style in https://keepachangelog.com/en/1.0.0/
   text. Untyped, it reads its inputs lazily and still type-checks what the expression fixes before any value is read.
   It is typed with a project, `--type` or a types file: every value is checked first, and the types find named
   arguments however they were given, defaults, consts, the kind of a number, and, with `--type`, mistakes in the query
-  before the query runs on any value. See `docs/specs/query-command.md` and decision 44. The library has the `query` module and
+  before the query runs on any value. See `docs/specs/query-command.md`, decision 44, and the query grammar in
+  `syntax/grammar.md`, with its examples in `syntax/examples/query/`. The library has the `query` module and
   `query_typed`, and depends on `num-bigint`.
 
 ### Changed

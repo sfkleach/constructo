@@ -1,0 +1,2 @@
+// expect: ERROR: A match needs at least one arm
+#values.map(|s| match s { })

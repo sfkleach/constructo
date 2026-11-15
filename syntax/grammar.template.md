@@ -4,7 +4,8 @@
 
 Constructo has two notations that are used together. A **data-types** file declares a schema using Rust-style
 `enum` declarations, and named values using `const` declarations. A **data-values** file holds data written in a
-JSON-like notation extended with named constructors. The values are checked against the types.
+JSON-like notation extended with named constructors. The values are checked against the types. A third notation, the
+**query** language of `constructo query`, extracts and transforms values with Rust-like expressions.
 
 For example, a types file might declare:
 
@@ -28,10 +29,10 @@ Box { width: 7.0, height: 1.0 };
 unit_circle
 ```
 
-The two grammars are given below as railroad diagrams. Both use `//` line comments, and the same `TypeName`
+The three grammars are given below as railroad diagrams. All use `//` line comments, and the same `TypeName`
 (uppercase initial) and `field-name` (lowercase or underscore initial) identifiers. The sources of the diagrams are
-`dt_grammar_tabatkins.txt` and `dv_grammar_tabatkins.txt`, and the diagrams are built with `just build`. Example
-files for each grammar are in [examples/](examples/).
+`dt_grammar_tabatkins.txt`, `dv_grammar_tabatkins.txt` and `dq_grammar_tabatkins.txt`, and the diagrams are built with
+`just build`. Example files for each grammar are in [examples/](examples/).
 
 ## Data-types grammar
 
@@ -96,3 +97,71 @@ The rules are:
 ![Data-values grammar](dv_grammar.svg)
 
 The diagrams are also available as a [PDF](dv_grammar.pdf).
+
+## Query grammar
+
+A query is one expression, given on the command line of `constructo query`, as in `#values.map(|m| m.x)`. It is Rust's
+expressions with the changes that [decision 44][decision-44] makes, and what the language means is in the [specification
+of the query command](../docs/specs/query-command.md). This section says only how a query is written.
+
+[decision-44]: ../docs/decisions/0044-queries-are-rust-like-expressions-over-a-stream-of-values.md
+
+The diagrams give one rule for each level of precedence, from the loosest to the tightest:
+
+| Level | Operators | Associativity |
+|---|---|---|
+| `Expression` | `=` `+=` `-=` `*=` `/=` `%=` | none: only one, and only in the closure of `update` |
+| `Disjunction` | `\|\|` | left |
+| `Conjunction` | `&&` | left |
+| `Comparison` | `==` `!=` `<` `<=` `>` `>=` | none: `a < b < c` is an error |
+| `Sum` | `+` `-` | left |
+| `Product` | `*` `/` `%` | left |
+| `Cast` | `as Nat`, `as Int`, `as Float` | left |
+| `Unary` | `!` `-` | prefix |
+| `Postfix` | `.field`, `.method(...)`, `.0`, `[i]` | left |
+
+The `Nat`, `Float`, `String`, `TypeName` and `Qualifier` of the diagrams are those of the
+[data-values grammar](#data-values-grammar), and a constructor is named as in a values file, as `Circle`,
+`shapes::Circle` or `acme.shapes::Circle`. A `name` starts with a lower-case letter or `_`, like a field name, but the
+reserved words are different. The keywords of a query are `if`, `then`, `elseif`, `else`, `endif`, `match`, `with`,
+`endmatch`, `as` and `_`, so none of them can be a variable, while `enum` and `const` can. A name must be bound by a
+closure or a pattern, except `true`, `false` and `null`, which are the consts of the prelude; no other const can be
+named in a query.
+
+The tokens differ from those of a values file in three ways:
+
+- **A sign is never part of a number.** `n - 5` is a subtraction. A `+` or `-` that touches the number after it, with
+  no space between, is joined to it as one `Literal`, so `-1` is still a literal. A signed whole number is an `Int`,
+  as in a values file. A `-` with a space after it is the operator `Unary` shows, so `- 1` is the negation of `1`.
+- **After a `.` a number is digits only,** so that `v.0.1` is two positions, as in Rust, and not `v` followed by the
+  `Float` `0.1`.
+- **There are operators and keywords,** and `#values`, the stream of input values, is a single token. Any other word
+  after `#` is an error. The `@` of a pattern is the binding, as in Rust, with or without spaces around it.
+
+The diagrams allow some things that are refused after parsing, and say less than the parser about others:
+
+- **Braces are never blocks.** `{` starts a record, except for the braces of a `Branch` of `if` and those around the
+  `Arms` of `match` in Rust's form. A closure is not called directly, only passed to a method. In the condition of those
+  forms a constructor followed by `{` is taken without the record when the record would swallow the branch, as in Rust,
+  so `if v == None { 1 } else { 2 }` works. The outfix forms, `if ... then ... endif` and `match ... with ... endmatch`,
+  have no such case, and every brace in them is a record.
+- **Field shorthand,** `Point { x, y }` for `Point { x: x, y: y }`, is allowed only after a constructor name, as in
+  Rust, which is why `ConstructorRecord` and `RecordExpr` are separate rules. A field may be given only once.
+- **In a constructor's tuple** the positional arguments come before the named ones, as in a values file.
+- **A closure's parameters** are single patterns: an alternative `p | q` needs parentheses, since `|` ends the list.
+  A closure with no parameters is written `| |`, with a space, because `||` is the `Disjunction` operator.
+- **`matches!`** is the name `matches` followed by `!`, as in Rust, and is not a macro: no other name may be followed
+  by `!`.
+- **An assignment** is read anywhere that an `Expression` is, but is refused after parsing unless it is the body of
+  the closure of `update`, and its target is a place that the access syntax reaches from the closure's parameter.
+- **A `match`** needs at least one arm, and an `if` needs its `else`, since every expression gives a value.
+- **The nesting** of a query is limited, so that a deeply nested query is refused rather than read with unbounded
+  recursion. The links of a chain of operators, of `as` or of postfix accesses each count as a level.
+
+The rules are:
+
+{{QUERIES_RULES}}
+
+![Query grammar](dq_grammar.svg)
+
+The diagrams are also available as a [PDF](dq_grammar.pdf).

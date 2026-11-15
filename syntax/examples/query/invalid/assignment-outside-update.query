@@ -1,0 +1,2 @@
+// expect: ERROR: An assignment is only allowed as the body of the closure of update
+#values.map(|s| s.r = 1.0)

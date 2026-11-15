@@ -1,0 +1,4 @@
+// Methods and indexing chain to the left.
+// output: { n: 2, x: 1.0, ok: true };
+#values.filter_match(|p @ Poly[..]| p)
+    .map(|p| { n: p.len(), x: p[0].x as Float, ok: p.first().is_some() && !p.is_empty() })

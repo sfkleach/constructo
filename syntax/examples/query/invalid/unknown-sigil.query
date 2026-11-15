@@ -1,0 +1,2 @@
+// expect: ERROR: #things is not known; the stream is #values
+#things.count()
