@@ -14,8 +14,9 @@ use std::rc::Rc;
 /// What the run of a typed query is given, once every value has been checked.
 pub struct QueryInputs<'s> {
     pub types: Types,
-    /// Each value, resolved, with the index of its source.
-    pub values: Vec<(usize, Value)>,
+    /// Each value, resolved, with the index of its source and the type that the check inferred for it, which is `None`
+    /// with `--type`, or if the type was too large to work out.
+    pub values: Vec<(usize, Value, Option<Ty>)>,
     /// The type of every value, if `--type` gave one.
     pub target: Option<Ty>,
     /// The constructor names of the query, resolved, in the order in which they are written.

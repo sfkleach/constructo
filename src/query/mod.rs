@@ -272,8 +272,8 @@ pub fn run_typed(
     let items: Vec<Item> = inputs
         .values
         .into_iter()
-        .map(|(file, value)| {
-            let ty = target.clone().or_else(|| typing.types.type_of(&value));
+        .map(|(file, value, inferred)| {
+            let ty = target.clone().or(inferred).or_else(|| typing.types.type_of(&value));
             Item {
                 value,
                 src: source_names[file].clone(),

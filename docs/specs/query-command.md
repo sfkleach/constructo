@@ -37,7 +37,9 @@ nothing.
 - **Typed,** the inputs are those of [the check command](check-command.md), read in the same way. The types and every
   value are checked, as `check` checks them, before the query runs, and the first error ends the run. With
   `--type=TYPE`, every value is checked against the type, which is any type of the root project, such as `Shape`,
-  `[Shape]` or `Option<Shape>`, as for `convert --from=json-typed`.
+  `[Shape]` or `Option<Shape>`, as for `convert --from=json-typed`. Without it, a value has the type that the check
+  infers for it, so that `Pair(1)` of `enum Pair<T> = Pair(T, other: T);` is a `Pair<Nat>`, whose omitted `other` is
+  `0`, and `[1, 2.5]` is a `[Float]`. A type that the value leaves open, such as the `T` of `None`, stays unknown.
 
 The query is read and checked before any input.
 
