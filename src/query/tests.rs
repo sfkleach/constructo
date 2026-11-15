@@ -393,3 +393,136 @@ fn a_const_reference_needs_the_types() {
         e
     );
 }
+
+// Typed queries.
+
+/// Runs a typed query over the values in `input`, with the declarations in `types`, as `query` does.
+fn typed(types: &str, input: &str, text: &str, type_text: Option<&str>) -> Result<String, String> {
+    let expr = prepare(text).map_err(|d| format!("before any value: {}", d))?;
+    let sources = vec![
+        crate::prelude_source(),
+        Source {
+            name: "in.types".to_string(),
+            text: types.to_string(),
+        },
+        Source {
+            name: "in.values".to_string(),
+            text: input.to_string(),
+        },
+    ];
+    let layout = crate::plain_layout(&sources);
+    let names = constructor_names(&expr);
+    let mut written = String::new();
+    let result = crate::query_typed(
+        &sources,
+        &layout,
+        &crate::CheckOptions::default(),
+        &names,
+        type_text,
+        &mut |inputs| {
+            run_typed(&expr, inputs, &mut |v| {
+                written.push_str(&render(v, true));
+                Ok(())
+            })
+        },
+    );
+    let shown = written.trim_end().replace(";\n", "; ");
+    match result {
+        Ok(()) => Ok(shown),
+        Err(crate::QueryTypedError::Invalid(ds)) => Err(format!("invalid: {}", ds[0])),
+        Err(crate::QueryTypedError::Query(d)) => Err(format!("before any value: {}", d)),
+        Err(crate::QueryTypedError::Run(RunError::Failed(Failure::Error(d)))) => Err(format!("{}after: {}", d, shown)),
+        Err(crate::QueryTypedError::Run(e)) => Err(format!("{:?}", e)),
+    }
+}
+
+fn typed_ok(types: &str, input: &str, text: &str) -> String {
+    typed(types, input, text, None).unwrap_or_else(|e| panic!("{} failed: {}", text, e))
+}
+
+fn typed_err(types: &str, input: &str, text: &str) -> String {
+    match typed(types, input, text, None) {
+        Ok(out) => panic!("{} gave {}", text, out),
+        Err(e) => e,
+    }
+}
+
+#[test]
+fn e11b_a_named_argument_typed() {
+    let types = "enum R = Record(Bool, right: Bool);";
+    assert_eq!(
+        typed_ok(types, RECORDS, "@values.flat_map(|rs| rs.iter().map(|r| r.right))"),
+        "false; false;"
+    );
+    assert_eq!(
+        typed_ok(
+            types,
+            "Record(true, right: false);",
+            "@values.filter_match(|Record(_, right: r)| r)"
+        ),
+        "false;"
+    );
+}
+
+#[test]
+fn e20_typed_a_nat_in_a_float_field_is_a_float() {
+    let types = "enum M = M { y: Float };";
+    assert_eq!(
+        typed_ok(
+            types,
+            "M { y: 1.5 }; M { y: 5 };",
+            "@values.filter(|m| m.y > 0.0).count()"
+        ),
+        "2;"
+    );
+    // The value keeps its text, and the cast to its own kind does nothing.
+    assert_eq!(typed_ok(types, "M { y: 5 };", "@values.map(|m| m.y as Float)"), "5;");
+    assert_eq!(typed_ok(types, "M { y: 5 };", "@values.map(|m| m.y * 2.0)"), "10.0;");
+}
+
+const SHAPES: &str = "enum Shape = Circle { r: Float }, Dot;\nenum T = T(a: Nat, b: Shape);\nconst origin = T(a: 3);";
+
+#[test]
+fn typed_defaults_consts_and_positions() {
+    let input = "T(a: 1); origin; T(2, Circle { r: 1.0 });";
+    assert_eq!(
+        typed_ok(SHAPES, input, "@values.map(|t| t.b)"),
+        "Circle { r: 0.0 }; Circle { r: 0.0 }; Circle { r: 1.0 };"
+    );
+    assert_eq!(typed_ok(SHAPES, input, "@values.map(|t| t.0)"), "1; 3; 2;");
+    assert_eq!(
+        typed_ok(SHAPES, input, "@values.map(|t| t.update(|t| t.a = 7))"),
+        "T(a: 7); T(a: 7); T(7, Circle { r: 1.0 });"
+    );
+}
+
+#[test]
+fn typed_names_are_resolved() {
+    let input = "T(a: 1, b: Dot); T(a: 2, b: Circle { r: 1.0 });";
+    assert_eq!(typed_ok(SHAPES, input, "@values.filter(|t| t.b == Dot).count()"), "1;");
+    let e = typed_err(SHAPES, input, "@values.map(|t| Squar)");
+    assert!(
+        e.starts_with("before any value") && e.contains("Unknown constructor Squar"),
+        "{}",
+        e
+    );
+}
+
+#[test]
+fn typed_values_are_checked_before_the_query_runs() {
+    let e = typed_err(SHAPES, "T(a: 1); T(a: \"x\");", "@values");
+    assert!(e.starts_with("invalid") && e.contains("in.values"), "{}", e);
+}
+
+#[test]
+fn typed_update_must_fit() {
+    let e = typed_err(SHAPES, "T(a: 1);", r#"@values.map(|t| t.update(|t| t.a = "x"))"#);
+    assert!(e.contains("does not fit") && e.contains("a Nat"), "{}", e);
+}
+
+#[test]
+fn typed_with_a_type_for_every_value() {
+    let e = typed(SHAPES, "T(a: 1);", "@values", Some("Shape")).unwrap_err();
+    assert!(e.starts_with("invalid") && e.contains("Expected Shape"), "{}", e);
+    assert_eq!(typed(SHAPES, "Dot;", "@values", Some("Shape")).unwrap(), "Dot;");
+}
