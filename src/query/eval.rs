@@ -345,7 +345,7 @@ pub fn eval(expr: &Expr, env: &Env, values: &mut Option<Stream>) -> R<Val> {
                     }
                     Some(TaggedBody::Tuple(out))
                 }
-                Some(CtorBody::Array(items)) => Some(TaggedBody::Array(array(items, env, values)?)),
+                Some(CtorBody::Array(items)) => Some(TaggedBody::Array(array(items, env, values)?.0)),
             };
             one(made(tagged(name, body), pos, &query_src(), false))
         }
@@ -354,8 +354,10 @@ pub fn eval(expr: &Expr, env: &Env, values: &mut Option<Stream>) -> R<Val> {
             one(made(ValueKind::Record(members), pos, &query_src(), false))
         }
         ExprKind::Array(items) => {
-            let items = array(items, env, values)?;
-            one(made(ValueKind::Array(items), pos, &query_src(), false))
+            let (items, element) = array(items, env, values)?;
+            let mut array = made(ValueKind::Array(items), pos, &query_src(), false);
+            array.ty = element.map(|t| Ty::Array(Rc::new(t)));
+            one(array)
         }
         ExprKind::Field(of, name) => {
             let of = item(of, env, values)?;
@@ -493,7 +495,8 @@ fn item(expr: &Expr, env: &Env, values: &mut Option<Stream>) -> R<Item> {
     }
 }
 
-fn array(items: &[Expr], env: &Env, values: &mut Option<Stream>) -> R<Vec<Value>> {
+/// The elements of an array, with the type of its elements when the types of the elements tell it.
+fn array(items: &[Expr], env: &Env, values: &mut Option<Stream>) -> R<(Vec<Value>, Option<Ty>)> {
     let mut out: Vec<Item> = Vec::new();
     for e in items {
         out.push(item(e, env, values)?);
@@ -502,11 +505,36 @@ fn array(items: &[Expr], env: &Env, values: &mut Option<Stream>) -> R<Vec<Value>
     let mut adapted = Vec::new();
     for item in out {
         adapted.push(match common {
-            Some(common) => adapt(item, common)?.value,
-            None => item.value,
+            Some(common) => adapt(item, common)?,
+            None => item,
         });
     }
-    Ok(adapted)
+    let element = element_of(&adapted);
+    Ok((adapted.into_iter().map(|i| i.value).collect(), element))
+}
+
+/// The type of the elements of an array of the items: the join of their types, as for `[1, 2.5]` in the types, so that
+/// an [Int] and a [Float] make a [[Float]]. A number without a type has the kind of its text. An element whose type is
+/// not known, or types that do not join, leave it unknown.
+fn element_of(items: &[Item]) -> Option<Ty> {
+    let ty_of = |i: &Item| {
+        i.ty.clone().or_else(|| {
+            num(i).map(|(kind, _)| match kind {
+                NumKind::Nat => Ty::Nat,
+                NumKind::Int => Ty::Int,
+                NumKind::Float => Ty::Float,
+            })
+        })
+    };
+    let (first, rest) = items.split_first()?;
+    let mut element = ty_of(first);
+    for i in rest {
+        element = match (&element, ty_of(i)) {
+            (Some(so_far), Some(ty)) => super::typed_check::join(so_far, &ty),
+            _ => None,
+        };
+    }
+    element
 }
 
 /// Checks that the elements of an array have a common type, as far as their kinds can tell: numbers of one kind (a
@@ -1065,15 +1093,8 @@ fn stream_method(
             }
             let common = common_kind(&items)?;
             let src = items.first().map(|i| i.src.clone()).unwrap_or_else(query_src);
-            // The array keeps the type of its elements, when every element has the same one, so that it is known again
-            // when they are taken out. Elements of different types, such as an [Int] and a [Float] from the branches
-            // of an `if`, leave it unknown, since the type of one would misread the others.
-            let element = items.first().and_then(|i| i.ty.clone()).filter(|first| {
-                items.iter().all(|i| {
-                    i.ty.as_ref()
-                        .is_some_and(|t| super::typed_check::agree(t, first, false))
-                })
-            });
+            // The array keeps the type of its elements, so that it is known again when they are taken out.
+            let element = element_of(&items);
             let mut values = Vec::new();
             for item in items {
                 values.push(match common {
@@ -1314,7 +1335,10 @@ fn set_path(at: &mut Value, ty: Option<Ty>, steps: &[Step], new: &Item, whole: &
     };
     let Some((step, rest)) = steps.split_first() else {
         if let Some(ty) = ty.filter(known) {
-            if !fits(&ty, &new.value) {
+            // The new value's type decides as well as its value, since a Float such as `const h: Float = 5` has the
+            // text of a Nat, which would fit a Nat.
+            let declared = new.ty.as_ref().filter(|t| known(t));
+            if !fits(&ty, &new.value) || declared.is_some_and(|d| !super::typed_check::compatible(d, &ty)) {
                 return at_query(
                     pos,
                     format!(
@@ -1503,15 +1527,21 @@ fn fits(ty: &Ty, value: &Value) -> bool {
     }
 }
 
-/// Whether the const of the name, if it is one that the types declare, has a value that fits the type. The chain of
-/// consts that one value may name ends, since a const cannot refer to itself.
+/// Whether the const of the name, if it is one that the types declare, fits the type. The chain of consts that one
+/// value may name ends, since a const cannot refer to itself.
 fn const_fits(ty: &Ty, name: &str) -> bool {
     if !crate::convert::is_const_name(name) {
         return false;
     }
-    match typing() {
-        Some(typing) => typing.types.constant(name).is_some_and(|(value, _)| fits(ty, value)),
-        None => false,
+    let Some(typing) = typing() else { return false };
+    let Some((value, declared)) = typing.types.constant(name) else {
+        return false;
+    };
+    // The type of the const decides, as it does for a value of that type: `const h: Float = 5` is a Float, which
+    // does not fit a Nat, though its value would. Only without a known type does the value decide.
+    match declared {
+        Some(declared) if known(declared) => super::typed_check::compatible(declared, ty),
+        _ => fits(ty, value),
     }
 }
 

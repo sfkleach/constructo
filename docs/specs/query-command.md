@@ -108,8 +108,11 @@ argument cannot be known, and asking for one is an error that says to supply the
 
 Typed, a named argument is found however it was written, an omitted one takes its default, a const is seen into, a
 number takes the kind of its place, so a `5` in a `Float` field is a `Float`, and the constructor names of the query
-are resolved as a values file of the root project would resolve them, so an unknown one is an error. `update` checks
-that the new value fits, and an omitted argument that it changes is written by name.
+are resolved as a values file of the root project would resolve them, so an unknown one is an error. An array that
+the query makes, with `[...]` or `collect`, has the join of the types of its elements, as the types give `[1, 2.5]`
+the type `[Float]`, so collecting an `[Int]` and a `[Float]` makes a `[[Float]]`. `update` checks that the new value
+fits, by its type as well as its value, so `const h: Float = 5` does not fit a `Nat` field, and an omitted argument
+that it changes is written by name.
 
 A typed query may also name a const of the types in an expression, as `origin` or `shapes::origin`: a name that no
 pattern binds is a const, and a binding hides a const of the same name, so `#values.map(|origin| origin)` gives each

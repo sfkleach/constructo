@@ -1005,12 +1005,39 @@ fn the_parts_of_a_const_are_bound_with_its_type() {
 }
 
 #[test]
-fn collected_elements_of_different_types_leave_the_element_type_unknown() {
+fn collected_elements_have_the_join_of_their_types() {
+    // An [Int] and a [Float] make a [[Float]], as they would in the types, so the Int is read as a Float and a Float
+    // with the text of a whole number is not read as a Nat.
     let types = "enum R = R { ints: [Int], floats: [Float], choose: Bool };";
     let input = "R { ints: [+1], floats: [1.5], choose: true };\nR { ints: [+1], floats: [1.5], choose: false };";
     let query = "#values.map(|r| if r.choose then r.ints else r.floats endif).collect().iter()\
                  .flat_map(|a| a.iter()).map(|n| n + 1)";
-    assert_eq!(typed(types, input, query, Some("R")).unwrap(), "+2; 2.5;");
+    assert_eq!(typed(types, input, query, Some("R")).unwrap(), "2.0; 2.5;");
+    let whole = "R { ints: [+1], floats: [5], choose: true };\nR { ints: [+1], floats: [5], choose: false };";
+    let halves = "#values.map(|r| if r.choose then r.ints else r.floats endif).collect().iter()\
+                  .flat_map(|a| a.iter()).map(|n| n / 2)";
+    assert_eq!(typed(types, whole, halves, Some("R")).unwrap(), "0.5; 2.5;");
+}
+
+#[test]
+fn collected_elements_keep_a_type_with_a_part_not_known() {
+    // The type of r is { a: Float, t: T }, with T not known, which is the same for every element.
+    let types = "enum W<T> = W { r: { a: Float, t: T } };";
+    assert_eq!(
+        typed_ok(
+            types,
+            "W { r: { a: 5, t: [] } };",
+            "#values.map(|w| w.r).collect().iter().map(|r| r.a / 2)"
+        ),
+        "2.5;"
+    );
+}
+
+#[test]
+fn an_array_literal_keeps_the_types_of_its_elements() {
+    let types = "enum U = Unit;\nconst h: Float = 5;";
+    assert_eq!(typed_ok(types, "Unit;", "#values.map(|u| [h][0] / 2)"), "2.5;");
+    assert_eq!(typed_ok(types, "Unit;", "#values.map(|u| [1, h][0] / 2)"), "0.5;");
 }
 
 #[test]
@@ -1057,4 +1084,36 @@ fn a_const_of_another_type_does_not_fit_an_enum_field() {
         ),
         "H { s: Dot };"
     );
+}
+
+#[test]
+fn the_declared_type_of_a_new_value_decides_whether_it_fits() {
+    let types = "enum C = C { a: [Nat], n: Nat, f: Float };\nconst h: Float = 5;\nconst k = 5;";
+    let input = "C { a: [1], n: 1, f: 1.5 };";
+    for refused in ["x.a = [h]", "x.n = h"] {
+        let e = typed_err(types, input, &format!("#values.map(|c| c.update(|x| {}))", refused));
+        assert!(e.contains("does not fit"), "{}: {}", refused, e);
+    }
+    assert_eq!(
+        typed_ok(
+            types,
+            input,
+            "#values.map(|c| c.update(|x| x.a = [k]).update(|x| x.n = k).update(|x| x.f = h))"
+        ),
+        "C { a: [5], n: 5, f: 5 };"
+    );
+}
+
+#[test]
+fn a_const_that_an_input_names_fits_by_its_declared_type() {
+    // The input names the consts, so the references reach the fitting of the new value unexpanded.
+    let types = "enum Shape = Dot, Circle { r: Nat };\nconst d: Shape = Dot;\nconst w: Float = 5;\n\
+                 enum H = H { s: Shape, t: Shape, n: Nat, f: Float };";
+    let input = "H { s: Dot, t: d, n: 1, f: w };";
+    assert_eq!(
+        typed_ok(types, input, "#values.map(|h| h.update(|x| x.s = h.t))"),
+        "H { s: d, t: d, n: 1, f: w };"
+    );
+    let e = typed_err(types, input, "#values.map(|h| h.update(|x| x.n = h.f))");
+    assert!(e.contains("does not fit"), "{}", e);
 }

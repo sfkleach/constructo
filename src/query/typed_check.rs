@@ -655,7 +655,7 @@ fn same(a: &Ty, b: &Ty) -> bool {
 
 /// Whether two types agree, comparing their arguments, elements and fields. A part that is not known agrees with
 /// anything when `lenient`, and with nothing otherwise.
-pub(super) fn agree(a: &Ty, b: &Ty, lenient: bool) -> bool {
+fn agree(a: &Ty, b: &Ty, lenient: bool) -> bool {
     if !known(a) || !known(b) {
         return lenient;
     }
@@ -675,8 +675,52 @@ pub(super) fn agree(a: &Ty, b: &Ty, lenient: bool) -> bool {
     }
 }
 
+/// The type that values of two types have when they are put in one array: the same type, with each number the wider
+/// of the two, as the inference of the types joins `[1, 2.5]` into `[Float]`. A part that is not known in either stays
+/// not known, since a type that is narrower than one of the values would misread it. Types that do not join have none.
+pub(super) fn join(a: &Ty, b: &Ty) -> Option<Ty> {
+    if !known(a) {
+        return Some(a.clone());
+    }
+    if !known(b) {
+        return Some(b.clone());
+    }
+    let rank = |t: &Ty| match t {
+        Ty::Nat => Some(0),
+        Ty::Int => Some(1),
+        Ty::Float => Some(2),
+        _ => None,
+    };
+    match (a, b) {
+        (x, y) if rank(x).is_some() && rank(y).is_some() => {
+            Some(if rank(x) >= rank(y) { x.clone() } else { y.clone() })
+        }
+        (Ty::Str, Ty::Str) => Some(Ty::Str),
+        (Ty::Array(x), Ty::Array(y)) => Some(Ty::Array(std::rc::Rc::new(join(x, y)?))),
+        (Ty::Record(xs), Ty::Record(ys)) if xs.len() == ys.len() => {
+            let mut fields = Vec::new();
+            for ((n, p), (m, q)) in xs.iter().zip(ys.iter()) {
+                if n != m {
+                    return None;
+                }
+                fields.push((n.clone(), join(p, q)?));
+            }
+            Some(Ty::Record(std::rc::Rc::new(fields)))
+        }
+        (Ty::Enum(x, xs), Ty::Enum(y, ys)) if x == y && xs.len() == ys.len() => {
+            let args = xs
+                .iter()
+                .zip(ys.iter())
+                .map(|(p, q)| join(p, q))
+                .collect::<Option<Vec<_>>>()?;
+            Some(Ty::Enum(x.clone(), std::rc::Rc::new(args)))
+        }
+        _ => None,
+    }
+}
+
 /// Whether a value of one type can go where another is expected, with the widening of numbers.
-fn compatible(new: &Ty, at: &Ty) -> bool {
+pub(super) fn compatible(new: &Ty, at: &Ty) -> bool {
     match (new, at) {
         (Ty::Nat, Ty::Int | Ty::Float) | (Ty::Int, Ty::Float) => true,
         (x, y) if !known(x) || !known(y) => true,

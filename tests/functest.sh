@@ -2391,6 +2391,9 @@ expect_query_error "a query is required" 2 "" "error: the following required arg
 expect_query_error "a query cannot be given both ways" 2 "" "error: the argument '--expr <EXPR>' cannot be used with" \
     -e '#values' --expr-file="$QUERY_EXAMPLES/valid/match.query" "$query_dir/moves.values"
 expect_query "--expr is the long form of -e" "3;" --expr='#values.count()' "$query_dir/moves.values"
+expect_query "a query may start with a hyphen" "-3;" -e '-(#values.count() as Int)' "$query_dir/moves.values"
+expect_query "a query file may start with a byte-order mark" "3;" \
+    --expr-file=<(printf '\xef\xbb\xbf#values.count()\n') "$query_dir/moves.values"
 expect_query "a query file with --stdin" "Move { x: 1, y: 2 }; Quit; Move { x: 3, y: 4 };" \
     --expr-file=<(printf '// Every value.\n#values\n') --stdin <"$query_dir/moves.values"
 
