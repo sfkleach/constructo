@@ -1032,6 +1032,10 @@ fn query_files(text: &str, compact: bool, stdin: bool, experimental: Experimenta
             }
         }
         Err(RunError::Write(e)) => write_failure(&e),
+        Err(RunError::Query(diagnostic)) => {
+            eprintln!("{}", diagnostic);
+            ExitCode::from(EXIT_USAGE)
+        }
     }
 }
 
@@ -1087,6 +1091,10 @@ fn query_typed_files(
                     ExitCode::from(EXIT_USAGE)
                 }
             }
+        }
+        Err(QueryTypedError::Run(RunError::Query(diagnostic))) => {
+            eprintln!("{}", diagnostic);
+            ExitCode::from(EXIT_USAGE)
         }
         Err(QueryTypedError::Run(RunError::Write(e))) => write_failure(&e),
     }

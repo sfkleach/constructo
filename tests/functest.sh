@@ -2403,6 +2403,12 @@ expect_query_error "typed: an unknown constructor in the query" 2 "" "ERROR: Unk
     '@values.map(|s| Square)' "$query_dir/r.types" "$query_dir/shapes.values"
 expect_query_error "typed: a value of the wrong type is found before the query runs" 1 "" "ERROR: Expected Shape" \
     --type=Shape '@values' "$query_dir/r.types" "$query_dir/r.values"
+expect_query_error "typed: --type finds a mistake before any value is read" 2 "" \
+    "ERROR: No constructor of Shape has a field or a parameter radius" --type=Shape '@values.map(|s| s.radius)' \
+    "$query_dir/r.types" "$query_dir/shapes.values"
+expect_query_error "typed: a match must cover every constructor" 2 "" "ERROR: The match does not cover Dot of Shape" \
+    --type=Shape '@values.map(|s| match s with Circle { r } => r, endmatch)' "$query_dir/r.types" \
+    "$query_dir/shapes.values"
 rm -f "$query_dir/out" "$query_dir/err" "$query_dir/moves.values" "$query_dir/arrays.values" "$query_dir/r.types" \
     "$query_dir/r.values" "$query_dir/shapes.values"
 rmdir "$query_dir"
