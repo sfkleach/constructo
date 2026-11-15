@@ -1,0 +1,2 @@
+// expect: ERROR: Comparisons cannot be chained; use && between them
+#values.map(|s| 1 < 2 < 3)

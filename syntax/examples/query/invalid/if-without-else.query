@@ -1,0 +1,2 @@
+// expect: ERROR: An 'if' needs an 'else', since it must give a value
+#values.map(|s| if s == Dot then 1 endif)

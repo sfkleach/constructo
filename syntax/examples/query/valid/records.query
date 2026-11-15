@@ -1,0 +1,5 @@
+// A bare record names its fields, a constructor may use shorthand, and ..base keeps the rest.
+// output: { swapped: Point { y: -2, x: +1 }, moved: Point { x: +5, y: -2 }, bare: { a: +1, b: -2 } };
+#values.filter_match(|Poly[p @ Point { x, y }, ..]|
+    { swapped: Point { y, x }, moved: Point { x: +5, ..p }, bare: { a: x, b: y } }
+)

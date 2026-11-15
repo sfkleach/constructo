@@ -1,0 +1,2 @@
+// expect: ERROR: A positional argument cannot follow a named one
+#values.map(|s| Rect(w: 1.0, 2.0))

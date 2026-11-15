@@ -1,0 +1,750 @@
+// Query Grammar
+Diagram(
+    Comment('Query'),
+    NonTerminal('Expression')
+)
+
+// Expression
+Diagram(
+    Comment('Expression'),
+    Sequence(
+        NonTerminal('Disjunction'),
+        Optional(
+            Sequence(
+                Choice(0,
+                    Terminal('='),
+                    Terminal('+='),
+                    Terminal('-='),
+                    Terminal('*='),
+                    Terminal('/='),
+                    Terminal('%=')
+                ),
+                NonTerminal('Disjunction'),
+                Comment('only in the closure of update')
+            )
+        )
+    )
+)
+
+// Disjunction
+Diagram(
+    Comment('Disjunction'),
+    Sequence(
+        NonTerminal('Conjunction'),
+        ZeroOrMore(
+            Sequence(
+                Terminal('||'),
+                NonTerminal('Conjunction')
+            )
+        )
+    )
+)
+
+// Conjunction
+Diagram(
+    Comment('Conjunction'),
+    Sequence(
+        NonTerminal('Comparison'),
+        ZeroOrMore(
+            Sequence(
+                Terminal('&&'),
+                NonTerminal('Comparison')
+            )
+        )
+    )
+)
+
+// Comparison
+Diagram(
+    Comment('Comparison'),
+    Sequence(
+        NonTerminal('Sum'),
+        Optional(
+            Sequence(
+                Choice(0,
+                    Terminal('=='),
+                    Terminal('!='),
+                    Terminal('<'),
+                    Terminal('<='),
+                    Terminal('>'),
+                    Terminal('>=')
+                ),
+                NonTerminal('Sum'),
+                Comment('comparisons do not chain')
+            )
+        )
+    )
+)
+
+// Sum
+Diagram(
+    Comment('Sum'),
+    Sequence(
+        NonTerminal('Product'),
+        ZeroOrMore(
+            Sequence(
+                Choice(0, Terminal('+'), Terminal('-')),
+                NonTerminal('Product')
+            )
+        )
+    )
+)
+
+// Product
+Diagram(
+    Comment('Product'),
+    Sequence(
+        NonTerminal('Cast'),
+        ZeroOrMore(
+            Sequence(
+                Choice(0, Terminal('*'), Terminal('/'), Terminal('%')),
+                NonTerminal('Cast')
+            )
+        )
+    )
+)
+
+// Cast
+Diagram(
+    Comment('Cast'),
+    Sequence(
+        NonTerminal('Unary'),
+        ZeroOrMore(
+            Sequence(
+                Terminal('as'),
+                Choice(0, Terminal('Nat'), Terminal('Int'), Terminal('Float'))
+            )
+        )
+    )
+)
+
+// Unary
+Diagram(
+    Comment('Unary'),
+    Sequence(
+        ZeroOrMore(
+            Choice(0,
+                Terminal('!'),
+                Sequence(Terminal('-'), Comment('not touching a number'))
+            )
+        ),
+        NonTerminal('Postfix')
+    )
+)
+
+// Postfix
+Diagram(
+    Comment('Postfix'),
+    Sequence(
+        NonTerminal('Primary'),
+        ZeroOrMore(
+            Choice(0,
+                Sequence(
+                    Terminal('.'),
+                    NonTerminal('name'),
+                    Optional(NonTerminal('Arguments'), 'skip'),
+                    Comment('field or method')
+                ),
+                Sequence(
+                    Terminal('.'),
+                    NonTerminal('Nat'),
+                    Comment('position')
+                ),
+                Sequence(
+                    Terminal('['),
+                    NonTerminal('Expression'),
+                    Terminal(']')
+                )
+            )
+        )
+    )
+)
+
+// Arguments
+Diagram(
+    Comment('Arguments'),
+    Sequence(
+        Terminal('('),
+        Optional(
+            Sequence(
+                NonTerminal('Expression'),
+                ZeroOrMore(
+                    Sequence(
+                        Terminal(','),
+                        NonTerminal('Expression')
+                    )
+                ),
+                Optional(Terminal(','))
+            )
+        ),
+        Terminal(')')
+    )
+)
+
+// Primary
+Diagram(
+    Comment('Primary'),
+    Choice(0,
+        NonTerminal('Literal'),
+        Terminal('#values'),
+        NonTerminal('ConstructorExpr'),
+        Sequence(NonTerminal('name'), Comment('variable, true, false or null')),
+        NonTerminal('RecordExpr'),
+        NonTerminal('ArrayExpr'),
+        Sequence(
+            Terminal('('),
+            NonTerminal('Expression'),
+            Terminal(')')
+        ),
+        NonTerminal('Closure'),
+        NonTerminal('If'),
+        NonTerminal('Match'),
+        NonTerminal('Matches')
+    )
+)
+
+// Literal
+Diagram(
+    Comment('Literal'),
+    Choice(0,
+        Sequence(
+            Optional(
+                Sequence(
+                    Choice(0, Terminal('+'), Terminal('-')),
+                    Comment('touching the number')
+                ),
+                'skip'
+            ),
+            Choice(0,
+                NonTerminal('Nat'),
+                NonTerminal('Float')
+            )
+        ),
+        NonTerminal('String')
+    )
+)
+
+// ConstructorName
+Diagram(
+    Comment('ConstructorName'),
+    Sequence(
+        Optional(NonTerminal('Qualifier')),
+        NonTerminal('TypeName')
+    )
+)
+
+// ConstructorExpr
+Diagram(
+    Comment('ConstructorExpr'),
+    Sequence(
+        NonTerminal('ConstructorName'),
+        Optional(
+            Choice(0,
+                NonTerminal('ConstructorRecord'),
+                NonTerminal('ConstructorTuple'),
+                NonTerminal('ArrayExpr')
+            )
+        )
+    )
+)
+
+// RecordExpr
+Diagram(
+    Comment('RecordExpr'),
+    Sequence(
+        Terminal('{'),
+        Optional(
+            Choice(0,
+                Sequence(
+                    NonTerminal('FieldInit'),
+                    ZeroOrMore(
+                        Sequence(
+                            Terminal(','),
+                            NonTerminal('FieldInit')
+                        )
+                    ),
+                    Optional(
+                        Sequence(
+                            Terminal(','),
+                            Optional(NonTerminal('Base'))
+                        )
+                    )
+                ),
+                NonTerminal('Base')
+            )
+        ),
+        Terminal('}')
+    )
+)
+
+// FieldInit
+Diagram(
+    Comment('FieldInit'),
+    Sequence(
+        NonTerminal('name'),
+        Terminal(':'),
+        NonTerminal('Expression')
+    )
+)
+
+// Base
+Diagram(
+    Comment('Base'),
+    Sequence(
+        Terminal('..'),
+        NonTerminal('Expression'),
+        Optional(Terminal(','))
+    )
+)
+
+// ConstructorRecord
+Diagram(
+    Comment('ConstructorRecord'),
+    Sequence(
+        Terminal('{'),
+        Optional(
+            Choice(0,
+                Sequence(
+                    NonTerminal('FieldOrShorthand'),
+                    ZeroOrMore(
+                        Sequence(
+                            Terminal(','),
+                            NonTerminal('FieldOrShorthand')
+                        )
+                    ),
+                    Optional(
+                        Sequence(
+                            Terminal(','),
+                            Optional(NonTerminal('Base'))
+                        )
+                    )
+                ),
+                NonTerminal('Base')
+            )
+        ),
+        Terminal('}')
+    )
+)
+
+// FieldOrShorthand
+Diagram(
+    Comment('FieldOrShorthand'),
+    Sequence(
+        NonTerminal('name'),
+        Optional(
+            Sequence(
+                Terminal(':'),
+                NonTerminal('Expression')
+            ),
+            'skip'
+        )
+    )
+)
+
+// ConstructorTuple
+Diagram(
+    Comment('ConstructorTuple'),
+    Sequence(
+        Terminal('('),
+        Optional(
+            Sequence(
+                Choice(0,
+                    Sequence(
+                        NonTerminal('Expression'),
+                        ZeroOrMore(
+                            Sequence(
+                                Terminal(','),
+                                NonTerminal('Expression')
+                            )
+                        ),
+                        Optional(
+                            Sequence(
+                                Terminal(','),
+                                NonTerminal('NamedArgInit'),
+                                ZeroOrMore(
+                                    Sequence(
+                                        Terminal(','),
+                                        NonTerminal('NamedArgInit')
+                                    )
+                                )
+                            )
+                        )
+                    ),
+                    Sequence(
+                        NonTerminal('NamedArgInit'),
+                        ZeroOrMore(
+                            Sequence(
+                                Terminal(','),
+                                NonTerminal('NamedArgInit')
+                            )
+                        )
+                    )
+                ),
+                Optional(Terminal(','))
+            )
+        ),
+        Terminal(')')
+    )
+)
+
+// NamedArgInit
+Diagram(
+    Comment('NamedArgInit'),
+    Sequence(
+        NonTerminal('name'),
+        Terminal(':'),
+        NonTerminal('Expression')
+    )
+)
+
+// ArrayExpr
+Diagram(
+    Comment('ArrayExpr'),
+    Sequence(
+        Terminal('['),
+        Optional(
+            Sequence(
+                NonTerminal('Expression'),
+                ZeroOrMore(
+                    Sequence(
+                        Terminal(','),
+                        NonTerminal('Expression')
+                    )
+                ),
+                Optional(Terminal(','))
+            )
+        ),
+        Terminal(']')
+    )
+)
+
+// Closure
+Diagram(
+    Comment('Closure'),
+    Sequence(
+        Terminal('|'),
+        Optional(
+            Sequence(
+                NonTerminal('SinglePattern'),
+                ZeroOrMore(
+                    Sequence(
+                        Terminal(','),
+                        NonTerminal('SinglePattern')
+                    )
+                ),
+                Optional(Terminal(','))
+            )
+        ),
+        Terminal('|'),
+        NonTerminal('Expression')
+    )
+)
+
+// If
+Diagram(
+    Comment('If'),
+    Sequence(
+        Terminal('if'),
+        NonTerminal('Disjunction'),
+        Choice(0,
+            Sequence(
+                Terminal('then'),
+                NonTerminal('Expression'),
+                ZeroOrMore(
+                    Sequence(
+                        Terminal('elseif'),
+                        NonTerminal('Disjunction'),
+                        Terminal('then'),
+                        NonTerminal('Expression')
+                    )
+                ),
+                Terminal('else'),
+                NonTerminal('Expression'),
+                Terminal('endif')
+            ),
+            Sequence(
+                NonTerminal('Branch'),
+                ZeroOrMore(
+                    Sequence(
+                        Terminal('else'),
+                        Terminal('if'),
+                        NonTerminal('Disjunction'),
+                        NonTerminal('Branch')
+                    )
+                ),
+                Terminal('else'),
+                NonTerminal('Branch')
+            )
+        )
+    )
+)
+
+// Branch
+Diagram(
+    Comment('Branch'),
+    Sequence(
+        Terminal('{'),
+        NonTerminal('Expression'),
+        Terminal('}')
+    )
+)
+
+// Match
+Diagram(
+    Comment('Match'),
+    Sequence(
+        Terminal('match'),
+        NonTerminal('Disjunction'),
+        Choice(0,
+            Sequence(
+                Terminal('with'),
+                NonTerminal('Arms'),
+                Terminal('endmatch')
+            ),
+            Sequence(
+                Terminal('{'),
+                NonTerminal('Arms'),
+                Terminal('}')
+            )
+        )
+    )
+)
+
+// Arms
+Diagram(
+    Comment('Arms'),
+    Sequence(
+        NonTerminal('Arm'),
+        ZeroOrMore(
+            Sequence(
+                Terminal(','),
+                NonTerminal('Arm')
+            )
+        ),
+        Optional(Terminal(','))
+    )
+)
+
+// Arm
+Diagram(
+    Comment('Arm'),
+    Sequence(
+        NonTerminal('Pattern'),
+        Optional(
+            Sequence(
+                Terminal('if'),
+                NonTerminal('Expression')
+            ),
+            'skip'
+        ),
+        Terminal('=>'),
+        NonTerminal('Expression')
+    )
+)
+
+// Matches
+Diagram(
+    Comment('Matches'),
+    Sequence(
+        Terminal('matches'),
+        Terminal('!'),
+        Terminal('('),
+        NonTerminal('Expression'),
+        Terminal(','),
+        NonTerminal('Pattern'),
+        Optional(Terminal(',')),
+        Terminal(')')
+    )
+)
+
+// Pattern
+Diagram(
+    Comment('Pattern'),
+    Sequence(
+        NonTerminal('SinglePattern'),
+        ZeroOrMore(
+            Sequence(
+                Terminal('|'),
+                NonTerminal('SinglePattern')
+            )
+        )
+    )
+)
+
+// SinglePattern
+Diagram(
+    Comment('SinglePattern'),
+    Choice(0,
+        NonTerminal('Literal'),
+        Terminal('_'),
+        Sequence(
+            NonTerminal('ConstructorName'),
+            Optional(
+                Choice(0,
+                    NonTerminal('RecordPattern'),
+                    NonTerminal('TuplePattern'),
+                    NonTerminal('ArrayPattern')
+                )
+            )
+        ),
+        Sequence(
+            Choice(0, Terminal('true'), Terminal('false'), Terminal('null')),
+            Comment('const of the prelude')
+        ),
+        Sequence(
+            NonTerminal('name'),
+            Optional(
+                Sequence(
+                    Terminal('@'),
+                    NonTerminal('SinglePattern')
+                ),
+                'skip'
+            ),
+            Comment('binding')
+        ),
+        NonTerminal('RecordPattern'),
+        NonTerminal('ArrayPattern'),
+        Sequence(
+            Terminal('('),
+            NonTerminal('Pattern'),
+            Terminal(')')
+        )
+    )
+)
+
+// RecordPattern
+Diagram(
+    Comment('RecordPattern'),
+    Sequence(
+        Terminal('{'),
+        Optional(
+            Choice(0,
+                Sequence(
+                    NonTerminal('FieldPattern'),
+                    ZeroOrMore(
+                        Sequence(
+                            Terminal(','),
+                            NonTerminal('FieldPattern')
+                        )
+                    ),
+                    Optional(
+                        Sequence(
+                            Terminal(','),
+                            Optional(Terminal('..'))
+                        )
+                    )
+                ),
+                Terminal('..')
+            )
+        ),
+        Terminal('}')
+    )
+)
+
+// FieldPattern
+Diagram(
+    Comment('FieldPattern'),
+    Sequence(
+        NonTerminal('name'),
+        Optional(
+            Sequence(
+                Terminal(':'),
+                NonTerminal('Pattern')
+            ),
+            'skip'
+        )
+    )
+)
+
+// TuplePattern
+Diagram(
+    Comment('TuplePattern'),
+    Sequence(
+        Terminal('('),
+        Optional(
+            Choice(0,
+                Sequence(
+                    NonTerminal('ArgPattern'),
+                    ZeroOrMore(
+                        Sequence(
+                            Terminal(','),
+                            NonTerminal('ArgPattern')
+                        )
+                    ),
+                    Optional(
+                        Sequence(
+                            Terminal(','),
+                            Optional(Terminal('..'))
+                        )
+                    )
+                ),
+                Terminal('..')
+            )
+        ),
+        Terminal(')')
+    )
+)
+
+// ArgPattern
+Diagram(
+    Comment('ArgPattern'),
+    Sequence(
+        Optional(
+            Sequence(
+                NonTerminal('name'),
+                Terminal(':')
+            ),
+            'skip'
+        ),
+        NonTerminal('Pattern')
+    )
+)
+
+// ArrayPattern
+Diagram(
+    Comment('ArrayPattern'),
+    Sequence(
+        Terminal('['),
+        Optional(
+            Choice(0,
+                Sequence(
+                    NonTerminal('Pattern'),
+                    ZeroOrMore(
+                        Sequence(
+                            Terminal(','),
+                            NonTerminal('Pattern')
+                        )
+                    ),
+                    Optional(
+                        Sequence(
+                            Terminal(','),
+                            Optional(Terminal('..'))
+                        )
+                    )
+                ),
+                Terminal('..')
+            )
+        ),
+        Terminal(']')
+    )
+)
+
+// name
+Diagram(
+    Comment('name'),
+    Sequence(
+        NonTerminal('[a-z_]'),
+        ZeroOrMore(NonTerminal('[A-Za-z0-9_]')),
+        Comment('not a keyword')
+    )
+)
+
+// Comment
+Diagram(
+    Comment('Line comment (whitespace)'),
+    Sequence(
+        Terminal('//'),
+        ZeroOrMore(NonTerminal('any-char-except-newline')),
+        NonTerminal('newline')
+    )
+)

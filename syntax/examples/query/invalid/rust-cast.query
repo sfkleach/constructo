@@ -1,0 +1,2 @@
+// expect: ERROR: Casts name a Constructo type: Nat, Int or Float, not f64
+#values.map(|s| 1 as f64)

@@ -1,0 +1,2 @@
+// expect: ERROR: Expected ')' but found '('
+#values.map(|s| (|x| x)(s))

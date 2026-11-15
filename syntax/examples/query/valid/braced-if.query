@@ -1,0 +1,5 @@
+// Rust's form of if. Dot is not given the branch after it as its record, so the condition is s == Dot.
+// output: "other"; "other"; "dot"; "poly";
+#values.map(|s|
+    if s == Dot { "dot" } else if matches!(s, Poly[..]) { "poly" } else { "other" }
+)

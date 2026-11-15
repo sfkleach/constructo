@@ -1,0 +1,6 @@
+// The types that the query examples are run against.
+enum Shape = Circle { r: Float }, Rect(w: Float, h: Float), Dot, Poly[Point];
+enum Point = Point { x: Int, y: Int };
+enum Two = Two(Int, Int);
+enum Nest = Nest(Two, Two);
+const origin = Point { x: +0, y: +0 };

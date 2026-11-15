@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Generate grammar.md from a template and the grammar sources.
 
-The template's {{TYPES_RULES}} and {{VALUES_RULES}} placeholders are replaced with the names of the rules defined in
-the data-types and data-values grammar sources, so the text follows the grammars when they change.
+The template's {{TYPES_RULES}}, {{VALUES_RULES}} and {{QUERIES_RULES}} placeholders are replaced with the names of the
+rules defined in the data-types, data-values and query grammar sources, so the text follows the grammars when they
+change.
 """
 
 import argparse
@@ -29,6 +30,7 @@ def main():
     parser.add_argument("--template", required=True)
     parser.add_argument("--types", required=True, help="The data-types grammar source.")
     parser.add_argument("--values", required=True, help="The data-values grammar source.")
+    parser.add_argument("--queries", required=True, help="The query grammar source.")
     args = parser.parse_args()
 
     with open(args.template, encoding="utf-8") as f:
@@ -36,6 +38,7 @@ def main():
     replacements = {
         "{{TYPES_RULES}}": format_rules(rule_names(args.types)),
         "{{VALUES_RULES}}": format_rules(rule_names(args.values)),
+        "{{QUERIES_RULES}}": format_rules(rule_names(args.queries)),
     }
     for placeholder, value in replacements.items():
         if placeholder not in text:

@@ -1,0 +1,2 @@
+// expect: ERROR: A bare record names its fields: write s for the value, or { s: s } for a record
+#values.map(|s| { s })

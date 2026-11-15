@@ -2364,6 +2364,18 @@ expect_query_error() {
     fi
 }
 
+# The examples of the query grammar. A valid one names its output, written with --compact, in a "// output: ..." line,
+# and an invalid one names its error in a "// expect: ..." line, so that neither can pass for some other reason.
+QUERY_EXAMPLES="$(dirname "$0")/../syntax/examples/query"
+for f in "$QUERY_EXAMPLES"/valid/*.query; do
+    expect_query "example valid/$(basename "$f")" "$(sed -n 's|^// output: ||p' "$f")" --compact "$(cat "$f")" \
+        "$QUERY_EXAMPLES/shapes.types" "$QUERY_EXAMPLES/shapes.values"
+done
+for f in "$QUERY_EXAMPLES"/invalid/*.query; do
+    expect_query_error "example invalid/$(basename "$f")" 2 "" "$(sed -n 's|^// expect: ||p' "$f")" "$(cat "$f")" \
+        "$QUERY_EXAMPLES/shapes.types" "$QUERY_EXAMPLES/shapes.values"
+done
+
 expect_query "pass the input through" "Move { x: 1, y: 2 }; Quit; Move { x: 3, y: 4 };" '#values' \
     "$query_dir/moves.values"
 expect_query "filter_match with field shorthand after a constructor" "Point { x: 1, y: 2 }; Point { x: 3, y: 4 };" \

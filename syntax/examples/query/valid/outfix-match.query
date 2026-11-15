@@ -1,0 +1,3 @@
+// The outfix form of match, whose arms may end with a comma.
+// output: -1;
+#values.filter_map(|s| match s with Poly[Point { x, y }, ..] => Some(x + y), _ => None, endmatch)

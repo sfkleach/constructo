@@ -46,7 +46,8 @@ The query is read and checked before any input.
 ## The language
 
 A query is an expression. It is Rust's expressions with the changes that decision 44 makes; where it deviates from
-Rust, the deviation has a name of its own.
+Rust, the deviation has a name of its own. How a query is written is given by the
+[query grammar](../../syntax/grammar.md#query-grammar), whose examples are in `syntax/examples/query/`.
 
 - **`#values`** is a lazy iterator over the values of every input, in order. It may be used once, and not inside a
   closure.

@@ -1,0 +1,2 @@
+// expect: ERROR: Alternatives are separated by a single '|', not '||'
+#values.map(|s| match s { Dot||Circle { .. } => 1, _ => 2 })
