@@ -828,3 +828,21 @@ fn long_chains_are_limited_as_nesting_is() {
         assert_eq!(ok("0;", &format!("@values.map(|v| v{})", " + 1".repeat(150))), "150;");
     });
 }
+
+#[test]
+fn conditions_within_conditions_are_read_in_reasonable_time() {
+    // Each level makes the first reading of its condition fail, which once doubled the work at every level.
+    let mut e = "None".to_string();
+    for _ in 0..40 {
+        e = format!("if ({}) == None {{ None }} else {{ None }}", e);
+    }
+    let start = std::time::Instant::now();
+    crate::test_support::on_a_main_sized_stack(move || {
+        parser::parse_query(&format!("@values.map(|v| {})", e)).expect("the query parses");
+    });
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(5),
+        "took {:?}",
+        start.elapsed()
+    );
+}

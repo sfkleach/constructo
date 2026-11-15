@@ -8,6 +8,7 @@ use super::lexer::{lex, Tok, Token};
 use super::syntax::*;
 use crate::diagnostics::{Diagnostic, Pos};
 use crate::limits::MAX_DEPTH;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 /// The name that diagnostics give to the text of the query.
@@ -23,6 +24,7 @@ pub fn parse_query(text: &str) -> Result<Expr> {
         no_ctor_record: false,
         depth: 0,
         too_deep: false,
+        conditions: HashMap::new(),
     };
     let expr = parser.expr()?;
     if parser.peek() != &Tok::Eof {
@@ -30,6 +32,10 @@ pub fn parse_query(text: &str) -> Result<Expr> {
     }
     Ok(expr)
 }
+
+/// A condition that has been read: the condition and whether the outfix form follows, or the error, with the index of
+/// the token after it and whether the nesting limit was passed.
+type ReadCondition = (Result<(Expr, bool)>, usize, bool);
 
 struct Parser {
     tokens: Vec<Token>,
@@ -42,6 +48,10 @@ struct Parser {
     /// Whether the nesting limit has been passed. Reading a condition again cannot help then, so it is not tried,
     /// which would otherwise double the work at every level of a deeply nested query.
     too_deep: bool,
+    /// The conditions that have been read, by where they start and the state they were read in, with where they end.
+    /// A condition that is read a second time, as the inner conditions of one that is read again are, takes its result
+    /// from here, so that the work does not double at every level of conditions within conditions.
+    conditions: HashMap<(usize, bool, u32), ReadCondition>,
 }
 
 impl Parser {
@@ -642,6 +652,19 @@ impl Parser {
     /// constructor bodies included. If what follows is neither `outfix` nor `{`, it is read again without the record
     /// of a constructor, which a braced form's `{` would otherwise be taken for, as in `if v == None { x } else ...`.
     fn condition(&mut self, outfix: &str) -> Result<(Expr, bool)> {
+        let key = (self.index, self.no_ctor_record, self.depth);
+        if let Some((result, end, too_deep)) = self.conditions.get(&key) {
+            self.index = *end;
+            self.too_deep |= *too_deep;
+            return result.clone();
+        }
+        let result = self.read_condition(outfix);
+        self.conditions.insert(key, (result.clone(), self.index, self.too_deep));
+        result
+    }
+
+    /// Reads a condition, as `condition` describes, without looking for it among those already read.
+    fn read_condition(&mut self, outfix: &str) -> Result<(Expr, bool)> {
         let start = self.index;
         let depth = self.depth;
         let attempt = self.or_expr();
