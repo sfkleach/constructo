@@ -726,12 +726,14 @@ pub(super) fn compatible(new: &Ty, at: &Ty) -> bool {
         (x, y) if !known(x) || !known(y) => true,
         // A number widens where it is inside another type too, as it does when the value is fitted as the query runs.
         (Ty::Array(x), Ty::Array(y)) => compatible(x, y),
+        // The fields are paired by name and not by position, as `fits` and the checker do, so the order that the
+        // fields are declared in makes no difference. The lengths are equal and the names of a record differ, so
+        // every field of one is a field of the other.
         (Ty::Record(xs), Ty::Record(ys)) => {
             xs.len() == ys.len()
                 && xs
                     .iter()
-                    .zip(ys.iter())
-                    .all(|((n, p), (m, q))| n == m && compatible(p, q))
+                    .all(|(n, p)| ys.iter().any(|(m, q)| n == m && compatible(p, q)))
         }
         (Ty::Enum(x, xs), Ty::Enum(y, ys)) => {
             x == y && xs.len() == ys.len() && xs.iter().zip(ys.iter()).all(|(p, q)| compatible(p, q))

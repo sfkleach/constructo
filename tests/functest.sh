@@ -2409,6 +2409,11 @@ expect_query "take stops reading early" "Move { x: 1, y: 2 };" -e '#values.take(
 expect_query "a pipe among the files is read whole" "1;" -e '#values.count()' <(printf '1;\n')
 expect_query "update" "{ a: 10, b: { c: 20 } };" -e '#values.map(|v| v.update(|v| v.a = 10).update(|v| v.b.c = 20))' \
     --stdin < <(printf '{ a: 1, b: { c: 2 } };\n')
+printf 'enum T = C { a: { x: Nat, y: Nat }, b: { y: Nat, x: Nat } };\n' >"$query_dir/order.types"
+printf 'C { a: { x: 1, y: 2 }, b: { y: 3, x: 4 } };\n' >"$query_dir/order.values"
+expect_query "update assigns a record whose fields are declared in another order" \
+    "C { a: { y: 3, x: 4 }, b: { y: 3, x: 4 } };" -e '#values.map(|v| v.update(|v| v.a = v.b))' \
+    "$query_dir/order.types" "$query_dir/order.values"
 expect_query_error "an error at a value comes after the values before it" 1 "1;" \
     "ERROR: The index 0 is out of range for an array of 0 ($query_dir/arrays.values, line 2, col 1)" \
     -e '#values.map(|a| a[0])' "$query_dir/arrays.values"
@@ -2445,6 +2450,7 @@ expect_query_error "typed: a match must cover every constructor" 2 "" "ERROR: Th
     --type=Shape -e '#values.map(|s| match s with Circle { r } => r, endmatch)' "$query_dir/r.types" \
     "$query_dir/shapes.values"
 rm -f "$query_dir/out" "$query_dir/err" "$query_dir/moves.values" "$query_dir/arrays.values" "$query_dir/r.types" \
+    "$query_dir/order.types" "$query_dir/order.values" \
     "$query_dir/r.values" "$query_dir/shapes.values"
 rmdir "$query_dir"
 echo ""
