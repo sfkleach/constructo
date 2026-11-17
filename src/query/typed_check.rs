@@ -698,11 +698,12 @@ pub(super) fn join(a: &Ty, b: &Ty) -> Option<Ty> {
         (Ty::Str, Ty::Str) => Some(Ty::Str),
         (Ty::Array(x), Ty::Array(y)) => Some(Ty::Array(std::rc::Rc::new(join(x, y)?))),
         (Ty::Record(xs), Ty::Record(ys)) if xs.len() == ys.len() => {
+            // The fields are paired by name and not by position, as `compatible` pairs them, and the join keeps the
+            // order of the first. The lengths are equal and the names of a record differ, so every field of one is a
+            // field of the other.
             let mut fields = Vec::new();
-            for ((n, p), (m, q)) in xs.iter().zip(ys.iter()) {
-                if n != m {
-                    return None;
-                }
+            for (n, p) in xs.iter() {
+                let (_, q) = ys.iter().find(|(m, _)| m == n)?;
                 fields.push((n.clone(), join(p, q)?));
             }
             Some(Ty::Record(std::rc::Rc::new(fields)))
