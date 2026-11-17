@@ -1020,6 +1020,17 @@ fn collected_elements_have_the_join_of_their_types() {
 }
 
 #[test]
+fn collected_records_join_their_fields_by_name() {
+    // The fields of the two records are declared in different orders, and are paired by name, so the join is
+    // { x: Float, y: Float } and the Int is read as a Float.
+    let types = "enum R = R { p: { x: Int, y: Int }, q: { y: Float, x: Float }, choose: Bool };";
+    let input = "R { p: { x: +1, y: +1 }, q: { y: 1.5, x: 5 }, choose: true };\n\
+                 R { p: { x: +1, y: +1 }, q: { y: 1.5, x: 5 }, choose: false };";
+    let query = "#values.map(|r| if r.choose then r.p else r.q endif).collect().iter().map(|v| v.x / 2)";
+    assert_eq!(typed(types, input, query, Some("R")).unwrap(), "0.5; 2.5;");
+}
+
+#[test]
 fn collected_elements_keep_a_type_with_a_part_not_known() {
     // The type of r is { a: Float, t: T }, with T not known, which is the same for every element.
     let types = "enum W<T> = W { r: { a: Float, t: T } };";
