@@ -1,0 +1,12 @@
+# The adoptions of the scenario for Python, as `--adopt=adopt.toml` would read them. The spike does not read this
+# file: the generated code in shapes.py is written by hand as if it had. A function is named as `module:name`.
+
+[python.constructor."com.example.ids::Uuid"]
+type = "uuid.UUID"
+from = "adopt:uuid_from_string"
+to = "adopt:uuid_to_string"
+
+[python.enum."com.example.shapes::Colour"]
+type = "paint.Colour"
+from = "adopt:colour_from_generated"
+to = "adopt:colour_to_generated"

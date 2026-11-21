@@ -738,6 +738,12 @@ find others, and some of them may change what is common to every target, such as
 the model of step 2 and the codec. The scenario is to be done for Python, with
 the same projects and data, before the implementation starts.
 
+It is done: [the scenario for Python](scenario-shapes-python.md). Its section
+"What changes the common design" lists five things to decide before step 1: the
+runtime for a language other than Rust, output that is a folder, `Option` inside
+`Option`, resolving names as the value is read, and defaults as those of a
+class.
+
 1. **The runtime crate.** Move the six modules into `constructo-runtime`, a crate
    of its own in a workspace, re-export them from `constructo`, and check that everything that
    passed still passes. Nothing is generated yet.
