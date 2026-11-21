@@ -78,6 +78,17 @@ def main() -> None:
     assert codec.read(Drawing, codec.write(Drawing, huge)) == huge
     print("--- Large and small floats written and read back")
 
+    print("--- Defaults of a class are those of the codec")
+    assert shapes.Point(x=4.0) == codec.read(shapes.Point, "Point(x: 4.0)")
+    assert shapes.Point() == codec.read(shapes.Point, "Point()")
+    one = uuid.UUID("67e55044-10b1-426f-9247-bb680e5fe0c8")
+    assert Drawing(id=one) == codec.read(Drawing, f"Drawing({ID})")
+    print(f"Point(x=4.0) = {shapes.Point(x=4.0)}; Drawing(id=...) = {Drawing(id=one)}")
+    try:
+        Drawing(title="T")
+    except rt.CodecError as error:
+        print(f"Drawing(title='T'): {error}")
+
     print("--- Refused when written")
     bad: list[tuple[str, typing.Callable[[Drawing], None]]] = [
         ("a custom colour", lambda d: setattr(d.shapes[0], "colour", paint.Colour(0x336699))),
