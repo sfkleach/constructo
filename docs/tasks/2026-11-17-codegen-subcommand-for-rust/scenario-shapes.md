@@ -374,6 +374,10 @@ says why.
 8. **The resolution is a pass of its own,** which copies the tree before
    `FromValue` reads it. It is simple, and it costs a copy of each value. Doing
    it as the tree is read is an option for later, if the copy matters.
+   *Decided since:* names and consts are resolved as the value is read and
+   written, by traits that the codec implements for each type
+   (`ReadValue<T>`, `WriteValue<T>`, `DefaultValue<T>`), so `self` is the codec.
+   The spike predates this: its traits are on the value types, and it has a pass.
 9. **The key between the codec and the impls is the full name.** The first
    version of the spike used the checker's own form, `Circle@com.example.shapes`,
    which is internal and specified nowhere. Any key that is unique in the run

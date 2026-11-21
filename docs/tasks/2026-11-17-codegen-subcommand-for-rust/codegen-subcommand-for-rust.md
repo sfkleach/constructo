@@ -225,21 +225,42 @@ second is generated for each project, and the third is generated for each type.
 1. **The syntax layer**, from text to a generic tree of values and back. It is
    the same for every type, and it builds data only. A constructor name in the
    text is a string at this point, and nothing is instantiated.
-2. **The codec**, one for each project that the code is generated for. It
-   stands between the text and the types: it turns the names in a tree into
-   full names, and puts the value of a const in place of a reference
-   to it, and on the way out it does the reverse and writes the names as the
-   project writes them. It holds the limits as well. See below.
-3. **The type layer**, from the tree to the Rust types and back. The codec has
-   two traits of its own, `FromValue` and `ToValue`, generated with it, and the
-   generator writes an impl of each for every type. `from_value` is a `match`
-   over the fixed list of the constructors that the declarations have, by their
-   full names, so a name that is not in the list is an error. That is the closed set above, and
-   it holds by construction: nothing can be invoked that the `match` does not
-   name. The Rust types are plain data, which know nothing of any project, and
-   the conversions belong to the codec. It is also where the two functions of an
-   adopted constructor are called, and where an omitted argument is given its
-   default.
+2. **The codec**, one for each project that the code is generated for, which
+   reads the tree into the Rust types and writes them back. It holds the names
+   and the consts of its project and the limits, and it resolves each name as
+   it reaches it (see below).
+3. **The types**, which are plain data and know nothing of any project. The
+   conversions are the codec's.
+
+The codec reads and writes with **traits that it implements, one for each
+type**, and so `self` is the codec wherever a name or a const is looked up:
+
+```rust
+pub trait ReadValue<T> { fn read_value(&self, value: &Value) -> Result<T, Error>; }
+pub trait WriteValue<T> { fn write_value(&self, value: &T) -> Result<Value, Error>; }
+pub trait DefaultValue<T> { fn default_value(&self) -> Result<T, String>; }
+
+impl ReadValue<Shape> for Codec { ... }
+impl<T> ReadValue<Styled<T>> for Codec where Codec: ReadValue<T> { ... }
+```
+
+`read_value` for an enum is a `match` over the fixed list of its constructors,
+by their full names, so a name that is not in the list is an error. That is the
+closed set above, and it holds by construction: nothing can be invoked that the
+`match` does not name. It is also where the two functions of an adopted
+constructor are called, and where an omitted argument is given its default. The
+program calls `codec.read::<Drawing>(text)`, which needs `Codec:
+ReadValue<Drawing>`. In Python, which has no traits, they are the codec's
+methods ([scenario for Python](scenario-shapes-python.md)).
+
+**Names and consts are resolved as the value is read,** and not in a pass of
+their own. At a constructor, the reader asks the codec for its full name and
+matches that. At a const, it asks for the const's value and reads it with the
+same reader, against the type that it already expects there. Writing is the same
+the other way: each name is written in the form that the project writes as the
+tree is built. So an error is reported where the reader is, with the names of
+the parameters in its path, which a pass cannot know, and no copy of the tree is
+made.
 
 **The key between the codec and the impls is the full name** of a constructor,
 such as `com.example.shapes::Circle`. It is unique in a run, it is the language's
@@ -283,9 +304,9 @@ that is specific to it.
   Text that is read by the codec of service A cannot name a constructor that
   only service B's project has, because A's table does not have it, and it is
   an error at the name.
-- **Reading** is text, then the tree, then the names and consts resolved by the
-  codec, then `FromValue`. **Writing** is `ToValue`, then the tree with
-  full names, then the codec writes the names for its project, then text.
+- **Reading** is text, then the tree, then the codec's readers, which resolve
+  each name and const as they reach it. **Writing** is the codec's writers,
+  which write each name as the project writes it, then text.
 - **One Rust module for each Constructo project** of the run, so that two
   services that each have a `Shape` do not clash. The root project is the
   generated file itself, and the codec is in it. The rest are in submodules
@@ -301,14 +322,15 @@ that is specific to it.
   keep in step.
 - **A record type without a name** (below) is in the module of the project that
   uses it, so the same record type in two projects is two `struct`s.
-- **The traits are the codec's own.** `FromValue`, `ToValue` and the trait of
-  defaults are generated with the codec, in the program's crate, with their
-  impls for `u64`, `i64`, `f64`, `String`, `bool`, `Vec<T>` and `Option<T>`. A
-  trait of the program's crate can be implemented for a type of any crate, so an
-  adopted `uuid::Uuid` is no trouble, which it would be if the traits were in
-  the runtime crate (Rust's orphan rule). Each codec has its own traits, so two
-  codecs can adopt the same type differently and their impls do not collide.
-  It costs a few dozen lines that are the same in each generated file.
+- **The traits are the codec's own.** `ReadValue`, `WriteValue` and
+  `DefaultValue` are generated with the codec, in the program's crate, and the
+  codec implements them for its types and for `u64`, `i64`, `f64`, `String`,
+  `bool`, `Vec<T>` and `Option<T>`. A trait of the program's crate can be
+  implemented for a type of any crate, so `impl ReadValue<uuid::Uuid> for Codec`
+  is no trouble, which it would be if the traits were in the runtime crate
+  (Rust's orphan rule). Each codec has its own traits, so two codecs can adopt
+  the same type differently and their impls do not collide. It costs a few dozen
+  lines that are the same in each generated file.
 - **The runtime crate is one.** Every generated file depends on the same version
   of `constructo-runtime`, since they share its syntax layer, and the generated
   code says the version that it needs. The runtime crate has no traits.
@@ -361,7 +383,7 @@ Constructo name of the root never shows, and two services that each have a
   there is a clash, and it does not depend on order. A number is the last
   resort, where `ShapeCircle` is taken too.
 - **The names that the generator adds are fixed:** `Codec`, `codec`,
-  `FromValue`, `ToValue` and `DefaultValue`. They are what the program calls, so
+  `ReadValue`, `WriteValue` and `DefaultValue`. They are what the program calls, so
   they do not move, and a Constructo name that is one of them yields, with a `_`
   at the end: an enum `Codec` is `Codec_`. The generated code has no other names
   of its own, such as aliases, and writes everything else in full.
@@ -381,14 +403,15 @@ I ran `check` on `enum A = A { _: Nat };` and on a record of the fields `_x`,
 
 ### The runtime crate
 
-The syntax layer is a **small runtime crate**, named `constructo-runtime` (in
+For Rust, the syntax layer is a **small runtime crate**, named `constructo-runtime` (in
 code, `constructo_runtime`), that the generated code depends on, and that this
 repository provides. The name is that of its job, which is to be what generated
 code calls, and it stays right if the types files part of the parser is cut
 later. The convention for a crate of a project is `<project>-<role>`, in
 kebab-case. It is the code that `check` already uses,
-so the generated code and `check` agree on the syntax by construction, and there
-is one parser to audit and not a copy in every generated file. The generated
+so the generated Rust code and `check` agree on the syntax by construction, and
+there is not a copy of the parser in every generated file. Other targets have a
+runtime of their own (below). The generated
 files stay small.
 
 The modules that it would hold are `lexer`, `parser`, `ast`, `values_text` (the
@@ -408,6 +431,66 @@ change.
 
 **Open:** whether it is published, and so whether its version is tied to that of
 `constructo`; and whether the types files part of the parser stays in it.
+
+### The runtime of another language
+
+The runtime crate is the parser of `check` only for Rust. Another target needs a
+runtime in its own language, and the [scenario for Python](scenario-shapes-python.md)
+found that the draft had taken one parser for every target for granted.
+
+- **Each target has a runtime of its own,** written in its language: the syntax
+  layer of values only (no types files, projects or type checking), which is a
+  lexer, a parser, a printer and the limits, and the helpers that the generated
+  code calls. It is small, and it installs wherever the language does, with no
+  native build.
+- **A conformance suite holds them to one syntax.** For each input, from
+  `syntax/examples` and from cases written for it, the suite says what a runtime
+  must give: the canonical text that the Rust printer writes for it, or the
+  message and the position of the error. A runtime conforms when it gives them
+  exactly. The expected results are Constructo text, so the suite needs no other
+  notation. In place of one parser to audit there is one suite, which makes the
+  claim that every target reads the same syntax one that can be checked.
+- **The limits are part of it.** A runtime reads data that is not trusted, so the
+  suite has deep nesting and large inputs, and every runtime refuses them with
+  the same message.
+- **A change to the syntax is a change to every runtime,** and the suite is what
+  finds one that has not been changed.
+- **A native runtime can be added later,** as Python's `json` has a module in C
+  beside the one in Python: a binding to the Rust runtime, for speed. The
+  generated code calls only the runtime's functions, so it would be a change of
+  packaging and not of the generated code. It is not part of this task.
+
+### The tree of a value
+
+A program should be able to read Constructo into a neutral tree, and write a tree
+as Constructo, without any generated code and without types, as a program can
+read JSON into dictionaries and lists. The syntax layer has the tree already, so
+this makes it public, in every runtime.
+
+- **`parse(text)` gives the values of a text as trees, and `render(tree)` gives
+  the text of a tree.** The tree is the syntax and nothing more: a number keeps
+  the text it was written with, so it is exact, a name is as it was written,
+  bare, through a group or in full, a const is a reference to it, a tuple keeps
+  which arguments were given by name, and a record keeps the order of its fields.
+  Each value has its position in the text, for messages.
+- **Nothing is built from the data,** since the tree is data only, so it is safe
+  for data that is not trusted, as the codec is.
+- **Rendering can fail.** A tree that a program builds can be one that has no
+  text, such as a name that is not an identifier, or a const with a body, and
+  `render` refuses it. Whatever `render` writes, `parse` reads back as the same
+  tree.
+- **The suite covers it,** since the canonical text that it expects is what
+  `render` writes for what `parse` reads.
+- **The tree is an interface,** in Rust as in every other target, so its shape is
+  a promise once it is published. For Rust it is the `ast` module of the parser,
+  which was written for `check`, and it is to be looked at for public use
+  before the runtime crate is published.
+
+**Open:** a tree with the names resolved and the consts replaced, but no types.
+The codec could give it, with `codec.read_tree(text)`, since it has the names and
+the consts of its project: every name in full, and a name that is not of the run
+refused. It is between the neutral tree and a value of a generated type, and
+whether it is wanted is for the first program that asks for it.
 
 ### The names in the text
 
@@ -483,8 +566,8 @@ enum List<T> { Nil, Cons(Cons<T>) }
 ```
 
 - **Reading.** The generated impls have bounds,
-  `impl<T: FromValue> FromValue for List<T>`, and the codec has impls for
-  `u64`, `String`, `f64`, `bool`, `Vec<T>` and `Option<T>`. The caller names
+  `impl<T> ReadValue<List<T>> for Codec where Codec: ReadValue<T>`: the codec
+  can read a `List<T>` if it can read a `T`. The caller names
   the instance, as in `codec.read::<List<u64>>(text)`, so reading is still
   constrained by the target type, and no type is chosen by the data.
 - **Adoption.** The Rust type that is adopted for a constructor has the type
@@ -633,9 +716,10 @@ resolve consts would refuse it. A const is a name for plain data, which is
 checked against its type, and a generic one such as `null` is good at any type.
 
 - **The codec resolves references from a closed table.** The generator embeds
-  the full name of each const of the run and its value. When the codec meets a
-  const name it puts the value in its place and reads that into the target type, as for any
-  other value. The value is untyped until it is read, so a generic const and a
+  the full name of each const of the run and its value, written with full names.
+  When the reader meets a const name, it reads the const's value into the type
+  that it expects there, as for any other value. The codec can parse each value
+  once and keep it. The value is untyped until it is read, so a generic const and a
   widening (a `Nat` const where an `Int` is wanted) need nothing extra. The table
   is fixed when the code is generated, so the data can name only the consts that
   the generator knew for that project, as it can invoke only the constructors
@@ -643,6 +727,11 @@ checked against its type, and a generic one such as `null` is good at any type.
 - **A const that refers to another** is resolved in the same way, and the
   runtime's depth limit stops a chain that is too long. A circle is refused by
   `check`, so it does not arise.
+- **An error inside a const's value is reported at the reference,** with a note
+  that names the const: `5:12, in the value of const unit_circle: ...`. It says
+  both where the const was used and what is wrong in it. The values are checked
+  by `check`, so it is rare, and is mostly a value that does not fit the
+  target, such as a `Nat` too large for a `u64`.
 - **Names are resolved like those of constructors:** the full name, or the name
   that the project resolves.
 - **A value that does not fit Rust is refused when the code is generated.**
@@ -668,8 +757,8 @@ parameters. A record field is never optional, and nor is the parameter of a
 constructor that has no names. `check` accepts a document that leaves an
 argument out, so the reader has to fill it in.
 
-- **A trait of the codec gives the default,** beside `FromValue` and
-  `ToValue`. It is not Rust's `Default`, whose rules differ: it follows the
+- **A trait of the codec gives the default,** `DefaultValue<T>`, beside
+  `ReadValue<T>` and `WriteValue<T>`. It is not Rust's `Default`, whose rules differ: it follows the
   rules above and ignores a derived or hand-written `Default` of a type. The
   reader calls it for each argument that is left out.
 - **The generated impls follow the rules.** A number is `0` or `0.0`, a `String`
@@ -685,7 +774,7 @@ argument out, so the reader has to fill it in.
   error with the message that `check` gives, such as `Type List<T> has no default
   value`. A type that is never left out is not affected.
 - **A generic type uses the default of its parameter,** so the impl has the
-  bound `T: DefaultValue`. The caller names the instance, so the type is known
+  bound `Codec: DefaultValue<T>`. The caller names the instance, so the type is known
   where `check` would have to work it out from the other values.
 - **An adopted constructor gets its default through its function.** The default
   arguments are built as for any other constructor and are given to the
@@ -696,13 +785,44 @@ argument out, so the reader has to fill it in.
   default, so that the text does not depend on what the defaults are. Leaving
   them out would make the text shorter, and may be an option later.
 
+**Defaults when a program builds a value.** A target whose language has default
+arguments can give a named parameter its default in the generated class as well,
+so that a program can leave it out as the text can. Python does: the binding of
+decision 17, unnamed parameters by position and then named ones by position or
+by name, is Python's binding for the fields of a class that have defaults and
+those that do not. So `Point(x=4.0)` is what `Point(x: 4.0)` reads as.
+
+- **Only a named parameter has a default.** An unnamed parameter and the field of
+  a record are required, as they are in the text.
+- **The default is the codec's.** The class's default is the same generated
+  function that the codec calls when an argument is left out of the text, so
+  the two cannot differ: there is only one of them.
+- **No `None` stands in for a default.** A field's default is `None` only when its
+  type is an `Option`, which is when decision 18 says that the default is
+  `None`. A `Float` never has `None` for its default, and a type checker refuses
+  a factory that gives one, which the spike's run of mypy shows.
+- **A default that fails, fails where it is left out,** as in the text: the
+  adopted `Uuid` has no default, so `Drawing(title="T")` raises the adopted
+  function's refusal, as `Drawing(title: "T")` is refused when it is read.
+- **A parameter of the type `T` has no default,** since the type is not known at
+  run time. One whose default does not depend on `T`, such as `[T]` or `T?`,
+  has one.
+- **A test holds them together:** for each type, a value built with arguments
+  left out equals the value that the codec reads from the text with the same
+  arguments left out.
+
+Rust has no default arguments. `impl Default`, with `..Default::default()`, is
+the nearest, but it cannot fail and it covers every field, so the first version
+has none. An `impl Default` for a type whose defaults all succeed is a possible
+addition later.
+
 ## The options
 
 **Open.** The likely shape is below, and is not final.
 
 ```
 constructo codegen --lang=LANG [--project=FOLDER] [--adopt=FILE_PATH] [--names=project|full]
-                   [FILES]...
+                   [--out-file=FILE_PATH | --out-dir=FOLDER] [FILES]...
 ```
 
 - `--lang=LANG` is required, and the only value at first is `rust`. It is
@@ -719,11 +839,77 @@ constructo codegen --lang=LANG [--project=FOLDER] [--adopt=FILE_PATH] [--names=p
 - The types come as they do for the typed formats of `convert`: from `--project`
   and from the files given, with the options of `check` for projects, the
   prelude and consts where they apply.
-- The code is written to the standard output, and nothing is written if there is
-  an error, as for a `convert` format that writes one document.
+- `--out-file=FILE_PATH` and `--out-dir=FOLDER` say where the code is written,
+  and a target takes one kind of output and not the other (below).
+- Nothing is written if there is an error, as for a `convert` format that writes
+  one document: every file is made in memory first.
 - Exit codes are those of the other subcommands: 0 for success, 1 when the
   inputs have errors, 2 for a usage error, a setup problem or a file that cannot
   be read.
+
+### A faithful mapping first, and an idiomatic one where it is safe
+
+A target's first mapping of a Constructo type is the one that is always exact.
+Where the language has a more idiomatic form that loses nothing in a case that
+can be told from the declarations, the generator uses it there, and only there.
+An idiomatic form that is wrong in a rare case is a bug, however common the case
+in which it is right.
+
+`Option` in Python is the case that showed it
+([scenario for Python](scenario-shapes-python.md)):
+
+- **The faithful mapping** of `Option<X>` is `Some[X] | None`, where `Some` is a
+  box of one field in the runtime. `None`, `Some(None)` and `Some(Some(5))` are
+  three values, so nothing is lost, but it is not what a Python programmer
+  writes.
+- **The idiomatic mapping** is `X | None`. It is exact when no value of `X` is
+  `None` in Python, since a `None` can then only be the absent case.
+- **The generator uses the idiomatic one where it can show that,** which it can
+  from the declarations alone: `X` is a `Nat`, an `Int`, a `Float`, a `String`, a
+  `Bool`, an array, a record without a name, a generated class or enum, or an
+  adopted type. An adopted type qualifies because the codec refuses a `None` from
+  an adopted function, as an error at the value, so no value of it is `None`.
+- **Everywhere else it uses the faithful one:** where `X` is itself an `Option`,
+  so `Nat??` is `Some[int | None] | None`, and where `X` is a type parameter, so
+  `T?` is `Some[T] | None`, since the caller may choose a `T` that has `None` in
+  it. `Option<Option<T>>` is how a partial update is written, with "leave it" and
+  "set it to nothing" as two values, and it works in every target.
+
+Rust needs none of this, since its `Option<Option<T>>` is exact. The model of
+step 2 has to give a target what it needs to decide, which here is, for each
+type, whether its values in the target can be the absent value.
+
+### Where the code is written
+
+A target writes either one file or a folder, according to its language, and the
+option says which is meant, so that a path is never taken for the other kind.
+
+- **Rust writes one file,** since its modules can be inside one file. It goes to
+  `--out-file=FILE_PATH`, or to the standard output if neither option is given.
+- **Python writes a package,** since a module of Python is a file, and a run
+  with projects that are imported has more than one. It goes to
+  `--out-dir=FOLDER`, which it needs. The folder is the package, and its name is
+  the one that the program imports, as a Rust program names the module of the
+  file. `__init__.py` has the types of the root project and the codec, and each
+  other project is a module beside it, named as the Rust submodule is
+  (`com_example_ids.py`). They import each other with relative imports, so the
+  package can be put anywhere.
+- **The wrong option is a usage error,** exit code 2, which names the right one:
+  `Python writes a package: use --out-dir=FOLDER`, or `Rust writes one file:
+  use --out-file=FILE_PATH, or neither for the standard output`. Both options at
+  once is an error too.
+- **The folder of `--out-dir` belongs to the generator.** A run has to remove
+  what an earlier run wrote and no longer writes, such as the module of a project
+  that is not imported any more, so it replaces what is in the folder as a whole.
+  So that it never removes a file of the user's, it writes only to a folder that
+  does not exist, is empty, or has the marker file that `codegen` writes in every
+  folder that it makes. Any other folder is refused, with exit code 2, and
+  nothing in it is changed.
+- **The folder is replaced at once.** The package is written to a new folder
+  beside it, which then takes its place, so that a failure part of the way
+  through leaves the old package as it was.
+- **A file of `--out-file`** is written in the same way, to a new file beside it
+  that then takes its place.
 
 ## Steps
 
@@ -746,7 +932,9 @@ class.
 
 1. **The runtime crate.** Move the six modules into `constructo-runtime`, a crate
    of its own in a workspace, re-export them from `constructo`, and check that everything that
-   passed still passes. Nothing is generated yet.
+   passed still passes. Nothing is generated yet. The conformance suite is
+   written here too, from the output of this runtime, which is the first to
+   pass it and the one that the others are held to.
 2. **The model.** A description of the declarations that is the same for every
    target: the types after resolution, with full names, generics and
    defaults. The checker already holds most of it, so this step may be a view of
@@ -775,11 +963,23 @@ class.
 - How a type is adopted, a constructor or a whole enum, and why it is not in the
   project-file.
 - That the traits are generated with each codec and not put in the runtime
-  crate, because of the orphan rule.
+  crate, because of the orphan rule, and that the codec implements them, one for
+  each type, so that it is `self` where names and consts are looked up.
+- That names and consts are resolved as the value is read and written, and not
+  in a pass of their own.
+- That a generated class may give a named parameter its default, from the
+  codec's own function, where the language has default arguments.
 - The name `codegen`.
 - That names are written relative to the project by default, and in full on request.
 - That the syntax layer is a small crate, `constructo-runtime`, which the generated
   code depends on, and what it holds.
+- That a target maps a type faithfully, and idiomatically only where the
+  declarations show that it is exact, with `Option` in Python as the example.
+- That a target writes one file or a folder, with `--out-file` and `--out-dir`,
+  and that a folder belongs to the generator, guarded by a marker file.
+- That every other target has a runtime of its own, held to the syntax by a
+  conformance suite whose expected results are Constructo text, and that every
+  runtime makes the tree of a value public.
 - That name resolution, the consts and the limits are in a codec for each
   project and not in the types, so that an application can have more than one
   codec, and that the generated code has a Rust module for each project.

@@ -206,11 +206,19 @@ common to every target, or what the draft says of all of them.
    in Python and tested against the examples in `syntax/examples`, or a binding
    to the Rust one, as a native module that has to be built for each platform.
    The spike's way, running the binary, is a stand-in and not a choice.
+   *Decided since:* each target has a runtime of its own, held to one syntax by
+   a conformance suite whose expected results are Constructo text, and a native
+   runtime can be added later. Every runtime also makes the tree of a value
+   public, for reading and writing Constructo without types.
 2. **The output of a target is not always one file.** Rust has modules inside a
    file, so a run's projects are one file on the standard output. Python has a
    module for each file, so the projects of a run are a package, a folder, or
    their names are joined into one module. The command needs a way to write a
    folder, such as `--out=FOLDER`, for the targets that need one.
+   *Decided since:* `--out-file=FILE_PATH` for a target that writes one file,
+   such as Rust, and `--out-dir=FOLDER` for one that writes a package, such as
+   Python. The wrong one is a usage error that names the right one, and the
+   folder belongs to the generator, guarded by a marker file.
 3. **`Option<Option<T>>` cannot be named in Python.** `Nat | None | None` is
    `Nat | None`, so `Some(None)` and `None` would be the same value. A declared
    type such as `Nat??` must be refused for Python when the code is generated,
@@ -218,6 +226,86 @@ common to every target, or what the draft says of all of them.
    `Option`, which only the caller knows, must refuse `Some(None)` when it is
    read, as typed JSON does (decision 37). The model of step 2 has to let a
    target see where an `Option` is inside another.
+   *Decided since:* the faithful mapping is `Some[X] | None`, with a `Some` box
+   in the runtime, and `X | None` is used only where no value of `X` can be
+   `None`: the basic types, arrays, records, generated classes and enums, and
+   adopted types, whose functions the codec forbids to return `None`. An
+   `Option` inside an `Option`, and an `Option` of a type parameter, are boxed.
+   The spike has no type that needs the box, and it does not yet refuse a
+   `None` from an adopted function.
+   *Decided since:* names and consts are resolved as the value is read and
+   written, and the readers and writers are the codec's methods, so `self` has
+   the names, the consts and the limits. The spike still has a pass.
+5. **An adopted function refuses by raising `ValueError`,** which the codec turns
+   into an error with a path, and does not return a result. It is named as
+   `module:name` in the adoption file.
+6. **The adopted functions are imported when they are first called.** The
+   module of the adoptions imports the generated module, for `shapes.Colour`, and
+   the generated module calls the adoptions, so importing them at the top would
+   be a cycle.
+7. **There is no orphan rule**, and no traits: the codec's tables of readers and
+   writers do what the traits do in Rust.
+8. **Python has no raw names.** A field that is a keyword, such as `from`, gets a
+   `_` at the end, which is what the Rust rule does for the names that cannot be
+   raw. A record type named by a field that is a builtin, such as `list`, would
+   hide it, so the generated code should name the builtins in full,
+   `builtins.list`, as the Rust code names the std items in full. The spike does
+   not do this.
+9. **Python's typing cannot name a type expression as a parameter.** The
+   codec takes the type to read or write as a value, and a class or a generic
+   alias such as `list[uuid.UUID]` is a `type[X]`, so `codec.read(Drawing, text)`
+   is typed `Drawing` and `codec.read(list[uuid.UUID], text)` is typed
+   `list[UUID]`. A special form is not: `Shape`, which is a `type` alias, and
+   `X | None` give `Any`. The codec has overloads for the two, and a run of mypy
+   shows the cost: `codec.write(Drawing, 5)` passes, since the second overload
+   takes anything. PEP 747 (`TypeForm`) would close this when it is settled.
+10. **A type checker sees a `Nat` as an `int`.** mypy reads `_rt.Nat` as `int`,
+   as intended, so `Drawing(..., layer=-1)` and `layer=True` pass it, and only
+   the writer refuses them, when the value is written. A Rust `u64` refuses the
+   first when the program is compiled.
+11. **Generic classes need Python 3.12,** for `class Styled[T]` and `type Shape =
+   ...`, whose parameters are local to the class. With the older `TypeVar`, a
+   parameter `T` would be a name of the module, and could clash with an enum
+   called `T`.
+
+## What changes the common design
+
+These need a decision before the implementation, since they change what is
+common to every target, or what the draft says of all of them.
+
+1. **The runtime is not one parser for every language.** The draft says the
+   runtime crate is the code that `check` uses, so that there is one parser to
+   audit. That is true for Rust only. Python needs a parser of its own, written
+   in Python and tested against the examples in `syntax/examples`, or a binding
+   to the Rust one, as a native module that has to be built for each platform.
+   The spike's way, running the binary, is a stand-in and not a choice.
+   *Decided since:* each target has a runtime of its own, held to one syntax by
+   a conformance suite whose expected results are Constructo text, and a native
+   runtime can be added later. Every runtime also makes the tree of a value
+   public, for reading and writing Constructo without types.
+2. **The output of a target is not always one file.** Rust has modules inside a
+   file, so a run's projects are one file on the standard output. Python has a
+   module for each file, so the projects of a run are a package, a folder, or
+   their names are joined into one module. The command needs a way to write a
+   folder, such as `--out=FOLDER`, for the targets that need one.
+   *Decided since:* `--out-file=FILE_PATH` for a target that writes one file,
+   such as Rust, and `--out-dir=FOLDER` for one that writes a package, such as
+   Python. The wrong one is a usage error that names the right one, and the
+   folder belongs to the generator, guarded by a marker file.
+3. **`Option<Option<T>>` cannot be named in Python.** `Nat | None | None` is
+   `Nat | None`, so `Some(None)` and `None` would be the same value. A declared
+   type such as `Nat??` must be refused for Python when the code is generated,
+   or have a `Some` class of its own, and a generic type whose parameter is an
+   `Option`, which only the caller knows, must refuse `Some(None)` when it is
+   read, as typed JSON does (decision 37). The model of step 2 has to let a
+   target see where an `Option` is inside another.
+   *Decided since:* the faithful mapping is `Some[X] | None`, with a `Some` box
+   in the runtime, and `X | None` is used only where no value of `X` can be
+   `None`: the basic types, arrays, records, generated classes and enums, and
+   adopted types, whose functions the codec forbids to return `None`. An
+   `Option` inside an `Option`, and an `Option` of a type parameter, are boxed.
+   The spike has no type that needs the box, and it does not yet refuse a
+   `None` from an adopted function.
 4. **Names should be resolved as the value is read,** and not in a pass of their
    own. The pass does not know the names of the parameters, so its errors say
    `[2][0].item` where the reader's say `shapes[0].item`. It is the Rust
@@ -227,6 +315,11 @@ common to every target, or what the draft says of all of them.
    dataclass that have defaults, so `Point(x=4.0)` could take the default of `y`
    as reading does. The default of an adopted type can fail, so it is not always
    possible. It is a choice for each target, and not done in the spike.
+   *Decided since:* a named parameter has its default in the class, from the
+   function that the codec uses, so the two cannot differ; a default is `None`
+   only for an `Option`; and a default that fails raises where it is left out.
+   The spike does this for `Point` and `Drawing`, and checks that a value built
+   with arguments left out equals the value read from the text without them.
 
 ## How to run it
 

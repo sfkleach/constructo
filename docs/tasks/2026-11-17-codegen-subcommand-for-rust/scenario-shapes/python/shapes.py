@@ -57,10 +57,13 @@ type Shape = Circle | Box | Dot | Polygon
 
 @dataclasses.dataclass
 class Point:
-    """`enum Point = Point(x: Float, y: Float);`, one constructor of the same name, so one class."""
+    """`enum Point = Point(x: Float, y: Float);`, one constructor of the same name, so one class.
 
-    x: float
-    y: float
+    A named parameter has the default of its type (decision 18), from the function that the codec uses when an
+    argument is left out of the text, so `Point(x=4.0)` is what `Point(x: 4.0)` reads as."""
+
+    x: float = dataclasses.field(default_factory=lambda: _default_float())
+    y: float = dataclasses.field(default_factory=lambda: _default_float())
 
 
 class Colour(enum.Enum):
@@ -92,10 +95,10 @@ class dx_dy:
 class Drawing:
     """`enum Drawing = Drawing(id: ids::Uuid, title: String, shapes: [Styled<Shape>], layer: Nat);`"""
 
-    id: uuid.UUID
-    title: str
-    shapes: list[Styled[Shape]]
-    layer: _rt.Nat
+    id: uuid.UUID = dataclasses.field(default_factory=lambda: _default_uuid())
+    title: str = dataclasses.field(default_factory=lambda: _default_string())
+    shapes: list[Styled[Shape]] = dataclasses.field(default_factory=lambda: _default_list())
+    layer: _rt.Nat = dataclasses.field(default_factory=lambda: _default_int())
 
 
 # com.example.ids has only `Uuid`, which is adopted as `uuid.UUID`, so nothing is generated for it.
@@ -449,7 +452,7 @@ def _read_drawing(v: _rt.Value) -> Drawing:
             return Drawing(
                 _argument(id, "id", "Drawing", _read_uuid, _default_uuid),
                 _argument(title, "title", "Drawing", _read_string, _default_string),
-                _argument(shapes, "shapes", "Drawing", _read_list(_read_styled(_read_shape)), list),
+                _argument(shapes, "shapes", "Drawing", _read_list(_read_styled(_read_shape)), _default_list),
                 _argument(layer, "layer", "Drawing", _read_nat, _default_int),
             )
         case _rt.Tagged("com.example.shapes::Drawing" as name, _):
@@ -503,6 +506,10 @@ def _default_float() -> float:
 
 def _default_string() -> str:
     return ""
+
+
+def _default_list() -> list[typing.Any]:
+    return []
 
 
 def _default_uuid() -> uuid.UUID:
