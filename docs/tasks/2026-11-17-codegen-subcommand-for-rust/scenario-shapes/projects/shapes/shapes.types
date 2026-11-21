@@ -1,0 +1,15 @@
+enum Shape =
+  Circle { radius: Float },
+  Box { width: Float, height: Float },
+  Dot,
+  Polygon[Point];
+
+enum Point = Point(x: Float, y: Float);
+
+enum Colour = Red, Green, Blue;
+
+enum Styled<T> = Styled { item: T, colour: Colour?, offset: { dx: Int, dy: Int } };
+
+enum Drawing = Drawing(id: ids::Uuid, title: String, shapes: [Styled<Shape>], layer: Nat);
+
+const unit_circle = Circle { radius: 1.0 };

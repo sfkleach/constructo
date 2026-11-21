@@ -1,0 +1,14 @@
+# The adoptions of the scenario, as `--adopt=adopt.toml` would read them. The spike does not read this file: the
+# generated code in rust/app/src/shapes.rs is written by hand as if it had.
+
+# The constructor `Uuid(String)` of com.example.ids is held by the `uuid` crate's type.
+[rust.constructor."com.example.ids::Uuid"]
+type = "uuid::Uuid"
+from = "crate::adopt::uuid_from_string"
+to = "crate::adopt::uuid_to_string"
+
+# The enum `Colour` of com.example.shapes is the program's own `paint::Colour`.
+[rust.enum."com.example.shapes::Colour"]
+type = "crate::paint::Colour"
+from = "crate::adopt::colour_from_generated"
+to = "crate::adopt::colour_to_generated"
