@@ -740,7 +740,7 @@ pub struct Paren(pub Box<Expr>);    // an Expr can hold a Term by value
   but the bound `Codec: ReadValue<Nested<Vec<T>>>`, inside the impl of
   `ReadValue<Nested<T>>`, may be more than Rust's trait solver can follow. If it
   is, such a type needs a reader that is written out and not bound. The test of
-  step 3, which compiles the output, has one.
+  step 4, which compiles the output, has one.
 - **Deep values.** The parser's limit on nesting (decision 43) bounds how deep
   the reader goes. A program can build a value that is deeper, such as a long
   chain of `Cons`, and the writer, which is recursive, applies the same limit and
@@ -953,11 +953,69 @@ constructo codegen --lang=LANG [--project=FOLDER] [--adopt=FILE_PATH]
 
 ### A faithful mapping first, and an idiomatic one where it is safe
 
-A target's first mapping of a Constructo type is the one that is always exact.
+A value that a target's mapping is given ends in one of three ways: it is **held**
+exactly, and comes back as the same value; it is **refused**, and the codec says at
+the value that the target cannot hold it; or it is **changed**, and becomes another
+value without a word. The rules:
+
+- **A mapping never changes a value,** with one exception, `Float`, below.
+- **A mapping may refuse a value that is outside the target's range for its
+  type,** when it is read and when it is written, with an error at the value.
+  A `Nat` that does not fit a Rust `u64` or a TypeScript `number`, and a `Float`
+  that is not finite, are refused. The range is the target's, and is documented,
+  and a generation setting may widen it, as `bigint` would for TypeScript.
+- **A mapping may not refuse a form that the declarations contain.** A declared
+  `Nat??` asks for `Some(None)` as a value, and refusing it would take away part
+  of the type, and not limit its range. Where an idiomatic form cannot hold a
+  form that the declarations have, the faithful form is used. This is why
+  `Option<T>` as `T | None` everywhere would be a bug, while a `Nat` as a `u64`
+  is not: the `u64` limits how large a `Nat` is, and takes no constructor away.
+
+So a target's first mapping of a Constructo type is the one that is always exact.
 Where the language has a more idiomatic form that loses nothing in a case that
 can be told from the declarations, the generator uses it there, and only there.
 An idiomatic form that is wrong in a rare case is a bug, however common the case
 in which it is right.
+
+Two consequences, which the targets so far have to meet:
+
+- **A string that has no Constructo text is refused.** A JavaScript string can
+  hold a lone surrogate, which has no form in UTF-8. A writer that put U+FFFD in
+  its place would change it, so it refuses it. The TypeScript spike does not
+  check this yet.
+- **The functions of an adoption have to be inverses,** and the codec cannot see
+  that they are. A `from` that makes a UUID lower case changes one that was
+  written in upper case. It is the adopter's to get right, as the section on
+  adoption says, and this is why it matters.
+
+**`Float` is the one exception.** A `Float` is a real number, extended by +∞, −∞
+and nullity, with Anderson's transreal arithmetic as their theory (the task
+[non-finite-values](../todo/2026-11-21-non-finite-values/non-finite-values.md)
+gives them a text). The notation writes only rationals, an integer over a power
+of ten, so a value in a text is always one of those. Held exactly, it would need
+a decimal or rational type in every target, which no one would want, since the
+hardware is IEEE 754, and escaping it gains little and costs much. So:
+
+- **A target maps a `Float` to its binary floating type,** holding the nearest
+  value, and the loss of precision is accepted, as it is across the industry.
+  This is the only exception to the rule that a mapping never changes a value,
+  and no other type is to have one.
+- **Only precision is excepted, and not range.** A finite `Float` that is too
+  large for the target is refused: `1.0e400` is not made +∞, which would make a
+  finite value infinite. A `Float` too small to be held other than as zero is
+  made zero, which is a loss of precision like any other.
+- **The writer writes the shortest text that reads back as the same binary
+  value,** so a value that a program holds goes through text and back exactly,
+  and a long literal in a file does not keep the digits that the binary type
+  cannot hold.
+- **A negative zero is written as `0.0`.** A `Float` has no negative zero, so
+  there is nothing else for it to be, and the two are equal in IEEE as well.
+- **The non-finite values map to IEEE's,** when they have a text: +∞ and −∞ to
+  the infinities, and nullity to NaN, and every NaN is written as nullity.
+  Until then, writing one is an error, as the section on numbers says.
+
+The model of a `Float` is written nowhere in the specifications yet, and step 1
+writes it there.
 
 `Option` in Python is the case that showed it
 ([scenario for Python](scenario-shapes-python.md)):
@@ -980,7 +1038,7 @@ in which it is right.
   "set it to nothing" as two values, and it works in every target.
 
 Rust needs none of this, since its `Option<Option<T>>` is exact. The model of
-step 2 has to give a target what it needs to decide, which here is, for each
+step 3 has to give a target what it needs to decide, which here is, for each
 type, whether its values in the target can be the absent value.
 
 ### Where the code is written
@@ -1025,11 +1083,11 @@ not said, most of them about how Constructo's names and types meet those of
 Rust. Python has no `enum` with data, no static types to check the generated
 code, integers of any size and one namespace for a module's names, so it will
 find others, and some of them may change what is common to every target, such as
-the model of step 2 and the codec. The scenario is to be done for Python, with
+the model of step 3 and the codec. The scenario is to be done for Python, with
 the same projects and data, before the implementation starts.
 
 It is done: [the scenario for Python](scenario-shapes-python.md). Its section
-"What changes the common design" lists five things to decide before step 1: the
+"What changes the common design" lists five things to decide before step 2: the
 runtime for a language other than Rust, output that is a folder, `Option` inside
 `Option`, resolving names as the value is read, and defaults as those of a
 class.
@@ -1041,30 +1099,41 @@ that does not fit is refused and never changed, settings of a target's own,
 where the reading of a type lives, and how generated names avoid Constructo
 names.
 
-1. **The runtime crate.** Move the six modules into `constructo-runtime`, a crate
+1. **What a number is, in the specifications.** The values of `Nat`, `Int` and
+   `Float` are written nowhere, and every mapping of a number depends on them.
+   A `Nat` and an `Int` are whole numbers of any size. A `Float` is a real
+   number, extended by +∞, −∞ and nullity, with Anderson's transreal arithmetic
+   as their theory: nullity is equal to itself, and there is no negative zero.
+   The notation writes only the rationals among them, an integer over a power of
+   ten, which is the number that the digits write. It goes in
+   `docs/specs/type-checking.md`, beside the types, or in a specification of its
+   own, with a decision for the model of `Float`, and it refers to the task for
+   the text of the non-finite values. The mapping of a `Float` to a binary type,
+   and the precision that it gives up, are `codegen`'s, and stay here.
+2. **The runtime crate.** Move the six modules into `constructo-runtime`, a crate
    of its own in a workspace, re-export them from `constructo`, and check that everything that
    passed still passes. Nothing is generated yet. The conformance suite is
    written here too, from the output of this runtime, which is the first to
    pass it and the one that the others are held to.
-2. **The model.** A description of the declarations that is the same for every
+3. **The model.** A description of the declarations that is the same for every
    target: the types after resolution, with full names, generics and
    defaults. The checker already holds most of it, so this step may be a view of
    what exists and not new code. Each target writes from it, so a second
    language needs only a writer.
-3. **Rust, the types.** Enums, variants, generics, `Vec`, `Option` and `Bool`. A
+4. **Rust, the types.** Enums, variants, generics, `Vec`, `Option` and `Bool`. A
    test that compiles the output.
-4. **Rust, the codec, writing and reading.** The codec of a project, with its
+5. **Rust, the codec, writing and reading.** The codec of a project, with its
    tables of names and consts, and the code that writes a value as Constructo
    syntax that `check` accepts, and reads a value that `check` accepts, for each
    example under `syntax/examples`. A test with two projects that have a type
    of the same name, read by two codecs in one program. Limits are decided
    here.
-5. **Adoption.** A small program that compiles first: a codec whose traits are
+6. **Adoption.** A small program that compiles first: a codec whose traits are
    implemented for a type of another crate, inside a `Vec` and as the argument
    of a generic type, to show that the orphan rule allows it. Then the file and
    its entries for constructors and enums, the two functions, the check that a type
    that needs an adoption has one, and the refusal of an open type.
-6. **Documentation.** A spec of the command in `docs/specs/`, a decision for the
+7. **Documentation.** A spec of the command in `docs/specs/`, a decision for the
    closed set and one for the adoption, and the wording of decision 39.
 
 ## Decisions to write
@@ -1090,7 +1159,10 @@ names.
   code depends on, and what it holds.
 - That every field on a cycle of types held by value is boxed, at every site,
   and no other is.
-- That a target maps a type faithfully, and idiomatically only where the
+- That a mapping never changes a value, may refuse one outside the target's
+  range for its type, and may not refuse a form that the declarations contain;
+  and that `Float` is the one exception, mapped to the nearest binary value;
+  and so that a target maps a type faithfully, and idiomatically only where the
   declarations show that it is exact, with `Option` in Python as the example.
 - That a target writes one file or a folder, with `--out-file` and `--out-dir`,
   and that a folder belongs to the generator, guarded by a marker file.
@@ -1107,7 +1179,7 @@ names.
 
 ## Not in scope
 
-- A target other than Rust. The model of step 1 is meant to make the next one
+- A target other than Rust. The model of step 3 is meant to make the next one
   small, and it is not written here.
 - JSON, XML or any other notation from the generated code. `convert` does that,
   and `codegen` is about Constructo's own syntax.
