@@ -1,0 +1,2 @@
+// An identifier, written as the text of a UUID.
+enum Uuid = Uuid(String);
