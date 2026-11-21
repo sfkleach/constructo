@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "typeRoots": ["../../../../../_build/scenario/ts/node_modules/@types"],
+    "types": ["node"]
+  },
+  "include": ["*.ts", "shapes/*.ts", "constructo-runtime/*.ts"]
+}

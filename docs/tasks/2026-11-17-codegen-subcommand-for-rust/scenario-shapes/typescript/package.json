@@ -1,0 +1,10 @@
+{
+  "name": "constructo-scenario-shapes",
+  "private": true,
+  "type": "module",
+  "description": "The TypeScript spike of the codegen scenario.",
+  "devDependencies": {
+    "@types/node": "^24",
+    "typescript": "7.0.2"
+  }
+}

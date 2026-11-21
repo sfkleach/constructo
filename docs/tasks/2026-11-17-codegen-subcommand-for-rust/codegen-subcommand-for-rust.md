@@ -264,8 +264,8 @@ made.
 
 **The key between the codec and the impls is the full name** of a constructor,
 such as `com.example.shapes::Circle`. It is unique in a run, it is the language's
-own absolute name (decision 42), and it is what `--names=full` writes, so the
-writer needs no step for that option. The checker has a form of its own for the
+own absolute name (decision 42), and it is what a codec writes when its names
+are set to `full`, so the writer needs no step for that setting. The checker has a form of its own for the
 names that it resolves, which is internal, and the generated code does not use
 it. Any key that is unique in the run would do, since the generator writes both
 sides; the full name is chosen because it is already specified. A generated
@@ -331,9 +331,38 @@ that is specific to it.
   (Rust's orphan rule). Each codec has its own traits, so two codecs can adopt
   the same type differently and their impls do not collide. It costs a few dozen
   lines that are the same in each generated file.
+- **The settings of a codec are its own, and can be changed** (below).
 - **The runtime crate is one.** Every generated file depends on the same version
   of `constructo-runtime`, since they share its syntax layer, and the generated
   code says the version that it needs. The runtime crate has no traits.
+
+### Settings: of the generated code, and of a codec
+
+A setting either changes the code that is generated, or only how a codec behaves,
+and that decides where it is given.
+
+- **A generation setting changes the generated code,** and so it is given to the
+  command, for one target. TypeScript's `Nat` as `number` or as `bigint` is one:
+  it is the type of a field, which the program's compiler checks before the
+  program runs, and a codec that made a `bigint` for a field declared `number`
+  would break the program while it type-checks. The extension in TypeScript's
+  imports is another, since it is text in the generated code.
+- **A codec setting changes only what a codec does,** and is a property of the
+  codec, which a program can change: the limits, such as the depth of nesting and
+  of consts, and `names`, which is `project`, to write each name as the project
+  writes it, or `full`. A service that reads from a peer that it does not trust
+  can tighten the limits, and a program can write its own files with the
+  project's names and the text for another party in full, from one generated
+  package.
+- **A codec is cheap, and is never shared by default.** `codec()` makes a new
+  one each time, and the generated code keeps none of its own for callers to
+  share, so a program that changes a setting changes it only for itself. The
+  tables of names and consts are made when the code is generated and are shared
+  by every codec; a codec holds only its settings and the consts that it has
+  parsed. In Rust a setting is a field that is changed through `&mut self`, so
+  the borrow checker stops a change behind another user's back.
+- **Without a project, `names` can only be `full`,** since there is nothing for a
+  name to be relative to.
 
 ### Modules and names in Rust
 
@@ -523,9 +552,11 @@ writes each name in the shortest form that the project can resolve.
   group, so that the two keep writing the same text for the same value, as the
   [scenario](scenario-shapes.md) found that they do.
 
-- **Full names on request.** `--names=full` makes the codec write the full name
-  of every constructor, which is valid in any project. It is for text that goes to a
-  consumer whose imports are not known.
+- **Full names on request.** A codec whose `names` setting is `full` writes the
+  full name of every constructor, which is valid in any project. It is for text
+  that goes to a consumer whose imports are not known. It is a setting of the
+  codec and not an option of the command, so that one program can write both
+  (see the settings of a codec, below).
 - **Without a project the names are full,** since bare names have nothing to be
   relative to.
 - **The codec accepts every form on reading:** the full name, and the name that
@@ -895,7 +926,7 @@ addition later.
 **Open.** The likely shape is below, and is not final.
 
 ```
-constructo codegen --lang=LANG [--project=FOLDER] [--adopt=FILE_PATH] [--names=project|full]
+constructo codegen --lang=LANG [--project=FOLDER] [--adopt=FILE_PATH]
                    [--out-file=FILE_PATH | --out-dir=FOLDER] [FILES]...
 ```
 
@@ -907,9 +938,8 @@ constructo codegen --lang=LANG [--project=FOLDER] [--adopt=FILE_PATH] [--names=p
 - `--project=FOLDER` is the project that the codec is for. An application with
   two services runs the command twice, with each project and its own output
   file, and calls the codec of each.
-- `--names=project|full` says how the codec writes constructor names
-  (above). The default is `project`, which needs `--project`, and without one
-  it is `full`.
+- A target's generation settings (below) are given to the command. How they are
+  given, an option for each or a table for the target in a file, is open.
 - The types come as they do for the typed formats of `convert`: from `--project`
   and from the files given, with the options of `check` for projects, the
   prelude and consts where they apply.
@@ -1004,6 +1034,13 @@ runtime for a language other than Rust, output that is a folder, `Option` inside
 `Option`, resolving names as the value is read, and defaults as those of a
 class.
 
+[The scenario for TypeScript](scenario-shapes-typescript.md) followed, for a
+language whose numbers are all doubles and whose types are gone when the program
+runs. Its section "What changes the common design" lists four more: a number
+that does not fit is refused and never changed, settings of a target's own,
+where the reading of a type lives, and how generated names avoid Constructo
+names.
+
 1. **The runtime crate.** Move the six modules into `constructo-runtime`, a crate
    of its own in a workspace, re-export them from `constructo`, and check that everything that
    passed still passes. Nothing is generated yet. The conformance suite is
@@ -1044,7 +1081,11 @@ class.
 - That a generated class may give a named parameter its default, from the
   codec's own function, where the language has default arguments.
 - The name `codegen`.
-- That names are written relative to the project by default, and in full on request.
+- That names are written relative to the project by default, and in full when a
+  codec is set to write them so.
+- That a setting which changes the generated code is given to the command, and
+  one that changes only behaviour is a property of a codec, which is cheap and
+  never shared by default.
 - That the syntax layer is a small crate, `constructo-runtime`, which the generated
   code depends on, and what it holds.
 - That every field on a cycle of types held by value is boxed, at every site,

@@ -1,0 +1,13 @@
+# The adoptions of the scenario for TypeScript, as `--adopt=adopt.toml` would read them. The spike does not read this
+# file: the generated code in shapes/ is written by hand as if it had. A function is named by a module and an export,
+# and the module is as the generated package imports it.
+
+[typescript.constructor."com.example.ids::Uuid"]
+type = "string"
+from = "../adopt.ts#uuidFromString"
+to = "../adopt.ts#uuidToString"
+
+[typescript.enum."com.example.shapes::Colour"]
+type = "../paint.ts#Colour"
+from = "../adopt.ts#colourFromGenerated"
+to = "../adopt.ts#colourToGenerated"
