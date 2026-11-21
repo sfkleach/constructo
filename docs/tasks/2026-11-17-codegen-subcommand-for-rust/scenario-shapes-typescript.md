@@ -164,6 +164,12 @@ with `@ts-expect-error`, so that `tsc` fails if it is not an error:
    values that become the same value without a word, such as `Some(None)` and
    `None`. A number that is refused is not that. The principle should say so: a
    mapping may refuse what it cannot hold, but never change it without saying.
+   *Decided since:* a mapping never changes a value, may refuse one that is
+   outside the target's range for its type, and may not refuse a form that the
+   declarations contain. `Float`, a real with transreal non-finites, is the
+   one exception: it is mapped to the nearest binary value, and the loss of
+   precision is accepted.
+
 2. **A target has settings of its own.** The generated modules import each other
    with an extension: `.ts`, which Node and the bundlers accept, or `.js`, which
    is what `tsc` writes out. Which is right depends on how the program is built,
