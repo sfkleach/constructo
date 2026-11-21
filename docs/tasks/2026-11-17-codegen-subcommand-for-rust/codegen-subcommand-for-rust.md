@@ -578,18 +578,14 @@ enum List<T> { Nil, Cons(Cons<T>) }
 
 **Open:**
 
-- **Recursion.** `Cons` holds a `List<T>`, which holds a `Cons<T>`, so without a
-  `Box` the type would have infinite size. This is not only about generics:
-  `enum Tree = Leaf, Node(Tree, Tree)` is the same. The generator has to find
-  the recursive references, including mutual recursion as in `Tree` and
-  `Forest` of `syntax/examples/types/valid/mutual.types`, and box them. A `Vec`
-  already breaks the cycle. Which references are boxed has to be stable, so that
-  the type does not change when an unrelated declaration is added. An adopted
-  type that is recursive has to do its own boxing.
 - **A parameter that no constructor uses.** `enum Phantom<_T> = Phantom;` has no
-  constructor that uses `_T`, so the Rust `enum` would have a parameter that is
-  not used, and it needs a hidden `PhantomData`. It is the one case where the
-  generated `enum` is not just a list of its constructors.
+  constructor that uses `_T`, so the Rust type, which is `struct Phantom<_T>` as
+  an enum with one constructor, would have a parameter that is not used, and it
+  needs a hidden `PhantomData`. An enum of several constructors with such a
+  parameter needs one too. It is the one case where the generated type has
+  something that the declaration does not.
+
+Recursion, which needs the `Box` of `Cons`, is below.
 
 The mapping of the types is as in the table, provisional because the language
 may grow and the grammar has not been checked against each row.
@@ -642,6 +638,84 @@ writer writes, since an argument that has a name is written by name, as
 - **Other crates.** Whether the generated types also implement the traits of
   another crate, such as `serde`, so that other notations can use them. It is not
   needed for the goal, and it is not in this task unless it is wanted.
+
+### Recursion
+
+A Rust type that holds itself by value has no size, so
+`struct Cons<T> { head: T, tail: List<T> }` does not compile: some field on every
+such cycle has to hold its value through a pointer, `Box<List<T>>`. Python has
+nothing like it, since its values are all references, so the model only says
+which fields hold their type by value, and each target decides what that means.
+
+**Which fields are boxed.** The generator makes a graph of the Rust types that it
+generates, the enums, the `struct`s of constructors and those of records, with an
+edge from A to B where A holds B by value:
+
+- directly, or in an `Option`, or in a field of a tuple;
+- through a type argument, where the declaration holds that parameter by value:
+  `Styled<X>` holds an `X`, since its `item: T` is by value, and a type that
+  holds its `T` only in a `Vec` does not;
+- and not in a `Vec`, which is a pointer already, nor in an adopted type, which
+  the generator cannot see into, and whose author boxes what it needs.
+
+A cycle in the graph is a type of infinite size. **Every field whose edge is on a
+cycle is boxed, and nothing else is.** `next: Node?` on a cycle is
+`Option<Box<Node>>`.
+
+- **Fields only, and never a variant.** `Shape::Circle(Circle)` is never boxed.
+  A `struct`'s only edges are its fields, so every cycle has a field on it, and
+  boxing the fields is enough. A `match` on the variants stays as it would be
+  written by hand.
+- **Every site of a mutual recursion.** One box is enough to make a cycle
+  finite, but choosing one needs a rule such as "the first declared", and then
+  moving a declaration would move the box, and change the types that the
+  program's code is written against, for a change that means nothing in
+  Constructo. Boxing every field on the cycle makes the type of a field depend
+  only on whether it is on a cycle, and it costs an allocation more where there
+  could have been one fewer. It also needs no search for the fewest boxes, which
+  is a hard problem in general.
+- **The text does not change.** The codec reads and writes through
+  `impl<T> ReadValue<Box<T>> for Codec where Codec: ReadValue<T>`, so a `Box`
+  is not seen in the text.
+
+Two examples. `syntax/examples/types/valid/mutual.types` needs no box:
+
+```
+enum Tree<T> = Leaf(T), Node(Forest<T>);
+enum Forest<T> = Trees([Tree<T>]);
+```
+
+`Tree`'s `Node` holds a `Forest<T>` by value, but `Forest<T>`, as one
+`struct Forest<T>(Vec<Tree<T>>)`, holds the `Tree<T>` only in a `Vec`, so there is
+no cycle. This pair needs a box at both sites:
+
+```
+enum Expr = Num(Nat), Neg(Term);
+enum Term = Lit(Nat), Paren(Expr);
+```
+
+```rust
+pub enum Expr { Num(Num), Neg(Neg) }
+pub struct Neg(pub Box<Term>);      // a Term can hold an Expr by value
+
+pub enum Term { Lit(Lit), Paren(Paren) }
+pub struct Paren(pub Box<Expr>);    // an Expr can hold a Term by value
+```
+
+**To test, and not to take for granted:**
+
+- **Recursion that changes its argument.** `enum Nested<T> = Flat(T),
+  Deep(Nested<[T]>);` is accepted by `check`. The `Box` makes the type finite,
+  but the bound `Codec: ReadValue<Nested<Vec<T>>>`, inside the impl of
+  `ReadValue<Nested<T>>`, may be more than Rust's trait solver can follow. If it
+  is, such a type needs a reader that is written out and not bound. The test of
+  step 3, which compiles the output, has one.
+- **Deep values.** The parser's limit on nesting (decision 43) bounds how deep
+  the reader goes. A program can build a value that is deeper, such as a long
+  chain of `Cons`, and the writer, which is recursive, applies the same limit and
+  returns an error, and does not run out of stack. The `Drop` of Rust is
+  recursive too, which is the program's to manage, and the documentation says
+  so.
 
 ### Numbers
 
@@ -973,6 +1047,8 @@ class.
 - That names are written relative to the project by default, and in full on request.
 - That the syntax layer is a small crate, `constructo-runtime`, which the generated
   code depends on, and what it holds.
+- That every field on a cycle of types held by value is boxed, at every site,
+  and no other is.
 - That a target maps a type faithfully, and idiomatically only where the
   declarations show that it is exact, with `Option` in Python as the example.
 - That a target writes one file or a folder, with `--out-file` and `--out-dir`,
