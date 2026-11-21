@@ -187,9 +187,13 @@ with `@ts-expect-error`, so that `tsc` fails if it is not an error:
    runtime. What is common is only that the codec's names, consts and limits are
    what the readers use. The draft should say that, and leave where the code is
    to the target.
+   *Decided since:* every reader and writer works through the codec, and where
+   their code lives is the target's choice.
 4. **How generated names avoid Constructo names is the target's choice:** a name
    that yields in Rust and Python, a `$` in TypeScript. The draft gives the Rust
    rule as if it were the rule.
+   *Decided since:* the target chooses, provided that the names never clash, the
+   ones the program calls are fixed, and every renaming is reported.
 
 ## How to run it
 
