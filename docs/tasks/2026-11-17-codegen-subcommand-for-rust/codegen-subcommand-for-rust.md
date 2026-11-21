@@ -322,7 +322,7 @@ that is specific to it.
   keep in step.
 - **A record type without a name** (below) is in the module of the project that
   uses it, so the same record type in two projects is two `struct`s.
-- **The traits are the codec's own.** `ReadValue`, `WriteValue` and
+- **In Rust, the traits are the codec's own.** `ReadValue`, `WriteValue` and
   `DefaultValue` are generated with the codec, in the program's crate, and the
   codec implements them for its types and for `u64`, `i64`, `f64`, `String`,
   `bool`, `Vec<T>` and `Option<T>`. A trait of the program's crate can be
@@ -488,6 +488,22 @@ found that the draft had taken one parser for every target for granted.
   beside the one in Python: a binding to the Rust runtime, for speed. The
   generated code calls only the runtime's functions, so it would be a change of
   packaging and not of the generated code. It is not part of this task.
+- **Where the reading of a type lives is the target's choice.** What is common
+  is that every reader and writer works through the codec: it asks the codec for
+  the full name of a constructor, for the value of a const and for its limits,
+  and it is given the codec to do so. Where the code is put is left to the
+  target. Rust generates its traits with each codec, because of the orphan rule
+  (above). Python makes them the codec's methods. TypeScript, which has neither
+  traits nor that rule, keeps `Type<T>` and the basic types in its runtime,
+  shared by every codec, and gives the codec to them as a parameter ([scenario
+  for TypeScript](scenario-shapes-typescript.md)).
+- **How the names that the generator adds avoid Constructo names is the target's
+  choice.** What is common is that they never clash, that those the program calls
+  are fixed and do not move, and that every renaming of a Constructo name is
+  reported. Rust and Python have no character that a Constructo name lacks, so a
+  Constructo name yields, with a `_` at the end. A Constructo name cannot have a
+  `$`, so TypeScript puts one in every name that it adds, such as `$kind` and
+  `Colour$Constructors`, and nothing yields.
 
 ### The tree of a value
 
@@ -1142,9 +1158,15 @@ names.
   invoke are a closed set that is fixed when the code is generated.
 - How a type is adopted, a constructor or a whole enum, and why it is not in the
   project-file.
-- That the traits are generated with each codec and not put in the runtime
-  crate, because of the orphan rule, and that the codec implements them, one for
-  each type, so that it is `self` where names and consts are looked up.
+- That every reader and writer works through the codec, and where their code
+  lives is the target's choice; and that in Rust the traits are generated with
+  each codec and not put in the runtime crate, because of the orphan rule, and
+  the codec implements them, one for each type, so that it is `self` where names
+  and consts are looked up.
+- That how the names that the generator adds avoid Constructo names is the
+  target's choice, provided that they never clash, the ones the program calls
+  are fixed, and every renaming is reported: a `_` that yields in Rust and
+  Python, a `$` in TypeScript.
 - That names and consts are resolved as the value is read and written, and not
   in a pass of their own.
 - That a generated class may give a named parameter its default, from the
