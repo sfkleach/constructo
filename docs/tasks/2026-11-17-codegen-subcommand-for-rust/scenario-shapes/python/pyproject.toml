@@ -1,0 +1,22 @@
+[project]
+name = "constructo-scenario-shapes"
+version = "0.1.0"
+description = "The Python spike of the codegen scenario."
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.uv]
+# Not a package to build or install: the modules are run from this folder.
+package = false
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["constructo_runtime.py", "shapes.py", "paint.py", "adopt.py", "main.py"]
+# The cache is kept out of the repository's documentation, under _build/.
+cache_dir = "../../../../../_build/scenario/mypy-cache"
+
+[dependency-groups]
+dev = [
+    "mypy>=2.4.1",
+]
