@@ -13,8 +13,8 @@ third raised only questions of its own language, which is the sign that the comm
 
 - **It delivers** `constructo codegen --lang=rust`, which writes one Rust file for a project: its types, a codec with
   its tables of names and consts, and the reading, writing and defaults of every type, with adoption of constructors
-  and of whole enums. It delivers the crate `constructo-runtime`, which the generated file depends on, and a
-  conformance suite for runtimes.
+  and of whole enums. It delivers the crate `constructo-runtime`, which the generated file depends on, made ready to
+  be published with `constructo`, and a conformance suite for runtimes.
 - **It does not deliver** a second target. Python and TypeScript are tasks of their own, which start from the model of
   step 3 and the conformance suite of step 2. So the parts of the draft that only another target needs are not built
   here: the marker file and the folder of `--out-dir`, the generation settings and how the command is given them (Rust
@@ -37,7 +37,7 @@ third raised only questions of its own language, which is the sign that the comm
 - **Three pull requests**, so that the large mechanical change is merged before the new code depends on it:
   - the design and steps 1 and 2, which change no behaviour and touch every import of the six modules;
   - steps 3, 4 and 5, which give a working codec without adoption;
-  - steps 6 and 7, after which the task moves to `docs/tasks/done/`.
+  - steps 6, 7 and 8, after which the task moves to `docs/tasks/done/`.
 
 ## Step 1: what a number is, in the specifications
 
@@ -68,9 +68,10 @@ Documentation only. *Done:* the section "What a number is" in `docs/specs/type-c
   module's comment and decision 43 require.
 - **The types parser stays in the runtime** for now, which settles that open question: cutting it is a refactoring of
   the parser for no gain to this task. It is noted as a later possibility.
-- **The runtime is not published** in this task. The generated file names the version that it needs, and a program
-  depends on the crate by path or by git until a release decides otherwise. This settles the other open question of
-  the section for the first version.
+- **The runtime is not published in this step,** but it is made publishable: it has the version of `constructo`, and
+  `constructo` depends on it by that exact version as well as by path. `cargo publish` refuses a crate that depends
+  on one that is not on crates.io, so from this step on `constructo` cannot be released without the runtime. Step 8
+  publishes it.
 - **The conformance suite** is a folder, `syntax/conformance/`, of inputs, each with the expected result beside it: the
   canonical text that `values_text` writes, or `// expect:` with the message and the position of the error, as the
   invalid examples have now. Its first cases are the values under `syntax/examples`, and cases are added for the
@@ -180,6 +181,22 @@ Documentation only. *Done:* the section "What a number is" in `docs/specs/type-c
 - The decisions left by the table below, and the wording of decision 39, from "driven by a type" to "constrained by
   the target type".
 - `CHANGELOG.md`, the README, and the `--help` of the command.
+
+## Step 8: publishing the runtime
+
+From step 2 on, `constructo` depends on `constructo-runtime`, and `cargo publish` refuses a crate whose dependency is
+not on crates.io. So the runtime is published with `constructo`, at the same version, and before it.
+
+- **The public API is looked at,** as the draft's section on the tree of a value asks: the `ast` module becomes a
+  promise once it is published, and it was written for `check`. So do the two functions that step 2 had to make
+  public, `lexer::scan_string` and `values_text::bare`, which are kept, renamed or hidden from the documentation.
+- **The crate is made fit to be read on its own:** a README of its own, the doc comments of its public items, and a
+  check that its name is free on crates.io.
+- **The release recipes** check that the two crates have the same version, and publish the runtime first. The
+  workflow that `publish-release` triggers, `release-publish.yml`, is not in the repository, so it is written or
+  amended here to publish both, in that order.
+- **The release itself** is cut from `main` after the merge, as every release is, by the recipes. So the step is done
+  when a release would publish both; the first release after the merge is the one that does it.
 - The task moves to `docs/tasks/done/`, as the last commit before the merge.
 
 ## Where each decision is written
@@ -226,6 +243,6 @@ this task implements it.
 - TypeScript in the same way.
 - Go, as a fourth thought experiment, if a target with explicit errors and no unions is wanted.
 - The text of the non-finite values, after which a codec writes them instead of refusing them.
-- Publishing `constructo-runtime`, and cutting its types parser, if either is wanted.
+- Cutting the types parser out of `constructo-runtime`, if it is wanted.
 
 [group]: ../todo/2026-11-21-convert-writes-names-through-a-group/convert-writes-names-through-a-group.md
