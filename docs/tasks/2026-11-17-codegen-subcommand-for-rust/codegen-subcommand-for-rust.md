@@ -1024,14 +1024,15 @@ hardware is IEEE 754, and escaping it gains little and costs much. So:
   value,** so a value that a program holds goes through text and back exactly,
   and a long literal in a file does not keep the digits that the binary type
   cannot hold.
-- **A negative zero is written as `0.0`.** A `Float` has no negative zero, so
-  there is nothing else for it to be, and the two are equal in IEEE as well.
+- **A negative zero is written as `0.0`.** A `Float` has no distinct negative
+  zero value, so there is nothing else for it to be, and the two are equal in
+  IEEE as well.
 - **The non-finite values map to IEEE's,** when they have a text: +∞ and −∞ to
   the infinities, and nullity to NaN, and every NaN is written as nullity.
   Until then, writing one is an error, as the section on numbers says.
 
-The model of a `Float` is written nowhere in the specifications yet, and step 1
-writes it there.
+The model of a `Float` is in [type checking](../../specs/type-checking.md), the
+section "What a number is", and in decision 45, which step 1 wrote.
 
 `Option` in Python is the case that showed it
 ([scenario for Python](scenario-shapes-python.md)):
@@ -1119,13 +1120,15 @@ names.
    `Float` are written nowhere, and every mapping of a number depends on them.
    A `Nat` and an `Int` are whole numbers of any size. A `Float` is a real
    number, extended by +∞, −∞ and nullity, with Anderson's transreal arithmetic
-   as their theory: nullity is equal to itself, and there is no negative zero.
+   as their theory: nullity is equal to itself, and there is no distinct
+   negative zero value.
    The notation writes only the rationals among them, an integer over a power of
    ten, which is the number that the digits write. It goes in
    `docs/specs/type-checking.md`, beside the types, or in a specification of its
    own, with a decision for the model of `Float`, and it refers to the task for
    the text of the non-finite values. The mapping of a `Float` to a binary type,
-   and the precision that it gives up, are `codegen`'s, and stay here.
+   and the precision that it gives up, are `codegen`'s, and stay here. *Done:*
+   in `docs/specs/type-checking.md` and decision 45.
 2. **The runtime crate.** Move the six modules into `constructo-runtime`, a crate
    of its own in a workspace, re-export them from `constructo`, and check that everything that
    passed still passes. Nothing is generated yet. The conformance suite is

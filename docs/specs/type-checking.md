@@ -31,12 +31,28 @@ The sign decides the type of a number. `+5` is an `Int`, even though it is not n
 the error is `Expected Nat but found Int`. A negative number never fits a `Nat`. A number with a point is a `Float`,
 and the fraction may be followed by an exponent, as in `1.5e3`. `1e5` is not a number.
 
+### What a number is
+
+The text of a number decides its type, and the values of each type are these, as decision 45 says:
+
+- A `Nat` is a whole number that is zero or more, and an `Int` is a whole number, of any size.
+- A `Float` is a real number, or one of the three values that are not finite: +∞, −∞ and nullity, with Anderson's
+  transreal arithmetic as their theory. Nullity is equal to itself.
+- The notation writes only the rationals among the reals. A `Float` is written as an integer over a power of ten, and
+  its value is that number exactly, so `1.50` and `1.5` are the same value, and `0.1` is one tenth.
+- There is no distinct negative zero value. `-0.0` and `-0` are correct texts, if a little odd, and are the same
+  values as `0.0` and `+0`.
+- The values that are not finite have no text yet, so no value in a file is one of them.
+
+A program that holds a `Float` in a binary type, such as an `f64`, holds the nearest value that the type has. That is
+an approximation made by the program, and it is not what a `Float` is.
+
 ### Numbers and widening
 
 By default a number fits any type that is at least as wide as its own, where `Nat` is narrower than `Int`, which is
 narrower than `Float`. So `5` can be given for a `Float`. `--no-widening` makes each number exact: `5` is only a `Nat`.
-Widening applies in the same way to a reference to a const, as below, and to the elements of an array. Widening to
-`Float` may lose precision for a very large `Nat` or `Int`.
+Widening applies in the same way to a reference to a const, as below, and to the elements of an array. A program that
+holds a `Float` in a binary type may lose precision for a very large `Nat` or `Int` that is widened to it.
 
 ### Tagged values
 
@@ -219,4 +235,4 @@ verbose output even if its error was not one of those reported, and a values fil
 - [The check command](check-command.md), for the stages around this one.
 - [Validity checks](validity-checks.md), which must pass first.
 - [Resolving identifiers](resolving-identifiers.md), for the scope of names.
-- Decisions 9 to 11, 13 to 20 and 22, in `docs/decisions/`.
+- Decisions 9 to 11, 13 to 20, 22 and 45, in `docs/decisions/`.
