@@ -213,8 +213,9 @@ fn scan_number(chars: &[char], start: usize) -> (Tok, usize, Option<(usize, Stri
 /// Scans a string literal whose opening quote is at `start`.
 ///
 /// Returns the decoded text and the index after the closing quote. For a malformed string it returns the index of the
-/// error, the message, and the index at which lexing should resume.
-pub(crate) fn scan_string(chars: &[char], start: usize) -> Result<(String, usize), (usize, String, usize)> {
+/// error, the message, and the index at which lexing should resume. The lexer of queries uses it too, so that a string
+/// in a query is read as one in a values file is.
+pub fn scan_string(chars: &[char], start: usize) -> Result<(String, usize), (usize, String, usize)> {
     let mut text = String::new();
     let mut i = start + 1;
     loop {

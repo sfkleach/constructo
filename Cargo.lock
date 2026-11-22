@@ -79,6 +79,7 @@ name = "constructo"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "constructo-runtime",
  "glob",
  "num-bigint",
  "num-traits",
@@ -86,6 +87,10 @@ dependencies = [
  "sha2",
  "toml",
 ]
+
+[[package]]
+name = "constructo-runtime"
+version = "0.1.0"
 
 [[package]]
 name = "cpufeatures"
