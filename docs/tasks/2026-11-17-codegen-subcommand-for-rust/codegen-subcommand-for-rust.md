@@ -458,8 +458,10 @@ change.
 - It also parses types files, because the parser is one module. It is simplest to
   leave that in, and it could be cut later.
 
-**Open:** whether it is published, and so whether its version is tied to that of
-`constructo`; and whether the types files part of the parser stays in it.
+*Decided since:* it is published with `constructo`, at the same version, which
+`cargo publish` requires once `constructo` depends on it; and the types files
+part of the parser stays in it for now. See the
+[implementation plan](implementation-plan.md), steps 2 and 8.
 
 ### The runtime of another language
 
