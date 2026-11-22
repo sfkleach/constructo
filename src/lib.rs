@@ -2,18 +2,18 @@
 //!
 //! The `constructo` command-line tool is a thin layer over this crate.
 
-pub mod ast;
+pub use constructo_runtime::ast;
 pub mod config;
 pub mod convert;
-pub mod diagnostics;
+pub use constructo_runtime::diagnostics;
 pub mod digest;
 pub mod exact;
 pub mod fetch;
 pub mod json;
-pub mod lexer;
-pub mod limits;
+pub use constructo_runtime::lexer;
+pub use constructo_runtime::limits;
 pub mod lock;
-pub mod parser;
+pub use constructo_runtime::parser;
 pub mod project;
 pub mod query;
 pub mod resolve;
@@ -24,7 +24,7 @@ pub mod typed;
 pub mod typed_back;
 pub mod typed_files;
 pub mod validate;
-pub mod values_text;
+pub use constructo_runtime::values_text;
 pub mod verify;
 pub mod xml;
 pub mod xml_back;

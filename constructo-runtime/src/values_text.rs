@@ -231,9 +231,9 @@ fn quoted(text: &str) -> String {
     out
 }
 
-/// The value with every position replaced by one place, so that values can be compared.
-#[cfg(test)]
-pub(crate) fn bare(value: &Value) -> Value {
+/// The value with every position replaced by one place, so that values can be compared. It is public so that the
+/// tests of the crates that use this one can compare values too.
+pub fn bare(value: &Value) -> Value {
     let pos = crate::diagnostics::Pos { line: 1, col: 1 };
     let all = |items: &[Value]| items.iter().map(bare).collect::<Vec<_>>();
     let members = |ms: &[Member]| {
@@ -384,7 +384,7 @@ mod tests {
 
     #[test]
     fn what_is_written_is_read_back() {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("syntax/examples/values/valid");
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../syntax/examples/values/valid");
         let mut seen = 0;
         for entry in std::fs::read_dir(dir).unwrap() {
             let path = entry.unwrap().path();
