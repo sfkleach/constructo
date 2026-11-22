@@ -41,11 +41,11 @@ third raised only questions of its own language, which is the sign that the comm
 
 ## Step 1: what a number is, in the specifications
 
-Documentation only.
+Documentation only. *Done:* the section "What a number is" in `docs/specs/type-checking.md`, and decision 45.
 
 - **What:** the values of `Nat`, `Int` and `Float`, as step 1 of the draft says. `Nat` and `Int` are whole numbers of
   any size. A `Float` is a real number, extended by +∞, −∞ and nullity under transreal arithmetic, and the notation
-  writes only the rationals among them. Nullity equals itself, and there is no negative zero.
+  writes only the rationals among them. Nullity equals itself, and there is no distinct negative zero value.
 - **Where:** a section "What a number is" in `docs/specs/type-checking.md`, before "Numbers and widening", which already
   says that widening to `Float` "may lose precision"; that sentence is reworded to say it is the nearest value. A spec
   of its own is not needed while the model is a paragraph.
