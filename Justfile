@@ -7,10 +7,10 @@ shippable:
 test: unittest lint fmt-check audit functest
 
 unittest:
-    cargo test
+    cargo test --workspace
 
 lint:
-    cargo clippy --all-targets -- -D warnings
+    cargo clippy --workspace --all-targets -- -D warnings
 
 audit:
     @echo "Running security audit..."
@@ -26,11 +26,11 @@ install-audit:
     cargo install cargo-audit
 
 fmt:
-    cargo fmt
+    cargo fmt --all
 
 # Check formatting without modifying files
 fmt-check:
-    cargo fmt --check
+    cargo fmt --all --check
 
 build:
     cargo build
@@ -59,6 +59,10 @@ functest:
 # Install constructo locally via cargo install --path . (no sudo required).
 install:
     cargo install --path .
+
+# A release has to publish constructo-runtime before constructo, since cargo publish refuses a crate whose dependency
+# is not on crates.io, and the two have the same version. The recipes below do not do that yet: step 8 of the codegen
+# task (docs/tasks/2026-11-17-codegen-subcommand-for-rust/implementation-plan.md) changes them to.
 
 # Sign and push a release tag, triggering the release-draft.yml workflow.
 # Monitor the workflow run manually via: gh run list --workflow=release-draft.yml
