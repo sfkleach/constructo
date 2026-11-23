@@ -11,7 +11,7 @@ pub mod exact;
 pub mod fetch;
 pub mod json;
 pub use constructo_runtime::lexer;
-pub use constructo_runtime::limits;
+pub mod limits;
 pub mod lock;
 pub use constructo_runtime::parser;
 pub mod project;
