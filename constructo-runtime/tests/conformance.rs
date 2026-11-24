@@ -3,6 +3,9 @@
 //!
 //! With `CONSTRUCTO_BLESS=1` in the environment, the expected results are written from what this runtime gives,
 //! instead of being compared with it. That is how they are made, and how they are changed when the syntax changes.
+//!
+//! The suite is in the repository and not in the published crate, so a copy of the crate that is not in the repository,
+//! such as one downloaded from crates.io, skips these tests.
 
 use constructo_runtime::diagnostics::Diagnostic;
 use constructo_runtime::parser::{parse_values_with, Experimental};
@@ -10,12 +13,29 @@ use constructo_runtime::values_text::render;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-fn repository() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("..")
+/// The root of the repository, or `None` when the crate is not in one. The repository is recognised by the
+/// `Cargo.toml` of its workspace, beside this crate's folder. Within the repository the suite must be found, so that a
+/// suite that has been moved or lost is a failure and not a skip.
+fn repository() -> Option<PathBuf> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let manifest = fs::read_to_string(root.join("Cargo.toml")).ok()?;
+    if !manifest.contains("\"constructo-runtime\"") {
+        return None;
+    }
+    assert!(
+        root.join("syntax/conformance").is_dir(),
+        "the repository has no syntax/conformance"
+    );
+    Some(root)
 }
 
-fn suite() -> PathBuf {
-    repository().join("syntax/conformance")
+/// The repository, or `None` after saying that the tests are skipped.
+fn repository_or_skip() -> Option<PathBuf> {
+    let root = repository();
+    if root.is_none() {
+        eprintln!("The conformance suite is skipped, since this crate is not in the Constructo repository.");
+    }
+    root
 }
 
 /// Every file under the folder whose name has the extension, sorted, so that failures are reported in a stable order.
@@ -64,8 +84,11 @@ fn result(path: &Path, relative: &Path) -> String {
 
 #[test]
 fn every_case_gives_its_expected_result() {
+    let Some(repository) = repository_or_skip() else {
+        return;
+    };
     let bless = std::env::var_os("CONSTRUCTO_BLESS").is_some();
-    let root = suite();
+    let root = repository.join("syntax/conformance");
     let cases = files(&root, "values");
     assert!(cases.len() > 50, "the suite has only {} cases", cases.len());
     let mut failures = Vec::new();
@@ -93,7 +116,10 @@ fn every_case_gives_its_expected_result() {
 
 #[test]
 fn every_expected_result_has_a_case() {
-    let root = suite();
+    let Some(repository) = repository_or_skip() else {
+        return;
+    };
+    let root = repository.join("syntax/conformance");
     let orphans: Vec<_> = files(&root, "expected")
         .into_iter()
         .filter(|path| !path.with_extension("values").exists())
@@ -106,8 +132,11 @@ fn every_expected_result_has_a_case() {
 /// same as the examples, so that the two cannot drift apart.
 #[test]
 fn every_example_of_values_is_a_case() {
-    let examples = repository().join("syntax/examples/values");
-    let copies = suite().join("examples");
+    let Some(repository) = repository_or_skip() else {
+        return;
+    };
+    let examples = repository.join("syntax/examples/values");
+    let copies = repository.join("syntax/conformance/examples");
     let mut failures = Vec::new();
     for example in files(&examples, "values") {
         let relative = example.strip_prefix(&examples).unwrap();

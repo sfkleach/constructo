@@ -2,6 +2,8 @@
 > Amends [decision 38](0038-reading-json-exact-back-is-strict.md) and
 > [decision 41](0041-reading-xml-back-is-strict-with-a-parser-of-our-own.md), whose parsers had a nesting limit of
 > 200 levels of their own syntax.
+> Amended by [decision 46](0046-the-syntax-layer-is-a-crate-constructo-runtime.md): every limit is shown in
+> `src/limits.rs`, and `MAX_DEPTH` is defined in `constructo-runtime`, where the parser is.
 
 ## Issue
 

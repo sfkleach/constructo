@@ -453,15 +453,17 @@ change.
 
 - It would be a member of a workspace of this repository, and the main crate
   would depend on it and stay where it is.
-- It has to carry the limits of the parser (nesting and size), since it reads
-  data that is not trusted.
+- It has to carry the limit of the parser on nesting, since it reads data that
+  is not trusted. The parser has no limit on size, which it does not need, since
+  it is linear in its input.
 - It also parses types files, because the parser is one module. It is simplest to
   leave that in, and it could be cut later.
 
 *Decided since:* it is published with `constructo`, at the same version, which
-`cargo publish` requires once `constructo` depends on it; and the types files
-part of the parser stays in it for now. See the
-[implementation plan](implementation-plan.md), steps 2 and 8.
+`cargo publish` requires once `constructo` depends on it, so a release has to
+publish the runtime first; and the types files part of the parser stays in it
+for now. See the [implementation plan](implementation-plan.md), steps 2 and 8,
+and decision 46, which step 2 wrote.
 
 ### The runtime of another language
 
@@ -476,14 +478,14 @@ found that the draft had taken one parser for every target for granted.
   native build.
 - **A conformance suite holds them to one syntax.** For each input, from
   `syntax/examples` and from cases written for it, the suite says what a runtime
-  must give: the canonical text that the Rust printer writes for it, or the
+  must give: the text that the Rust printer writes back for it, or the
   message and the position of the error. A runtime conforms when it gives them
   exactly. The expected results are Constructo text, so the suite needs no other
   notation. In place of one parser to audit there is one suite, which makes the
   claim that every target reads the same syntax one that can be checked.
 - **The limits are part of it.** A runtime reads data that is not trusted, so the
-  suite has deep nesting and large inputs, and every runtime refuses them with
-  the same message.
+  suite has deep nesting, and every runtime refuses it with the same message.
+  *Built in step 2,* in `syntax/conformance/`, with decision 47.
 - **A change to the syntax is a change to every runtime,** and the suite is what
   finds one that has not been changed.
 - **A native runtime can be added later,** as Python's `json` has a module in C
@@ -526,7 +528,7 @@ this makes it public, in every runtime.
   text, such as a name that is not an identifier, or a const with a body, and
   `render` refuses it. Whatever `render` writes, `parse` reads back as the same
   tree.
-- **The suite covers it,** since the canonical text that it expects is what
+- **The suite covers it,** since the text that it expects is what
   `render` writes for what `parse` reads.
 - **The tree is an interface,** in Rust as in every other target, so its shape is
   a promise once it is published. For Rust it is the `ast` module of the parser,
@@ -1183,7 +1185,7 @@ names.
   one that changes only behaviour is a property of a codec, which is cheap and
   never shared by default.
 - That the syntax layer is a small crate, `constructo-runtime`, which the generated
-  code depends on, and what it holds.
+  code depends on, and what it holds. *Written:* decision 46.
 - That every field on a cycle of types held by value is boxed, at every site,
   and no other is.
 - That a mapping never changes a value, may refuse one outside the target's
@@ -1195,7 +1197,7 @@ names.
   and that a folder belongs to the generator, guarded by a marker file.
 - That every other target has a runtime of its own, held to the syntax by a
   conformance suite whose expected results are Constructo text, and that every
-  runtime makes the tree of a value public.
+  runtime makes the tree of a value public. *Written:* decision 47.
 - That name resolution, the consts and the limits are in a codec for each
   project and not in the types, so that an application can have more than one
   codec, and that the generated code has a Rust module for each project.
