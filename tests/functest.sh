@@ -1849,7 +1849,7 @@ rm -f "$proj/app/constructo.lock" "$proj/app/constructo.toml" "$proj/lib/constru
 rmdir "$proj/app" "$proj/lib" "$proj"
 
 # A type of a project that is imported can hold a type of one that is not, and a value of it is written with the full
-# name of that project, which `check` accepts in a value.
+# name of that project, which `check` accepts in a value. The project that is imported is written through its group.
 proj="$(mktemp -d)"
 mkdir "$proj/app" "$proj/lib" "$proj/base"
 printf '[project]\nname = "example.base"\n' >"$proj/base/constructo.toml"
@@ -1862,7 +1862,7 @@ printf '[project]\nname = "example.app"\n\n[[import]]\nproject-name = "example.l
     >"$proj/app/constructo.toml"
 printf 'path = "../lib"\n' >>"$proj/app/constructo.toml"
 printf '{"Scene":{"shape":"Dot"}}\n' >"$proj/v.json"
-printf 'example.lib::Scene { shape: example.base::Dot };\n' >"$proj/expected.values"
+printf 'lib::Scene { shape: example.base::Dot };\n' >"$proj/expected.values"
 "$CONSTRUCTO" project update "$proj/app" >/dev/null 2>&1
 expect_json "from json-typed: a constructor of a project that is not imported is written in full" \
     "$proj/expected.values" --from=json-typed --type=lib::Scene --project="$proj/app" "$proj/v.json"
@@ -1872,15 +1872,15 @@ rm -f "$proj/app/constructo.lock" "$proj/app/constructo.toml" "$proj/lib/constru
     "$proj/base/constructo.toml" "$proj/base/base.types" "$proj/v.json" "$proj/expected.values"
 rmdir "$proj/app" "$proj/lib" "$proj/base" "$proj"
 
-# The names of the prelude are written as the project sees them, which is in full when it imports the prelude into a
-# group and not into local.
+# The names of the prelude are written as the project sees them, which is through the group when it imports the
+# prelude into a group and not into local.
 proj="$(mktemp -d)"
 printf '[project]\nname = "com.example.app"\ninclude = ["*.types"]\n\n[[import]]\nproject-name = "constructo.prelude"\n' \
     >"$proj/constructo.toml"
 printf 'group = "std"\nbuiltin = "constructo:/prelude"\n' >>"$proj/constructo.toml"
 printf 'enum Speed = Fast, Slow;\n' >"$proj/speed.types"
 printf '[null, 3]\n' >"$proj/v.json"
-printf '[constructo.prelude::None, constructo.prelude::Some(3)];\n' >"$proj/expected.values"
+printf '[std::None, std::Some(3)];\n' >"$proj/expected.values"
 expect_json "from json-typed: the prelude is written as the project imports it" "$proj/expected.values" \
     --from=json-typed --type='[std::Option<Nat>]' --project="$proj" "$proj/v.json"
 expect_exit "from json-typed: what is written for the prelude is accepted by check in the project" 0 check \
@@ -2299,10 +2299,9 @@ printf '[project]\nname = "com.example.app"\ninclude = ["*.types"]\n\n[[import]]
 printf 'group = "lib"\npath = "../lib"\n' >>"$proj/app/constructo.toml"
 printf 'enum Scene = Scene { shape: lib::Shape };\n' >"$proj/app/scene.types"
 printf '{"Scene":{"shape":{"Circle":{"r":2}}}}\n{"Scene":{"shape":"Dot"}}\n' >"$proj/v.jsonl"
-printf 'Scene { shape: com.example.lib::Circle { r: 2.0 } };\nScene { shape: com.example.lib::Dot };\n' \
-    >"$proj/expected.values"
+printf 'Scene { shape: lib::Circle { r: 2.0 } };\nScene { shape: lib::Dot };\n' >"$proj/expected.values"
 "$CONSTRUCTO" project update "$proj/app" >/dev/null 2>&1
-expect_json "from jsonl-typed: a type of a project, with the names of another project written in full" \
+expect_json "from jsonl-typed: a type of a project, with the names of another project written through its group" \
     "$proj/expected.values" --from=jsonl-typed --type=Scene --project="$proj/app" "$proj/v.jsonl"
 expect_exit "from jsonl-typed: what is written is accepted by check in the project" 0 check --project="$proj/app" \
     "$proj/expected.values"
@@ -2449,6 +2448,22 @@ expect_query_error "typed: --type finds a mistake before any value is read" 2 ""
 expect_query_error "typed: a match must cover every constructor" 2 "" "ERROR: The match does not cover Dot of Shape" \
     --type=Shape -e '#values.map(|s| match s with Circle { r } => r, endmatch)' "$query_dir/r.types" \
     "$query_dir/shapes.values"
+
+# A typed query writes a name of another project through the group that the project imports it into, as `convert`
+# does, and not in full.
+mkdir "$query_dir/lib" "$query_dir/app"
+printf '[project]\nname = "com.example.lib"\ninclude = ["*.types"]\n' >"$query_dir/lib/constructo.toml"
+printf 'enum Shape = Dot;\n' >"$query_dir/lib/shapes.types"
+printf '[project]\nname = "com.example.app"\ninclude = ["*.types"]\n\n[[import]]\n' >"$query_dir/app/constructo.toml"
+printf 'project-name = "com.example.lib"\ngroup = "lib"\npath = "../lib"\n' >>"$query_dir/app/constructo.toml"
+printf 'enum Scene = Scene(lib::Shape);\n' >"$query_dir/app/scene.types"
+printf 'Scene(com.example.lib::Dot);\n' >"$query_dir/scene.values"
+"$CONSTRUCTO" project update "$query_dir/app" >/dev/null 2>&1
+expect_query "typed: a name of another project is written through its group" "Scene(lib::Dot);" \
+    --project="$query_dir/app" -e '#values' "$query_dir/scene.values"
+rm -f "$query_dir/app/constructo.lock" "$query_dir/app/constructo.toml" "$query_dir/app/scene.types" \
+    "$query_dir/lib/constructo.toml" "$query_dir/lib/shapes.types" "$query_dir/scene.values"
+rmdir "$query_dir/app" "$query_dir/lib"
 rm -f "$query_dir/out" "$query_dir/err" "$query_dir/moves.values" "$query_dir/arrays.values" "$query_dir/r.types" \
     "$query_dir/order.types" "$query_dir/order.values" \
     "$query_dir/r.values" "$query_dir/shapes.values"

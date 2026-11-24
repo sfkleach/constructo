@@ -133,8 +133,9 @@ distinctions that the text shows; either may fail where the other succeeds.
 
 If the result is an iterator, each item is written as a value, as it is made; otherwise the one result is written. A
 value is written as `convert --from` writes values: on one line if that is at most 80 characters wide, and spread over
-lines otherwise, or all on one line with `--compact`. Typed, a name is written as the source of its value writes it,
-and a name that the query makes as a values file of the root project would write it.
+lines otherwise, or all on one line with `--compact`. Typed, a name is written as the project of the source of its
+value writes it, and a name that the query makes as a values file of the root project would write it: bare, else
+through a group, else in full, as `convert --from=json-typed` writes a name.
 
 ## Errors and exit codes
 

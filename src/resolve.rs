@@ -588,7 +588,40 @@ impl<'a> Resolver<'a> {
     }
 }
 
+/// The form in which a file writes the name of a declaration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Written {
+    /// The name alone, which is the new name if an import renames it.
+    Bare(String),
+    /// The name through a group of the project, as `ids::Uuid`: the group, and the name, which is the new name if the
+    /// import renames it.
+    Group(String, String),
+    /// The name with the full name of its project, as `com.example.ids::Uuid`.
+    Full,
+}
+
 impl Resolution {
+    /// The form in which the file with the index writes the declaration `local` of the project with the full name
+    /// `project`: bare if it resolves to that declaration there, else through a group of the project, else in full.
+    /// Where the project is in more than one group, the first import in the project-file through which the name is
+    /// visible is the one used.
+    pub fn written(&self, file: usize, local: &str, project: &str) -> Written {
+        self.names.written(file, local, project, true)
+    }
+
+    /// A canonical name as the file with the index writes it, in the form that `written` gives. A name with no
+    /// project, which is that of the files that were given without one, is written as it is.
+    pub fn write_name(&self, file: usize, name: &str) -> String {
+        let Some((local, project)) = name.split_once('@') else {
+            return name.to_string();
+        };
+        match self.written(file, local, project) {
+            Written::Bare(name) => name,
+            Written::Group(group, name) => format!("{}::{}", group, name),
+            Written::Full => format!("{}::{}", project, local),
+        }
+    }
+
     /// Rewrites the canonical names in a message as they would be written in the file with the index. A name that can
     /// be written bare there is shown bare, and any other is shown in full, as `com.example.shapes::Shape`.
     ///
@@ -657,14 +690,24 @@ impl Resolution {
 }
 
 impl Names {
-    /// The way to write a name in a file: bare if it resolves to the same declaration there, and in full if not.
+    /// The way to write a name in a message about a file: bare if it resolves to the same declaration there, and in
+    /// full if not. A message does not write a name through a group, so that it does not depend on the groups of the
+    /// project.
     fn show(&self, file: usize, local: &str, project: &str) -> String {
-        let full = format!("{}::{}", project, local);
-        let Some(home) = self.homes.get(file) else {
-            return full;
+        match self.written(file, local, project, false) {
+            Written::Bare(name) => name,
+            Written::Group(group, name) => format!("{}::{}", group, name),
+            Written::Full => format!("{}::{}", project, local),
+        }
+    }
+
+    /// The shortest form in which a file can write a name: bare, else through a group if `groups` is set, else in full.
+    fn written(&self, file: usize, local: &str, project: &str, groups: bool) -> Written {
+        let Some(&home) = self.homes.get(file) else {
+            return Written::Full;
         };
         let Some(target) = self.layout.projects.iter().position(|p| p.name == project) else {
-            return full;
+            return Written::Full;
         };
         let resolver = Resolver {
             layout: &self.layout,
@@ -672,15 +715,36 @@ impl Names {
             declared: HashMap::new(),
             sites: HashMap::new(),
         };
-        // The name is bare if, in the namespace that declares it, nothing but the target has the name in `local`. It
-        // is shown as the project writes it, which is the new name if the import renames it.
-        let members = resolver.local_members(*home);
-        let Some(own) = members.iter().find(|m| m.home == target) else {
-            return full;
-        };
-        let Some(written) = own.visible_name(local) else {
-            return full;
-        };
+        if let Some(name) = self.visible_in(&resolver.local_members(home), target, local) {
+            return Written::Bare(name);
+        }
+        if groups {
+            // The first import in the project-file through which the name is visible is the one used, so that the same
+            // project always writes the same text. The group `local` is the bare form, which has been tried.
+            for import in &self.layout.projects[home].imports {
+                let Some(group) = import.group.as_deref() else {
+                    continue;
+                };
+                if import.target != target || group == "local" {
+                    continue;
+                }
+                let Some(members) = resolver.group_members(home, group) else {
+                    continue;
+                };
+                if let Some(name) = self.visible_in(&members, target, local) {
+                    return Written::Group(group.to_string(), name);
+                }
+            }
+        }
+        Written::Full
+    }
+
+    /// The name by which the members of a scope write the declaration `local` of the project `target`, if that name
+    /// resolves to it and to nothing else there. It is the new name if the import renames it, and `None` if the target
+    /// is not a member, or the import hides the name, or another member declares the name too.
+    fn visible_in(&self, members: &[Member], target: Home, local: &str) -> Option<String> {
+        let own = members.iter().find(|m| m.home == target)?;
+        let written = own.visible_name(local)?;
         for ns in [Ns::Type, Ns::Value] {
             let declares = |h: Home, name: &str| self.declared.get(&(h, ns)).is_some_and(|names| names.contains(name));
             if !declares(target, local) {
@@ -695,10 +759,10 @@ impl Names {
                 .map(|m| m.home)
                 .collect();
             if found == [target] {
-                return written;
+                return Some(written);
             }
         }
-        full
+        None
     }
 }
 
@@ -1311,5 +1375,139 @@ mod tests {
             "first declared at Shape@x.y.types, line 1"
         );
         assert!(report.is_ok());
+    }
+
+    /// How the project `example.app` writes the constructor `Circle` of `example.lib`, which it imports with the
+    /// imports given, while `example.base` declares `Dot` and is not imported. Each import is given its group and its
+    /// hides and renames.
+    fn written_in_app(imports: Vec<ImportInfo>, local: &str, project: &str) -> Written {
+        resolution_in_app(imports).written(2, local, project)
+    }
+
+    /// The resolution of the three projects of `written_in_app`, whose file 2 is in `example.app`.
+    fn resolution_in_app(imports: Vec<ImportInfo>) -> Resolution {
+        let info = |name: &str, imports: Vec<ImportInfo>| ProjectInfo {
+            name: name.to_string(),
+            imports,
+            builtin: false,
+        };
+        let layout = Layout {
+            projects: vec![
+                info("example.lib", vec![]),
+                info("example.base", vec![]),
+                info("example.app", imports),
+            ],
+            owners: vec![0, 1, 2],
+            root: 2,
+        };
+        let texts = [
+            "enum Shape = Circle, Square;",
+            "enum Base = Dot;",
+            "enum Scene = Scene;",
+        ];
+        let sources: Vec<Source> = texts
+            .iter()
+            .enumerate()
+            .map(|(index, text)| Source {
+                name: format!("{}.types", index),
+                text: text.to_string(),
+            })
+            .collect();
+        let mut parsed: Vec<Parsed> = texts
+            .iter()
+            .map(|text| {
+                crate::parser::parse_file(text, crate::Experimental::default())
+                    .1
+                    .unwrap()
+            })
+            .collect();
+        let resolution = resolve(&sources, &mut parsed, &layout);
+        assert!(resolution.diagnostics.is_empty() && resolution.import_errors.is_empty());
+        resolution
+    }
+
+    fn import(group: &str, hide: &[&str], rename: &[(&str, &str)]) -> ImportInfo {
+        let at = Pos { line: 1, col: 1 };
+        ImportInfo {
+            hide: hide.iter().map(|name| (name.to_string(), at)).collect(),
+            rename: rename
+                .iter()
+                .map(|(new, old)| (new.to_string(), old.to_string(), at))
+                .collect(),
+            ..ImportInfo::new(Some(group), 0)
+        }
+    }
+
+    fn group(group: &str, name: &str) -> Written {
+        Written::Group(group.to_string(), name.to_string())
+    }
+
+    #[test]
+    fn a_name_is_written_bare_where_it_can_be() {
+        let bare = Written::Bare("Circle".to_string());
+        assert_eq!(
+            written_in_app(vec![import("local", &[], &[])], "Circle", "example.lib"),
+            bare
+        );
+        // The bare form is preferred to a group.
+        let imports = vec![import("g", &[], &[]), import("local", &[], &[])];
+        assert_eq!(written_in_app(imports, "Circle", "example.lib"), bare);
+        // A project's own names are bare.
+        assert_eq!(
+            written_in_app(vec![], "Scene", "example.app"),
+            Written::Bare("Scene".to_string())
+        );
+    }
+
+    #[test]
+    fn a_name_is_written_through_its_group_where_it_is_not_in_scope() {
+        assert_eq!(
+            written_in_app(vec![import("g", &[], &[])], "Circle", "example.lib"),
+            group("g", "Circle")
+        );
+    }
+
+    #[test]
+    fn a_name_that_an_import_renames_is_written_with_its_new_name() {
+        let imports = vec![import("g", &[], &[("Round", "Circle")])];
+        assert_eq!(written_in_app(imports, "Circle", "example.lib"), group("g", "Round"));
+        let imports = vec![import("local", &[], &[("Round", "Circle")])];
+        assert_eq!(
+            written_in_app(imports, "Circle", "example.lib"),
+            Written::Bare("Round".to_string())
+        );
+    }
+
+    #[test]
+    fn a_group_that_hides_the_name_is_not_used() {
+        assert_eq!(
+            written_in_app(vec![import("g", &["Circle"], &[])], "Circle", "example.lib"),
+            Written::Full
+        );
+        // The hide is of the import, so another import of the project can still be used.
+        let imports = vec![import("a", &["Circle"], &[]), import("b", &[], &[])];
+        assert_eq!(written_in_app(imports, "Circle", "example.lib"), group("b", "Circle"));
+        // A name that the import does not hide is still written through it.
+        let imports = vec![import("a", &["Circle"], &[]), import("b", &[], &[])];
+        assert_eq!(written_in_app(imports, "Square", "example.lib"), group("a", "Square"));
+    }
+
+    #[test]
+    fn the_first_import_through_which_a_name_is_visible_is_used() {
+        let imports = vec![import("b", &[], &[]), import("a", &[], &[])];
+        assert_eq!(written_in_app(imports, "Circle", "example.lib"), group("b", "Circle"));
+    }
+
+    #[test]
+    fn a_name_of_a_project_that_is_not_imported_is_written_in_full() {
+        assert_eq!(
+            written_in_app(vec![import("g", &[], &[])], "Dot", "example.base"),
+            Written::Full
+        );
+        let resolution = resolution_in_app(vec![import("g", &[], &[])]);
+        assert_eq!(resolution.write_name(2, "Dot@example.base"), "example.base::Dot");
+        assert_eq!(resolution.write_name(2, "Circle@example.lib"), "g::Circle");
+        // A name of the files that were given without a project has no `@`, and is written as it is.
+        assert_eq!(resolution.write_name(2, "Circle"), "Circle");
     }
 }

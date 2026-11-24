@@ -223,6 +223,10 @@ Following the style in https://keepachangelog.com/en/1.0.0/
 
 ### Changed
 
+- `convert --from=json-typed`, `--from=jsonl-typed` and a typed `query` write a name that the project cannot write bare
+  through a group of the project, as `lib::Circle`, where they wrote it in full, as `com.example.lib::Circle`. A name
+  that no group reaches is still written in full, and messages still show names bare or in full. The library has
+  `Resolution::written`, `Resolution::write_name` and `ReadContext::write`.
 - Every types file must now come before every values file (decision 23). A types file that follows a values file is an
   error, `A types file must come before the values files, but this follows FILE`, with exit code 1. A file with no
   declarations is exempt. Before this a values file saw only the types files that came before it.

@@ -24,8 +24,8 @@ pub struct QueryInputs<'s> {
     /// The index that the values that the query makes are shown as if they were in, which is that of its names.
     pub names_source: usize,
     pub source_names: Vec<String>,
-    /// Rewrites the canonical names in a text as they would be written in the source with the index.
-    pub show: &'s dyn Fn(usize, &str) -> String,
+    /// Writes one canonical name as the source with the index writes it: bare, else through a group, else in full.
+    pub write: &'s dyn Fn(usize, &str) -> String,
 }
 
 /// The declarations of a run, owned.

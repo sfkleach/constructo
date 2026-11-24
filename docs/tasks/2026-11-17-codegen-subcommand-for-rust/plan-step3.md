@@ -174,4 +174,4 @@ Unit tests in `src/codegen/model.rs`, built with `build_model` from sources and 
 - `just test` passes, which runs the unit tests, clippy, fmt, the audit and the functests, with no test changed except
   those that expect a full name where a group would do.
 
-[group]: ../todo/2026-11-21-convert-writes-names-through-a-group/convert-writes-names-through-a-group.md
+[group]: ../2026-11-21-convert-writes-names-through-a-group/convert-writes-names-through-a-group.md
