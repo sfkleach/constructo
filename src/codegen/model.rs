@@ -104,6 +104,19 @@ pub enum TypeRef {
     Param(String),
 }
 
+impl TypeRef {
+    /// Whether a value of the type can be the absent value of a target that has one, such as `None` in Python: the
+    /// prelude's `Option` can, and so can a parameter, which may be given an `Option`. A target that makes `Option<T>`
+    /// its own optional type has to tell `None` from `Some(None)` where one of these is inside another.
+    pub fn can_be_absent(&self) -> bool {
+        match self {
+            TypeRef::Enum(name, _) => name.project == crate::PRELUDE_PROJECT && name.local == "Option",
+            TypeRef::Param(_) => true,
+            _ => false,
+        }
+    }
+}
+
 /// A parameter of an enum or a const.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Param {
@@ -121,6 +134,11 @@ pub struct Enum {
     pub params: Vec<Param>,
     /// The constructors, in the order of the declaration.
     pub constructors: Vec<Constructor>,
+    /// False for an enum whose default would expand for ever, whatever its arguments: its first constructor holds,
+    /// through its fields and records but not through arrays, a type that leads back to the enum. `check` refuses to
+    /// leave out an argument of such a type, with `Type X has no default value`. The default of any other enum is
+    /// finite for finite arguments, and it is for the target to build, within the default limit.
+    pub has_default: bool,
 }
 
 /// A constructor of an enum.
@@ -150,6 +168,9 @@ pub enum Body {
 pub struct Parameter {
     pub name: Option<String>,
     pub ty: TypeRef,
+    /// Whether the parameter holds its type by value on a cycle of types that are held by value, which a target such
+    /// as Rust has to break with a pointer. Every such parameter and field is boxed, and no other.
+    pub boxed: bool,
 }
 
 /// A field of a record constructor or of a record type without a name.
@@ -157,6 +178,8 @@ pub struct Parameter {
 pub struct Field {
     pub name: String,
     pub ty: TypeRef,
+    /// As for `Parameter::boxed`.
+    pub boxed: bool,
 }
 
 /// A record type without a name, such as `{ dx: Int, dy: Int }`. There is one for each distinct type: two record types
@@ -252,13 +275,15 @@ pub(crate) fn build(
             consts.push(builder.const_decl(constant, project, inferred));
         }
     }
-    Model {
+    let mut model = Model {
         projects,
         root: layout.root,
         enums,
         records: builder.records,
         consts,
-    }
+    };
+    super::recursion::work_out(&mut model);
+    model
 }
 
 /// What is built up while the declarations are met: the record types without a name, and how to find each by its
@@ -287,6 +312,7 @@ impl Builder {
                             .map(|parameter| Parameter {
                                 name: parameter.name.clone(),
                                 ty: self.declared(&parameter.ty, &params, project),
+                                boxed: false,
                             })
                             .collect(),
                     ),
@@ -296,6 +322,7 @@ impl Builder {
                             .map(|field| Field {
                                 name: field.name.clone(),
                                 ty: self.declared(&field.ty, &params, project),
+                                boxed: false,
                             })
                             .collect(),
                     ),
@@ -311,6 +338,7 @@ impl Builder {
             project,
             params: model_params(&decl.params),
             constructors,
+            has_default: true,
         }
     }
 
@@ -422,6 +450,7 @@ impl Builder {
                         .map(|(name, ty)| Field {
                             name: name.clone(),
                             ty: ty.clone(),
+                            boxed: false,
                         })
                         .collect(),
                     projects: Vec::new(),
@@ -752,10 +781,12 @@ mod tests {
                 Parameter {
                     name: Some("x".into()),
                     ty: TypeRef::Float,
+                    boxed: false,
                 },
                 Parameter {
                     name: Some("y".into()),
                     ty: TypeRef::Float,
+                    boxed: false,
                 },
             ])
         );
@@ -807,10 +838,12 @@ mod tests {
                     Field {
                         name: "dx".into(),
                         ty: TypeRef::Int,
+                        boxed: false,
                     },
                     Field {
                         name: "dy".into(),
                         ty: TypeRef::Int,
+                        boxed: false,
                     },
                 ],
                 projects: vec![2],
@@ -1071,6 +1104,121 @@ mod tests {
         assert_eq!(names, ["inner", "outer"]);
         assert_eq!(model.records[1].fields[0].ty, TypeRef::Record(0, vec![param("A")]));
         assert_eq!(field_types(&model, "A"), [TypeRef::Record(1, vec![param("T")])]);
+    }
+
+    /// Which parameters or fields of the constructor are boxed.
+    fn boxes(model: &Model, local: &str) -> Vec<bool> {
+        match &constructor(model, local).body {
+            Body::Tuple(parameters) => parameters.iter().map(|p| p.boxed).collect(),
+            Body::Record(fields) => fields.iter().map(|f| f.boxed).collect(),
+            Body::None | Body::Array(_) => Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_mutual_recursion_is_boxed_at_both_sites() {
+        let model = model_of_app(&["enum Expr = Num(Nat), Neg(Term); enum Term = Lit(Nat), Paren(Expr);"]);
+        assert_eq!(boxes(&model, "Num"), [false]);
+        assert_eq!(boxes(&model, "Neg"), [true]);
+        assert_eq!(boxes(&model, "Lit"), [false]);
+        assert_eq!(boxes(&model, "Paren"), [true]);
+    }
+
+    #[test]
+    fn a_recursion_through_an_array_is_not_boxed() {
+        let model = model_of_app(&[
+            "enum Tree<T> = Leaf(T), Node(Forest<T>); enum Forest<T> = Trees([Tree<T>]);",
+            "enum Many<T> = Many([T]); enum N = N(Many<N>), Bare([N]);",
+        ]);
+        for local in ["Leaf", "Node", "Many", "N"] {
+            assert_eq!(boxes(&model, local), [false], "{}", local);
+        }
+        assert!(model.enums.iter().all(|e| e.has_default));
+    }
+
+    #[test]
+    fn a_recursion_through_an_option_is_boxed() {
+        let model = model_of_app(&["enum Node = Node { value: Nat, next: Node? };"]);
+        assert_eq!(boxes(&model, "Node"), [false, true]);
+        // The default of `next` is `None`, so the default of the whole is finite.
+        assert!(find_enum(&model, "Node").has_default);
+    }
+
+    #[test]
+    fn a_recursion_through_a_type_argument_is_boxed_where_the_parameter_is_held() {
+        let model = model_of_app(&[
+            "enum Styled<T> = Styled { item: T, colour: Nat };",
+            "enum Node = Leaf, Node(Styled<Node>);",
+        ]);
+        assert_eq!(boxes(&model, "Node"), [true]);
+        assert_eq!(boxes(&model, "Styled"), [false, false]);
+        // A parameter that is held through another declaration is held too.
+        let model = model_of_app(&[
+            "enum Inner<T> = Inner(T); enum Outer<U> = Outer(Inner<U>);",
+            "enum Node = Leaf, Node(Outer<Node>);",
+        ]);
+        assert_eq!(boxes(&model, "Node"), [true]);
+        assert_eq!(boxes(&model, "Inner"), [false]);
+        assert_eq!(boxes(&model, "Outer"), [false]);
+    }
+
+    #[test]
+    fn a_recursion_that_changes_its_argument_is_boxed() {
+        let model = model_of_app(&["enum Nested<T> = Flat(T), Deep(Nested<[T]>);"]);
+        assert_eq!(boxes(&model, "Flat"), [false]);
+        assert_eq!(boxes(&model, "Deep"), [true]);
+        assert!(find_enum(&model, "Nested").has_default);
+    }
+
+    #[test]
+    fn a_recursion_through_a_record_boxes_the_field_and_the_record() {
+        let model = model_of_app(&["enum Node = Node { r: { next: Node?, v: Nat }, w: Nat };"]);
+        assert_eq!(boxes(&model, "Node"), [true, false]);
+        let record = &model.records[0];
+        assert_eq!(record.name, "next_v");
+        let boxed: Vec<bool> = record.fields.iter().map(|f| f.boxed).collect();
+        assert_eq!(boxed, [true, false]);
+    }
+
+    #[test]
+    fn an_enum_whose_first_constructor_leads_back_to_it_has_no_default() {
+        let cons_first = model_of_app(&["enum List<T> = Cons { head: T, tail: List<T> }, Nil;"]);
+        assert!(!find_enum(&cons_first, "List").has_default);
+        assert_eq!(boxes(&cons_first, "Cons"), [false, true]);
+        let nil_first = model_of_app(&["enum List<T> = Nil, Cons { head: T, tail: List<T> };"]);
+        assert!(find_enum(&nil_first, "List").has_default);
+        let mutual = model_of_app(&["enum A = A(b: B); enum B = B(a: A); enum C = C(x: A);"]);
+        assert!(!find_enum(&mutual, "A").has_default);
+        assert!(!find_enum(&mutual, "B").has_default);
+        // The default of `C` needs that of `A`, which reports that it has none, as `check` does.
+        assert!(find_enum(&mutual, "C").has_default);
+        let through_argument = model_of_app(&["enum Wrap<T> = Wrap(T); enum L = L(Wrap<L>), N;"]);
+        assert!(!find_enum(&through_argument, "L").has_default);
+        assert!(find_enum(&through_argument, "Wrap").has_default);
+        let through_record = model_of_app(&["enum R = R { r: { again: R } }, S;"]);
+        assert!(!find_enum(&through_record, "R").has_default);
+    }
+
+    #[test]
+    fn a_generic_enum_whose_default_needs_its_argument_has_one() {
+        let model = model_of_app(&["enum Wrap<T> = Wrap(T); enum Holder = Holder(Wrap<Nat>);"]);
+        assert!(find_enum(&model, "Wrap").has_default);
+        assert!(find_enum(&model, "Holder").has_default);
+        assert!(find_enum(&model, "Option").has_default);
+        assert!(find_enum(&model, "Bool").has_default);
+    }
+
+    #[test]
+    fn an_option_or_a_parameter_can_be_the_absent_value() {
+        let model = scenario();
+        let types = field_types(&model, "Styled");
+        assert!(types[0].can_be_absent(), "the parameter T");
+        assert!(types[1].can_be_absent(), "Colour?");
+        assert!(!types[2].can_be_absent(), "the record");
+        assert!(!TypeRef::Enum(name("com.example.shapes", "Colour"), vec![]).can_be_absent());
+        assert!(!TypeRef::Nat.can_be_absent());
+        // An enum called `Option` of another project is not the prelude's.
+        assert!(!TypeRef::Enum(name("example.app", "Option"), vec![]).can_be_absent());
     }
 
     #[test]
