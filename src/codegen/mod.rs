@@ -2,3 +2,4 @@
 //! target, and each target writes its code from it.
 
 pub mod model;
+mod recursion;
