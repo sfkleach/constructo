@@ -1,0 +1,2 @@
+// expect: Expected Nat but found const default_radius of type Float
+Pair(default_radius, 1);

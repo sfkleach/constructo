@@ -1,0 +1,2 @@
+// expect: Unknown argument src in Image
+Image(src: "a.jpg", hOffset: 1, vOffset: 2, alignment: "left");

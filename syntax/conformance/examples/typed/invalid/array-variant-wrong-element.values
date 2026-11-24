@@ -1,0 +1,2 @@
+// expect: Expected String but found Nat
+Names["Ann", 1]

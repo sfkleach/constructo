@@ -1,0 +1,3 @@
+// A comment before.
+5; // A comment after.
+// A comment at the end, with no new line after it.

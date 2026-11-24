@@ -1,0 +1,10 @@
+// A postfix `?` wraps a value in `Some`, and it needs --experimental=some-query.
+0?;
+"text"?;
+[1?, 2?];
+Point(1, 2)?;
+{ x: 1 }?;
+// It can be repeated or follow white space.
+1??;
+1 ?;
+Pair(1?, b: 2?);

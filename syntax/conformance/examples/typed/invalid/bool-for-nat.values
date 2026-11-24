@@ -1,0 +1,2 @@
+// expect: Expected Nat but found const true of type Bool
+Pair(true, 1);

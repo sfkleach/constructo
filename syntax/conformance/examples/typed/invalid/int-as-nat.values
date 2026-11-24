@@ -1,0 +1,2 @@
+// expect: Expected Nat but found Int
+Pair(+1, 2);

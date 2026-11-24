@@ -1,0 +1,2 @@
+// A dot is only part of a qualifier, so this is not a value.
+acme.shapes

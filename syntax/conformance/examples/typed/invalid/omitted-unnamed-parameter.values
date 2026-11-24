@@ -1,0 +1,2 @@
+// expect: Constructor Image takes 5 value(s) but has 1
+Image("a.jpg");

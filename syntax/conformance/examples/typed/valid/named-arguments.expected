@@ -1,0 +1,4 @@
+Image("snowy_scene.jpg", "Snowy Scene", alignment: "left", hOffset: 100, vOffset: 50);
+Image("a.jpg", "A", vOffset: 1, alignment: "right", hOffset: 2);
+Image("a.jpg", "A", 1, 2, "centre");
+Image("a.jpg", "A", 1, 2, alignment: "centre");

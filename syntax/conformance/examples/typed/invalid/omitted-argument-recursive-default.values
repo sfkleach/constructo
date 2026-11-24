@@ -1,0 +1,2 @@
+// expect: Type Chain has no default value
+Linked();

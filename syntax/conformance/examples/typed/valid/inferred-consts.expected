@@ -1,0 +1,3 @@
+Circle { radius: default_radius };
+Config { name: "a", owner: null, limits: { cpu: 1, mem: 2 }, tags: no_tags };
+[no_tags, ["x"]];

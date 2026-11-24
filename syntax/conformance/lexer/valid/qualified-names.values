@@ -1,0 +1,3 @@
+com.example.shapes::Circle { radius: 1.0 };
+ids::Uuid("x");
+shapes::unit_circle;

@@ -1,0 +1,1 @@
+Image("a.jpg", "A", colour: "red", hOffset: 1, vOffset: 2, alignment: "left");

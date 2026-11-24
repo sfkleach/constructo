@@ -1,0 +1,1 @@
+ERROR: Invalid Unicode escape (high-surrogate-without-low.values, line 1, col 2)

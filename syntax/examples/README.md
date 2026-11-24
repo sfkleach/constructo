@@ -88,3 +88,6 @@
   `valid/*.query` must give the output in its `// output: ...` line, written with `--compact`, and each
   `invalid/*.query` must be refused before any value is read, with exit code 2 and the error in its `// expect: ...`
   line. They show the forms of the [query grammar](../grammar.md#query-grammar).
+- Every values file here is copied into [the conformance suite](../conformance/README.md), in `conformance/examples`
+  in the same folders, and a test of `constructo-runtime` fails if a copy is missing or differs. So a new or changed
+  values example needs its copy, and its expected result made with `CONSTRUCTO_BLESS=1`.

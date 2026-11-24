@@ -1,0 +1,2 @@
+// expect: Constructor Pair takes a tuple
+Pair[1, 2]

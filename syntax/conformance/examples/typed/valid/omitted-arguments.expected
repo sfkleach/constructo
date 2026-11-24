@@ -1,0 +1,6 @@
+Image("a.jpg", "A");
+Image("a.jpg", "A", 5);
+Image("a.jpg", "A", vOffset: 3);
+Job("build");
+Job("build", urgent: true);
+Cells(Cell("x"));

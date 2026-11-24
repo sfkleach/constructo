@@ -1,0 +1,4 @@
+// The types of default_radius and no_tags were inferred from their values.
+Circle { radius: default_radius };
+Config { name: "a", owner: null, limits: { cpu: 1, mem: 2 }, tags: no_tags };
+[no_tags, ["x"]];

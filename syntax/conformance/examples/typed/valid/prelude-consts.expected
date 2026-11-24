@@ -1,0 +1,6 @@
+null;
+true;
+[false, true];
+[null, Some(1), None];
+Some(null);
+Config { name: "a", owner: null, limits: { cpu: 1, mem: 2 }, tags: [] };
