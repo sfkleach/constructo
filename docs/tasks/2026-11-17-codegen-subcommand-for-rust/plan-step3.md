@@ -168,6 +168,19 @@ Unit tests in `src/codegen/model.rs`, built with `build_model` from sources and 
 3. What it works out: `boxed`, the enums with no default, and the absent value.
 4. The decision, and the draft and the outline brought up to date.
 
+## As it was built
+
+*Done,* in the four commits above. What the plan did not say:
+
+- The boxing and the defaults are worked out in `src/codegen/recursion.rs`, beside the model, over the strongly
+  connected components of the graph, found without recursion, rather than by reachability, whose memory grows with the
+  square of the declarations.
+- `Resolution::written_in_project` gives the written form for a project rather than a file, and the layout of a
+  project set moved from `src/main.rs` to `ProjectSet::layout`, so that the tests and the command can share it.
+- A record name that is already taken is numbered on, so `{ x_2: Nat }` met after a second `{ x }` is `x_2_2`.
+- Decision 48 also writes that every field on a cycle is boxed, which the outline had put in step 4, since the model
+  works it out. The outline's "a codec for each project" moves to step 5, which builds the codec.
+
 ## Done when
 
 - The model of every valid types example and project example can be built, and the tests above pass.
