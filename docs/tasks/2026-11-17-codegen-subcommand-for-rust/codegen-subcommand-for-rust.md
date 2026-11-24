@@ -824,8 +824,11 @@ generated `struct`, and it needs a name.
 - **No fields:** `{}` is named `empty`.
 - **The fields of the `struct` are in the sorted order,** which is also the order
   that the writer writes them in. The reader accepts any order, as `check` does.
-- **Parameters follow the rule above:** the `struct` has exactly the type
-  parameters that occur in its fields, in the enum's order.
+- **Parameters:** the `struct` has exactly the type parameters that occur in
+  its fields, renamed `A`, `B` and so on in the order in which they first occur
+  in the sorted fields, so that `{ x: T }` in `Foo<T>` and `{ x: U }` in
+  `Bar<U>` are one `struct`, `x<A>`. *Changed by* decision 48, from the enum's
+  names and order, which would have made two `struct`s of one type.
 
 **Open:** a record with many fields has a long name, and where it is too long
 the name needs a limit, such as a short hash of the rest. Whether the names
@@ -893,8 +896,10 @@ argument out, so the reader has to fill it in.
   what decides the default. `Bool` gives `false` and `Option<T>` gives `None`,
   as the prelude orders them.
 - **A type with no usable default is an error where it is left out,** and not
-  where it is declared, as in `check`. The generator works out, for each type,
-  whether it has a default, and gives it the same limits (`--default-limit`).
+  where it is declared, as in `check`. The model says which enums have no
+  default at all, those whose first constructor leads back to them, and the
+  generated code builds every other default with the same limit
+  (`--default-limit`), as decision 48 says.
   The default of a type is then a `Result`: a type that has none returns an
   error with the message that `check` gives, such as `Type List<T> has no default
   value`. A type that is never left out is not affected.
@@ -1187,7 +1192,7 @@ names.
 - That the syntax layer is a small crate, `constructo-runtime`, which the generated
   code depends on, and what it holds. *Written:* decision 46.
 - That every field on a cycle of types held by value is boxed, at every site,
-  and no other is.
+  and no other is. *Written:* decision 48.
 - That a mapping never changes a value, may refuse one outside the target's
   range for its type, and may not refuse a form that the declarations contain;
   and that `Float` is the one exception, mapped to the nearest binary value;
@@ -1204,7 +1209,8 @@ names.
 - How the modules and the names in Rust are chosen: the root is the file, the rest
   are flat, and a clash is numbered.
 - How a record type without a name is named, the handling of consts, and the
-  defaults of omitted arguments, once chosen.
+  defaults of omitted arguments, once chosen. *Written:* decision 48, for the
+  model; how the codec reads consts and builds defaults is step 5's.
 
 ## Not in scope
 

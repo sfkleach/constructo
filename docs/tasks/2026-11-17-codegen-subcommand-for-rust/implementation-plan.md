@@ -33,7 +33,7 @@ third raised only questions of its own language, which is the sign that the comm
   `tests/functest.sh`. A step that adds a kind of test adds it to one of these, so that it runs every time.
 - **The decisions are written by the step that implements them**, so that each is checked against working code when
   it is written. The table at the end gives each entry of the draft's "Decisions to write" a step. The next number is
-  0048.
+  0049.
 - **Three pull requests**, so that the large mechanical change is merged before the new code depends on it:
   - the design and steps 1 and 2, which change no behaviour and touch every import of the six modules;
   - steps 3, 4 and 5, which give a working codec without adoption;
@@ -84,6 +84,10 @@ and decisions 46 and 47.
 - **Done when** everything that passed still passes, with no change to any test, and the suite passes.
 
 ## Step 3: the model
+
+*Done,* as [plan-step3.md](plan-step3.md) says: `build_model` in `src/codegen/`, the task
+[convert-writes-names-through-a-group][group] as its first commit, and decision 48. The model holds which enums have
+no default at all, and not the default of every type, and the module name of a project is left to each target.
 
 - **What:** a description of the declarations of a run that every target writes from. It is built after the sources
   have been checked as `convert_typed` checks them, with the prelude, from the `Env` and the resolution, and a run that
@@ -210,11 +214,11 @@ not on crates.io. So the runtime is published with `constructo`, at the same ver
 | The model of `Float` (new)                                                         | 1    |
 | The syntax layer is a crate, `constructo-runtime`, and what it holds               | 2    |
 | Every other target has a runtime, held to the syntax by a conformance suite        | 2    |
-| A codec for each project, holding names, consts and limits                         | 3    |
 | How a record type without a name is named, and consts and defaults                 | 3    |
+| Every field on a cycle held by value is boxed, at every site                       | 3    |
 | How the modules and names in Rust are chosen                                       | 4    |
 | How generated names avoid Constructo names is the target's choice                  | 4    |
-| Every field on a cycle held by value is boxed, at every site                       | 4    |
+| A codec for each project, holding names, consts and limits                         | 5    |
 | A target writes one file or a folder, with `--out-file` and `--out-dir`            | 4    |
 | Reading is constrained by the target type, and the constructors are a closed set   | 5    |
 | Readers work through the codec; in Rust, traits generated with each codec          | 5    |
