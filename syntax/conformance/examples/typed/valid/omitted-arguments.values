@@ -1,0 +1,9 @@
+// A named argument that is left out takes the default of its type: 0, 0.0, "", [], the fields of a record, or the
+// first constructor of an enum.
+Image("a.jpg", "A");
+Image("a.jpg", "A", 5);
+Image("a.jpg", "A", vOffset: 3);
+Job("build");
+Job("build", urgent: true);
+// The expected type fixes the type parameter, so the omitted argument has a default.
+Cells(Cell("x"));

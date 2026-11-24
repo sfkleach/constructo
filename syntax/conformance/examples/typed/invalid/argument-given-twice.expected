@@ -1,0 +1,1 @@
+Image("a.jpg", "A", 1, 2, "left", hOffset: 3);

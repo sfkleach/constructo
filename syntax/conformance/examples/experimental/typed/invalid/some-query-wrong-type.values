@@ -1,0 +1,3 @@
+// expect: Expected Nat but found Some of type Option
+// A parameter that is not optional does not take a value with a postfix `?`.
+Pair(1?, 2)

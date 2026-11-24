@@ -1,0 +1,3 @@
+// expect: Expected Nat but found String
+// The content of the `Some` has to fit the type that is optional.
+Attempt("build", retries: "three"?)

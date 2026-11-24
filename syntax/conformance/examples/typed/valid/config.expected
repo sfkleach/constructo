@@ -1,0 +1,4 @@
+Config { name: "prod", owner: null, limits: { mem: 512, cpu: 2 }, tags: ["a", "b"] };
+Config { name: "dev", owner: Some("me"), limits: { cpu: 1, mem: 64 }, tags: [] };
+[1, 2.5, 3];
+{ anything: ["goes"] };

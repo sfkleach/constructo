@@ -1,0 +1,5 @@
+local::Circle { radius: 1.0 };
+local::Dot;
+local::Pair(1, -2);
+local::default_radius;
+local::Cons { head: 1, tail: local::Nil };

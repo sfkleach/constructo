@@ -1,0 +1,2 @@
+// A lone high surrogate is not a character.
+"\ud800"

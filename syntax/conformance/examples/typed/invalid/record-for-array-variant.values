@@ -1,0 +1,2 @@
+// expect: Constructor Names takes an array
+Names { name: "Ann" }

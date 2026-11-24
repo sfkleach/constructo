@@ -1,0 +1,3 @@
+// expect: Expected String but found Some of type Option
+// The question mark on an element wraps just the element, not the array.
+Names[ "Ann"? ]

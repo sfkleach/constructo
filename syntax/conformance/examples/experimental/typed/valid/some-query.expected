@@ -1,0 +1,5 @@
+Attempt("build", retries: Some(3));
+Attempt("build", Some(3), Some(Attempt("fallback")));
+Attempt("build", tags: Some(["fast"]));
+Attempt("build", retries: Some(3));
+Attempt("build", retries: null);

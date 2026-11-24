@@ -84,17 +84,18 @@ outline says: it stays, since cutting it is a change to the parser for no gain h
 - **Where:** `syntax/conformance/`, beside `syntax/examples`, since it is about the syntax and not about `constructo`.
   It has a `README.md` that says what a runtime has to do to conform.
 - **A case** is a values file, `NAME.values`, and its expected result, `NAME.expected`, which is one of:
-  - the values that the file holds, each written by `values_text::render` with `compact` false, one after the other.
-    That is the tree written back, so it keeps the text of each number and name as it was written: the suite tests the
-    syntax and not the model of numbers;
+  - the values that the file holds, each written by `values_text::render` with `compact` true, one to a line. That is
+    the tree written back, so it keeps the text of each number and name as it was written: the suite tests the syntax
+    and not the model of numbers. *Changed while it was built:* the plan had `compact` false, but the pretty printer
+    indents each level, so a case 200 levels deep had an expected file of over 100 KB, and another runtime would have
+    had to copy the layout rules of the printer as well as its syntax;
   - or the one line of the error that the parser reports, as `Diagnostic` writes it, with the file named as
     `NAME.values`: `ERROR: Nesting is too deep (deep-201.values, line 1, col 201)`. A runtime conforms if it gives
     the same message at the same line and column.
 - **The cases at first:**
-  - every file of `syntax/examples/values/valid` and `syntax/examples/values/invalid`, copied, so that the suite is
-    whole in itself, and another runtime, which may be in another repository, can take the folder as it is;
-  - the experimental values of `syntax/examples/values/experimental/valid`, in a folder `experimental/`, which a runtime
-    reads with the experimental features on, or skips if it has none;
+  - every values file of `syntax/examples/values`, copied into `examples/` in the same folders, so that the suite is
+    whole in itself, and another runtime, which may be in another repository, can take the folder as it is. A case in
+    a folder called `experimental` is read with the experimental features on, and a runtime that has none skips it;
   - the depth limit: a value nested 200 levels deep, which is accepted, and one 201 levels deep, which is refused,
     for each way that a value can hold another: array, record, tuple, tagged record, tagged array and postfix `?`;
   - the cases of the lexer that a hand-written runtime most often gets wrong: escapes, `\uXXXX` with surrogate pairs
@@ -104,8 +105,9 @@ outline says: it stays, since cutting it is a change to the parser for no gain h
   under `../syntax/conformance`, parses it with `parse_values_with`, and compares the rendered values or the error with
   the expected file. With `CONSTRUCTO_BLESS=1` it writes the expected files instead, which is how they are made, and how
   they are changed when the syntax is; a change to them shows in review.
-- **The suite is checked against the examples** by the runner too: a file of `syntax/examples/values` that has no case
-  of the same name in the suite is a failure, so the two cannot drift apart.
+- **The suite is checked against the examples** by the runner too: a values file of `syntax/examples/values` whose
+  copy in `examples/` is missing or different is a failure, and so is a copy whose example has gone, so the two cannot
+  drift apart.
 
 ## The commands
 
