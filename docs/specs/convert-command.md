@@ -477,9 +477,17 @@ The shapes are those of `--to=json-typed` in reverse, which the type and the JSO
   cannot be left to a default, since the types require every field of a record. A tuple that ends in named parameters
   may be short of them, and they take their defaults as in the data-values, which the check decides. A tuple that is
   short of the others is refused by the check, and is reported at the value.
-- **A name** is written as the root project can write it. A name that is in scope there is written bare, and any other
-  with the full name of its project, as `com.example.lib::Circle`, which `check` accepts in that project. The `Some`,
-  `None`, `true` and `false` of the prelude are always bare.
+- **A name** is written in the shortest form in which the root project can write it, which `check` accepts in that
+  project:
+  - bare, if it is in scope there, as `Circle`;
+  - else through a group of the project, as `lib::Circle`. A name that an import renames is written with its new
+    name, and a group whose import hides the name is not used. Where the project is in more than one group, the first
+    import in the project-file through which the name is visible is the one used, so the same project always gives
+    the same text;
+  - else with the full name of its project, as `com.example.lib::Circle`.
+
+  So the `Some`, `None`, `true` and `false` of the prelude are bare, unless the project imports the prelude into a
+  group, or renames or hides them.
 - **Each value is checked** against the type before it is written, with the same check as `check`, so what is written
   is accepted by `check` with the same types. A problem that the JSON alone cannot show, such as an omitted
   argument that has no default, is found by that check and is reported at the value.

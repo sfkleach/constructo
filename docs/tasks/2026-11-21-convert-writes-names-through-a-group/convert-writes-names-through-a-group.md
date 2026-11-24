@@ -10,8 +10,8 @@ imports `com.example.ids` into the group `ids` can write `ids::Uuid`, and
 
 The `codegen` task decided that its generated writer writes a name **bare, else
 through a group, else in full**
-([codegen-subcommand-for-rust.md](../../2026-11-17-codegen-subcommand-for-rust/codegen-subcommand-for-rust.md),
-"The names in the text"). Its [scenario](../../2026-11-17-codegen-subcommand-for-rust/scenario-shapes.md)
+([codegen-subcommand-for-rust.md](../2026-11-17-codegen-subcommand-for-rust/codegen-subcommand-for-rust.md),
+"The names in the text"). Its [scenario](../2026-11-17-codegen-subcommand-for-rust/scenario-shapes.md)
 found that the two write the same text, byte for byte, for the same value, and
 this task keeps it so by making `convert` do the same.
 
@@ -37,6 +37,12 @@ this task keeps it so by making `convert` do the same.
   messages). Whether messages are to show names through a group too is to be
   decided: it is consistent, and it changes the expected text of tests that
   quote a full name. A separate function for writing is the alternative.
+  *Decided:* messages keep the form they have, bare or full, so that a message
+  does not depend on the groups of the project. `Resolution::written` and
+  `Resolution::write_name` are for writing, and `show` is for messages.
+- *Done* as the first commit of step 3 of
+  [codegen](../2026-11-17-codegen-subcommand-for-rust/plan-step3.md), whose
+  model uses the same rule. A typed `query` writes its names in the same way.
 - The writers that use it: the typed JSON reader (`src/typed_back.rs`) and any
   other path that writes Constructo text with names resolved for a project.
   Search for the callers of `show` to find them all.

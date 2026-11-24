@@ -569,8 +569,11 @@ pub fn query_typed(
 pub struct ReadContext<'a, 'e> {
     pub env: &'e Env<'a>,
     pub target: Ty,
-    /// Rewrites the canonical names in a text as they would be written in the root project.
+    /// Rewrites the canonical names in a message as they would be written in the root project.
     pub show: &'e dyn Fn(&str) -> String,
+    /// Writes one canonical name as a values file of the root project writes it: bare, else through a group, else in
+    /// full.
+    pub write: &'e dyn Fn(&str) -> String,
 }
 
 /// The function of the caller that reads the values, and the way that it ended if it did not end well.
@@ -674,6 +677,8 @@ fn check_with_layout(
     let type_checked = found.is_empty() && !unresolved && options.type_check;
     let file_names: Vec<&str> = sources.iter().map(|source| source.name.as_str()).collect();
     let show = |index: usize, text: &str| resolution.show(index, text, &file_names);
+    // A name that is written in Constructo text, and not in a message, can also be written through a group.
+    let write = |index: usize, name: &str| resolution.write_name(index, name);
     let mut consts = Vec::new();
     if type_checked {
         consts = type_check_values(
@@ -683,6 +688,7 @@ fn check_with_layout(
             options,
             mode,
             &show,
+            &write,
             &mut outcomes,
             &mut found,
         );
@@ -744,6 +750,7 @@ fn type_check_values(
     options: &CheckOptions,
     mode: &mut ValueMode,
     show: &dyn Fn(usize, &str) -> String,
+    write: &dyn Fn(usize, &str) -> String,
     outcomes: &mut [Outcome],
     diagnostics: &mut Vec<(usize, Diagnostic)>,
 ) -> Vec<ConstInfo> {
@@ -797,6 +804,7 @@ fn type_check_values(
                 &everything,
                 querying,
                 show,
+                write,
                 outcomes,
                 diagnostics,
             );
@@ -810,10 +818,12 @@ fn type_check_values(
             match target_of(&parsed_sources[target_source]) {
                 Ok(target) => {
                     let root_show = |text: &str| show(target_source, text);
+                    let root_write = |name: &str| write(target_source, name);
                     let context = ReadContext {
                         env: &env,
                         target,
                         show: &root_show,
+                        write: &root_write,
                     };
                     if let Err(e) = (reading.run)(&context) {
                         reading.failure = Some(e);
@@ -904,6 +914,7 @@ fn run_query(
     everything: &Env,
     querying: &mut Querying,
     show: &dyn Fn(usize, &str) -> String,
+    write: &dyn Fn(usize, &str) -> String,
     outcomes: &mut [Outcome],
     diagnostics: &mut Vec<(usize, Diagnostic)>,
 ) {
@@ -997,7 +1008,7 @@ fn run_query(
         names,
         names_source: querying.names_source.unwrap_or(sources.len()),
         source_names: sources.iter().map(|source| source.name.clone()).collect(),
-        show,
+        write,
     };
     if let Err(e) = (querying.run)(inputs) {
         querying.failure = Some(e);

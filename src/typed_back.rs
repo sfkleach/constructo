@@ -34,8 +34,8 @@ pub fn read_typed(ctx: &ReadContext, node: &Node, file: &str, widening: bool) ->
 }
 
 /// Changes the canonical names of the constructors, which the check needs, to the names as the root project writes
-/// them. The names of the prelude are written as the root project sees them, which is bare, as `Some`, `None`, `true`
-/// and `false`, unless the project imports the prelude into a group or renames or hides them.
+/// them: bare, else through a group, else in full. The names of the prelude are bare, as `Some`, `None`, `true` and
+/// `false`, unless the project imports the prelude into a group or renames or hides them.
 fn write_names(ctx: &ReadContext, value: &mut Value) {
     match &mut value.kind {
         ValueKind::Array(items) => items.iter_mut().for_each(|item| write_names(ctx, item)),
@@ -43,7 +43,7 @@ fn write_names(ctx: &ReadContext, value: &mut Value) {
             .iter_mut()
             .for_each(|member| write_names(ctx, &mut member.value)),
         ValueKind::Tagged { name, body } => {
-            *name = (ctx.show)(name);
+            *name = (ctx.write)(name);
             match body {
                 Some(TaggedBody::Record(members)) => members
                     .iter_mut()
@@ -654,23 +654,20 @@ mod tests {
     }
 
     #[test]
-    fn a_name_is_written_bare_where_it_is_in_scope_and_in_full_where_it_is_not() {
+    fn a_name_is_written_bare_where_it_is_in_scope_and_through_its_group_where_it_is_not() {
         let a = "enum Shape = Circle, Middle;";
         let b = "enum Shape = Square, Middle;";
         let app = "enum Local = Home;";
         let read = |ty: &str, json: &str| read_in_projects(a, b, app, ty, json);
-        assert_eq!(read("a::Shape", "\"Middle\"").unwrap(), "example.a::Middle;\n");
-        assert_eq!(read("b::Shape", "\"Middle\"").unwrap(), "example.b::Middle;\n");
-        assert_eq!(read("a::Shape", "\"Circle\"").unwrap(), "example.a::Circle;\n");
+        assert_eq!(read("a::Shape", "\"Middle\"").unwrap(), "a::Middle;\n");
+        assert_eq!(read("b::Shape", "\"Middle\"").unwrap(), "b::Middle;\n");
+        assert_eq!(read("a::Shape", "\"Circle\"").unwrap(), "a::Circle;\n");
         assert_eq!(
             read("[b::Shape]", "[\"Square\", \"Middle\"]").unwrap(),
-            "[example.b::Square, example.b::Middle];\n"
+            "[b::Square, b::Middle];\n"
         );
         assert_eq!(read("Local", "\"Home\"").unwrap(), "Home;\n");
-        assert_eq!(
-            read("Option<a::Shape>", "\"Middle\"").unwrap(),
-            "Some(example.a::Middle);\n"
-        );
+        assert_eq!(read("Option<a::Shape>", "\"Middle\"").unwrap(), "Some(a::Middle);\n");
         assert_eq!(read("Bool", "true").unwrap(), "true;\n");
         assert_eq!(read("Option<Nat>", "null").unwrap(), "None;\n");
     }
@@ -680,7 +677,7 @@ mod tests {
         let a = "enum Shape = Circle;";
         assert_eq!(
             read_in_projects(a, "", "", "a::Shape", "\"Circle\"").unwrap(),
-            "example.a::Circle;\n"
+            "a::Circle;\n"
         );
         let e = read_in_projects(a, "", "", "Shape", "\"Circle\"").unwrap_err();
         assert!(e.starts_with("types:"), "{e}");

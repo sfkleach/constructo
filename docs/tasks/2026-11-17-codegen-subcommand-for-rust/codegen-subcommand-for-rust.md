@@ -589,7 +589,7 @@ writes each name in the shortest form that the project can resolve.
 Compressing the text is another way to make it smaller. It is not part of this
 and is left to the program (see below).
 
-[group-task]: ../todo/2026-11-21-convert-writes-names-through-a-group/convert-writes-names-through-a-group.md
+[group-task]: ../2026-11-21-convert-writes-names-through-a-group/convert-writes-names-through-a-group.md
 
 ### Generic enums
 

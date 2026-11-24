@@ -249,4 +249,4 @@ this task implements it.
 - The text of the non-finite values, after which a codec writes them instead of refusing them.
 - Cutting the types parser out of `constructo-runtime`, if it is wanted.
 
-[group]: ../todo/2026-11-21-convert-writes-names-through-a-group/convert-writes-names-through-a-group.md
+[group]: ../2026-11-21-convert-writes-names-through-a-group/convert-writes-names-through-a-group.md

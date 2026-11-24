@@ -367,8 +367,8 @@ pub fn constructor_names(expr: &Expr) -> Vec<(String, crate::diagnostics::Pos)> 
 }
 
 /// Runs a typed query over inputs that have been checked. The constructor names of the query are replaced by their
-/// resolved names first, and each value of the result is passed to `out` with its names shown as they are written in
-/// the source that it is in.
+/// resolved names first, and each value of the result is passed to `out` with its names written as the source that it
+/// is in writes them.
 pub fn run_typed(
     expr: &Expr,
     inputs: types::QueryInputs,
@@ -403,10 +403,10 @@ pub fn run_typed(
         })
         .collect();
     let stream: Stream = Box::new(items.into_iter().map(Ok));
-    let show = inputs.show;
+    let write = inputs.write;
     eval::with_typing(Some(typing), || {
         run_items(&expr, stream, &mut |item: &Item| {
-            let shown = show_names(&item.value, &|name| show(item.file, name));
+            let shown = show_names(&item.value, &|name| write(item.file, name));
             out(&shown)
         })
     })
