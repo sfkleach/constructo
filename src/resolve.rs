@@ -606,7 +606,16 @@ impl Resolution {
     /// Where the project is in more than one group, the first import in the project-file through which the name is
     /// visible is the one used.
     pub fn written(&self, file: usize, local: &str, project: &str) -> Written {
-        self.names.written(file, local, project, true)
+        match self.names.homes.get(file) {
+            Some(&home) => self.names.written(home, local, project, true),
+            None => Written::Full,
+        }
+    }
+
+    /// The form in which the project with the index in the layout writes the declaration `local` of the project with
+    /// the full name `project`, as `written` gives it for a file of that project.
+    pub fn written_in_project(&self, home: usize, local: &str, project: &str) -> Written {
+        self.names.written(home, local, project, true)
     }
 
     /// A canonical name as the file with the index writes it, in the form that `written` gives. A name with no
@@ -694,18 +703,19 @@ impl Names {
     /// full if not. A message does not write a name through a group, so that it does not depend on the groups of the
     /// project.
     fn show(&self, file: usize, local: &str, project: &str) -> String {
-        match self.written(file, local, project, false) {
+        let Some(&home) = self.homes.get(file) else {
+            return format!("{}::{}", project, local);
+        };
+        match self.written(home, local, project, false) {
             Written::Bare(name) => name,
             Written::Group(group, name) => format!("{}::{}", group, name),
             Written::Full => format!("{}::{}", project, local),
         }
     }
 
-    /// The shortest form in which a file can write a name: bare, else through a group if `groups` is set, else in full.
-    fn written(&self, file: usize, local: &str, project: &str, groups: bool) -> Written {
-        let Some(&home) = self.homes.get(file) else {
-            return Written::Full;
-        };
+    /// The shortest form in which a file of the project `home` can write a name: bare, else through a group if `groups`
+    /// is set, else in full.
+    fn written(&self, home: Home, local: &str, project: &str, groups: bool) -> Written {
         let Some(target) = self.layout.projects.iter().position(|p| p.name == project) else {
             return Written::Full;
         };

@@ -7,6 +7,7 @@ use crate::diagnostics::{Diagnostic, Pos};
 use crate::digest::file_digest;
 use crate::fetch::{redact, validate_url, Cache, Fetched};
 use crate::lock::{check_path, Lock, LockedProject, LockedRemote, LOCK_FILE};
+use crate::resolve::{ImportInfo, Layout, ProjectInfo};
 use glob::{MatchOptions, Pattern};
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -632,6 +633,39 @@ impl ProjectSet {
         self.projects
             .last()
             .expect("a set holds at least the project that was named")
+    }
+
+    /// How the sources are divided among the projects. The files of each project come in turn, and these are followed
+    /// by the files and the standard input that were given, which are written in the project that was named, as are
+    /// the values. `sources` is how many sources there are.
+    pub fn layout(&self, sources: usize) -> Layout {
+        let projects = self
+            .projects
+            .iter()
+            .map(|project| ProjectInfo {
+                name: project.name.clone(),
+                imports: project
+                    .imports
+                    .iter()
+                    .map(|import| ImportInfo {
+                        group: import.group.clone(),
+                        target: import.target.expect("the set has been loaded"),
+                        hide: import.hide.clone(),
+                        rename: import.rename.clone(),
+                        file: project.project_file(),
+                    })
+                    .collect(),
+                builtin: project.builtin,
+            })
+            .collect();
+        let root = self.projects.len() - 1;
+        let mut owners = Vec::new();
+        for (index, project) in self.projects.iter().enumerate() {
+            owners.extend(std::iter::repeat_n(index, project.files.len()));
+        }
+        // A syntax error can end the reading early, and then there are fewer sources than files.
+        owners.resize(sources, root);
+        Layout { projects, owners, root }
     }
 }
 
