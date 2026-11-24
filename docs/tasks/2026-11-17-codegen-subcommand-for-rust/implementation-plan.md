@@ -33,7 +33,7 @@ third raised only questions of its own language, which is the sign that the comm
   `tests/functest.sh`. A step that adds a kind of test adds it to one of these, so that it runs every time.
 - **The decisions are written by the step that implements them**, so that each is checked against working code when
   it is written. The table at the end gives each entry of the draft's "Decisions to write" a step. The next number is
-  0045.
+  0048.
 - **Three pull requests**, so that the large mechanical change is merged before the new code depends on it:
   - the design and steps 1 and 2, which change no behaviour and touch every import of the six modules;
   - steps 3, 4 and 5, which give a working codec without adoption;
@@ -55,6 +55,9 @@ Documentation only. *Done:* the section "What a number is" in `docs/specs/type-c
 
 ## Step 2: the runtime crate and the conformance suite
 
+*Done,* as [plan-step2.md](plan-step2.md) says: the crate `constructo-runtime`, the suite in `syntax/conformance/`,
+and decisions 46 and 47.
+
 - **The workspace.** The root `Cargo.toml` gains `[workspace]` with the member `constructo-runtime/`, and `constructo`
   stays where it is and depends on it by path. `.cargo/config.toml` already puts the target in `_build/target`, which
   is shared by the workspace.
@@ -73,10 +76,11 @@ Documentation only. *Done:* the section "What a number is" in `docs/specs/type-c
   on one that is not on crates.io, so from this step on `constructo` cannot be released without the runtime. Step 8
   publishes it.
 - **The conformance suite** is a folder, `syntax/conformance/`, of inputs, each with the expected result beside it: the
-  canonical text that `values_text` writes, or `// expect:` with the message and the position of the error, as the
-  invalid examples have now. Its first cases are the values under `syntax/examples`, and cases are added for the
-  limits: deep nesting and large inputs. A runner in `tests/` checks the Rust runtime against it, so the runtime that
-  the others are held to is the first to pass it.
+  values written back in the compact form that `values_text` writes, one to a line, or the line of the error with its
+  message and position. Its first cases are copies of the values under `syntax/examples`, and cases are added for the
+  depth limit and for the lexer. The parser has no limit on size, so there are no cases for large inputs. A runner in
+  `constructo-runtime/tests/` checks the Rust runtime against it, so the runtime that the others are held to is the
+  first to pass it.
 - **Done when** everything that passed still passes, with no change to any test, and the suite passes.
 
 ## Step 3: the model
