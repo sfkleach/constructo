@@ -13,8 +13,7 @@ use constructo::values_text::render;
 use constructo::verify::{read_lock, update_lock_with, verify_lock_with};
 use constructo::{
     check_in_projects, convert_typed, convert_typed_back, convert_typed_lines, query_typed, source_kind, syntax_error,
-    CheckOptions, Config, Experimental, ImportInfo, InputFile, Layout, Outcome, Project, ProjectInfo, ProjectSet,
-    QueryTypedError, Source, SourceKind,
+    CheckOptions, Config, Experimental, InputFile, Outcome, Project, ProjectSet, QueryTypedError, Source, SourceKind,
 };
 use std::collections::{HashSet, VecDeque};
 use std::ffi::OsString;
@@ -914,39 +913,6 @@ fn verify_projects(set: &ProjectSet, lock: Option<&Lock>, dev: bool) -> Option<E
     }
 }
 
-/// How the sources are divided among the projects. The files of each project come in turn, and these are followed by
-/// the files and the standard input that were given, which are written in the project that was named, as are the
-/// values.
-fn layout(set: &ProjectSet, sources: usize) -> Layout {
-    let projects = set
-        .projects
-        .iter()
-        .map(|project| ProjectInfo {
-            name: project.name.clone(),
-            imports: project
-                .imports
-                .iter()
-                .map(|import| ImportInfo {
-                    group: import.group.clone(),
-                    target: import.target.expect("the set has been loaded"),
-                    hide: import.hide.clone(),
-                    rename: import.rename.clone(),
-                    file: project.project_file(),
-                })
-                .collect(),
-            builtin: project.builtin,
-        })
-        .collect();
-    let root = set.projects.len() - 1;
-    let mut owners = Vec::new();
-    for (index, project) in set.projects.iter().enumerate() {
-        owners.extend(std::iter::repeat_n(index, project.files.len()));
-    }
-    // A syntax error can end the reading early, and then there are fewer sources than files.
-    owners.resize(sources, root);
-    Layout { projects, owners, root }
-}
-
 /// Reads an input: the text of a file of a built-in project is with it, and any other file is read from disk.
 fn read_input(file: &InputFile) -> std::io::Result<String> {
     match file.embedded {
@@ -1102,7 +1068,7 @@ fn query_typed_files(
         Ok(sources) => sources,
         Err(code) => return code,
     };
-    let layout = layout(set, sources.len());
+    let layout = set.layout(sources.len());
     let names = query::constructor_names(&query.expr);
     let mut out = std::io::BufWriter::new(std::io::stdout().lock());
     let result = query_typed(&sources, &layout, options, &names, type_text, &mut |inputs| {
@@ -1353,7 +1319,7 @@ fn convert_back_typed(
         }
     }
     let mut unreadable = None;
-    let layout = layout(&set, sources.len());
+    let layout = set.layout(sources.len());
     let code = stream_lines(|out| {
         convert_typed_back(&sources, &layout, &options, type_expr, &mut |context| {
             let inputs = json_files
@@ -1507,10 +1473,10 @@ fn convert_typed_files(
         Err(code) => return code,
     };
     if lines {
-        let layout = layout(set, sources.len());
+        let layout = set.layout(sources.len());
         return stream_lines(|out| convert_typed_lines(&sources, &layout, options, out));
     }
-    match convert_typed(&sources, &layout(set, sources.len()), options, to_array, compact) {
+    match convert_typed(&sources, &set.layout(sources.len()), options, to_array, compact) {
         Ok(done) => {
             for warning in &done.warnings {
                 eprintln!("{}", warning);
@@ -1543,7 +1509,7 @@ fn check(
     };
 
     // The processing is deliberately independent of the command line so that it is available as a library.
-    let report = check_in_projects(&sources, &layout(set, sources.len()), options);
+    let report = check_in_projects(&sources, &set.layout(sources.len()), options);
     for diagnostic in &report.diagnostics {
         eprintln!("{}", diagnostic);
     }

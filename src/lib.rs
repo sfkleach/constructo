@@ -3,6 +3,7 @@
 //! The `constructo` command-line tool is a thin layer over this crate.
 
 pub use constructo_runtime::ast;
+pub mod codegen;
 pub mod config;
 pub mod convert;
 pub use constructo_runtime::diagnostics;
@@ -460,6 +461,39 @@ enum ValueMode<'m, 'w> {
     Read(&'m mut Reading<'w>),
     /// Check every value, and then hand them, resolved, to a function that runs a query over them.
     Query(&'m mut Querying<'w>),
+    /// Check every value, and then build the model of the declarations, if there are no errors.
+    Model(&'m mut Modelling),
+}
+
+/// What building a model needs from the type-check, and the model once it is built.
+#[derive(Default)]
+struct Modelling {
+    /// The inferred type of each const that does not declare one, by its canonical name.
+    inferred: std::collections::HashMap<String, typecheck::Scheme>,
+    model: Option<codegen::model::Model>,
+}
+
+/// Builds the model of the declarations of the sources, from which a target writes code. The sources are checked as
+/// `check_in_projects` checks them, values and all, and the model is built only if there are no errors: a project
+/// whose values are wrong is not one to write code for. The result is the model, or the diagnostics, which are never
+/// empty.
+pub fn build_model(
+    sources: &[Source],
+    layout: &Layout,
+    options: &CheckOptions,
+) -> Result<codegen::model::Model, Vec<Diagnostic>> {
+    let options = CheckOptions {
+        type_check: true,
+        ..*options
+    };
+    let mut modelling = Modelling::default();
+    let report = check_with_layout(sources, Some(layout), &options, &mut ValueMode::Model(&mut modelling));
+    if !report.diagnostics.is_empty() {
+        return Err(report.diagnostics);
+    }
+    Ok(modelling
+        .model
+        .expect("a run with no errors and the types checked builds a model"))
 }
 
 /// The function of the caller that runs a query, with the sources that the query adds to those of the run.
@@ -693,6 +727,16 @@ fn check_with_layout(
             &mut found,
         );
     }
+    if let ValueMode::Model(modelling) = mode {
+        if type_checked && found.is_empty() {
+            modelling.model = Some(codegen::model::build(
+                &parsed_sources,
+                layout,
+                &resolution,
+                &modelling.inferred,
+            ));
+        }
+    }
     for info in &mut consts {
         info.name = show(info.source, &info.name);
         info.ty = show(info.source, &info.ty);
@@ -785,6 +829,13 @@ fn type_check_values(
         }
     }
     let infos = describe_consts(&everything, &all_consts);
+    if let ValueMode::Model(modelling) = mode {
+        for (_, constant) in &all_consts {
+            if let Some(scheme) = everything.inferred_type(&constant.name) {
+                modelling.inferred.insert(constant.name.clone(), scheme.clone());
+            }
+        }
+    }
 
     // Every types file comes before the values files, or else there would be a diagnostic and no type-check, so the
     // values see all of the declarations.
@@ -858,7 +909,7 @@ fn type_check_values(
                         (Some(diagnostic), _) => Some(diagnostic),
                         (None, ValueMode::Read(_)) => unreachable!("a reading returns before the values are met"),
                         (None, ValueMode::Query(_)) => unreachable!("a query returns before the values are met"),
-                        (None, ValueMode::Check) => check_value(&env, options.widening, value)
+                        (None, ValueMode::Check | ValueMode::Model(_)) => check_value(&env, options.widening, value)
                             .err()
                             .map(|e| Diagnostic::new(&sources[index].name, e.pos, e.message)),
                         (None, ValueMode::Convert(conversion)) => {
