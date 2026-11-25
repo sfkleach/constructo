@@ -2,6 +2,7 @@
 //! a Rust type keeps. Every renaming is reported as a warning at the declaration.
 
 use super::super::model::{At, Body, Enum, FullName, Model, TypeRef};
+use super::super::recursion::Opaque;
 use crate::diagnostics::{Diagnostic, Pos};
 use crate::PRELUDE_PROJECT;
 use std::collections::{HashMap, HashSet};
@@ -83,6 +84,9 @@ pub(super) struct Names {
     /// The index of each enum by its full name.
     pub index: HashMap<FullName, usize>,
     pub warnings: Vec<Diagnostic>,
+    /// The constructors and enums that are adopted, whose `struct` is not generated, and so is renamed without a
+    /// warning. Their names are still worked out, so that an adoption renames nothing else.
+    silent: HashSet<FullName>,
 }
 
 /// Whether the enum is the prelude's `Bool` or `Option`, which are Rust's own `bool` and `Option`.
@@ -101,7 +105,7 @@ pub(super) fn body_types(body: &Body) -> Vec<&TypeRef> {
 }
 
 impl Names {
-    pub fn new(model: &Model) -> Names {
+    pub fn new(model: &Model, opaque: &Opaque) -> Names {
         let index: HashMap<FullName, usize> = model
             .enums
             .iter()
@@ -122,7 +126,16 @@ impl Names {
             kept_records,
             index,
             warnings: Vec::new(),
+            silent: opaque.constructors.iter().cloned().collect(),
         };
+        // An enum whose one constructor is adopted is the adopted type, and has no `struct` either.
+        for decl in &model.enums {
+            if let [constructor] = &decl.constructors[..] {
+                if opaque.constructors.contains(&constructor.name) {
+                    names.silent.insert(decl.name.clone());
+                }
+            }
+        }
         for project in 0..model.projects.len() {
             names.name_types(model, project);
         }
@@ -164,11 +177,13 @@ impl Names {
                 } else {
                     format!("since {} cannot be the name of a type", local)
                 };
-                self.warn(
-                    model,
-                    decl.at,
-                    format!("The enum {} is {} in Rust, {}", decl.name, name, reason),
-                );
+                if !self.silent.contains(&decl.name) {
+                    self.warn(
+                        model,
+                        decl.at,
+                        format!("The enum {} is {} in Rust, {}", decl.name, name, reason),
+                    );
+                }
                 self.types[at] = name;
             }
         }
@@ -203,7 +218,7 @@ impl Names {
                 } else {
                     (local.to_string(), None)
                 };
-                if let Some(reason) = reason {
+                if let Some(reason) = reason.filter(|_| !self.silent.contains(&constructor.name)) {
                     let message = format!("The constructor {} is {} in Rust, {}", constructor.name, name, reason);
                     self.warn(model, constructor.at, message);
                 }

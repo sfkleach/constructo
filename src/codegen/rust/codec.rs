@@ -11,6 +11,7 @@
 //! the bound of the impl, which is `ReadValue<T>`, where the part is something else, such as a `Vec<T>`.
 
 use super::super::model::{Body, Const, Enum, FullName, Model, TypeRef};
+use super::adopt::Adoption;
 use super::names::{is_rusts_own, Fields};
 use super::{generic_list, Writer};
 use crate::ast::{TaggedBody, Value, ValueKind};
@@ -51,6 +52,8 @@ enum Form {
     Unit(String),
     /// A tuple `struct`, or `Some`, in a variant if `outer` is given.
     Tuple { outer: Option<String>, path: String },
+    /// The one part itself, which is the value of an adopted type that is the whole of the enum.
+    Bare,
     /// A `struct` with named fields, in a variant if `outer` is given.
     Named {
         outer: Option<String>,
@@ -68,6 +71,7 @@ impl Form {
         };
         match self {
             Form::Unit(path) => path.clone(),
+            Form::Bare => parts[0].clone(),
             Form::Tuple { outer, path } => wrap(outer, format!("{}({})", path, parts.join(", "))),
             Form::Named { outer, path, names } if names.is_empty() => wrap(outer, format!("{} {{}}", path)),
             Form::Named { outer, path, names } => {
@@ -93,6 +97,8 @@ struct Plan<'m> {
     form: Form,
     /// The Rust type of each part that is read: each field or parameter, or the element of an array.
     types: Vec<String>,
+    /// The adoption of the constructor, whose type holds the parts, converted by its functions.
+    adopted: Option<&'m Adoption>,
 }
 
 /// The type of an impl: its Rust type, its parameters, the name that a message gives it, and the path from its module
@@ -107,6 +113,12 @@ struct Target {
 impl Target {
     /// `impl<T> TRAIT<TYPE> for self::Codec where self::Codec: BOUNDS<T>`, with each bound on each parameter.
     fn header(&self, trait_name: &str, bounds: &[&str]) -> String {
+        self.header_with(trait_name, bounds, false)
+    }
+
+    /// The header, and with `cloned` a bound of `Clone` on each parameter, which the impl that writes an adopted
+    /// generic type has, since the function of the adoption gives the arguments back owned, and may clone them to.
+    fn header_with(&self, trait_name: &str, bounds: &[&str], cloned: bool) -> String {
         let up = self.up;
         let mut header = format!(
             "impl{} {}::{}<{}> for {}::Codec",
@@ -123,6 +135,11 @@ impl Target {
                 .flat_map(|p| bounds.iter().map(move |b| format!("{}::{}<{}>", up, b, p)))
                 .collect();
             header.push_str(&format!(" where {}::Codec: {}", up, bounds.join(" + ")));
+            if cloned {
+                for param in &self.params {
+                    header.push_str(&format!(", {}: ::std::clone::Clone", param));
+                }
+            }
         }
         header.push_str(" {");
         header
@@ -251,7 +268,7 @@ fn written(name: &FullName, written: &Written) -> String {
     }
 }
 
-impl Writer<'_> {
+impl<'w> Writer<'w> {
     /// The lines of the codec, at the root of the file: the part that is the same in every file, the tables, and the
     /// impls for the prelude's `Bool` and `Option`, which are Rust's own and have no module.
     pub(super) fn codec(&self, defaults: &Defaults) -> Vec<String> {
@@ -364,16 +381,73 @@ impl Writer<'_> {
         lines
     }
 
-    /// The three impls of an enum.
-    fn enum_impls(&self, at: usize, decl: &Enum, lines: &mut Vec<String>) {
+    /// The three impls of an enum, and three more for the type that adopts it whole, if one does.
+    fn enum_impls(&self, at: usize, decl: &'w Enum, lines: &mut Vec<String>) {
         let (target, plans) = self.enum_plans(at, decl);
         self.read_impl(&target, &plans, lines);
         self.write_impl(&target, &plans, lines);
         self.default_impl(&target, decl.has_default.then(|| &plans[0]), lines);
+        if let Some(adoption) = self.adopted_whole(at) {
+            self.whole_impls(&target, adoption, lines);
+        }
+    }
+
+    /// The impls for a type that adopts an enum whole. The generated enum is the step in between: the value is read
+    /// into it, which decides its constructor, and its function converts it, and the other way round.
+    fn whole_impls(&self, generated: &Target, adoption: &Adoption, lines: &mut Vec<String>) {
+        let target = Target {
+            ty: format!("{}{}", adoption.ty.path, generic_list(generated.params.iter().cloned())),
+            params: generated.params.clone(),
+            shown: generated.shown.clone(),
+            up: generated.up,
+        };
+        let (from, to) = (&adoption.from.path, &adoption.to.path);
+        lines.push(String::new());
+        lines.push(target.header("ReadValue", &["ReadValue", "DefaultValue"]));
+        lines.push(format!(
+            "    fn read_value(&self, value: &{}, depth: u32) -> {}<{}, {}> {{",
+            VALUE, RESULT, target.ty, ERROR
+        ));
+        lines.push(format!(
+            "        let generated = <Self as {}::ReadValue<{}>>::read_value(self, value, depth)?;",
+            target.up, generated.ty
+        ));
+        lines.push(format!("        self.adopted(value, {}(generated))", from));
+        lines.push("    }".to_string());
+        lines.push("}".to_string());
+        lines.push(String::new());
+        lines.push(target.header_with("WriteValue", &["WriteValue"], true));
+        lines.push(format!(
+            "    fn write_value(&self, value: &{}, depth: u32) -> {}<{}, {}> {{",
+            target.ty, RESULT, VALUE, ERROR
+        ));
+        lines.push(format!(
+            "        let generated = {}(value).map_err({}::new)?;",
+            to, ERROR
+        ));
+        lines.push(format!(
+            "        <Self as {}::WriteValue<{}>>::write_value(self, &generated, depth)",
+            target.up, generated.ty
+        ));
+        lines.push("    }".to_string());
+        lines.push("}".to_string());
+        lines.push(String::new());
+        lines.push(target.header("DefaultValue", &["DefaultValue"]));
+        lines.push(format!(
+            "    fn default_value(&self, budget: &mut usize) -> {}<{}, {}> {{",
+            RESULT, target.ty, NO_DEFAULT
+        ));
+        lines.push(format!(
+            "        let generated = <Self as {}::DefaultValue<{}>>::default_value(self, budget)?;",
+            target.up, generated.ty
+        ));
+        lines.push(format!("        {}(generated).map_err({}::Refused)", from, NO_DEFAULT));
+        lines.push("    }".to_string());
+        lines.push("}".to_string());
     }
 
     /// The type of an enum, in the module of its project, and the plan of each of its constructors.
-    fn enum_plans<'m>(&self, at: usize, decl: &'m Enum) -> (Target, Vec<Plan<'m>>) {
+    fn enum_plans(&self, at: usize, decl: &'w Enum) -> (Target, Vec<Plan<'w>>) {
         let project = decl.project;
         let kept: Vec<String> = self.names.params[at]
             .iter()
@@ -408,6 +482,7 @@ impl Writer<'_> {
                 body: &constructor.body,
                 form,
                 types,
+                adopted: self.adopted_constructor(at, c),
             }
         };
         let up = self.up(project);
@@ -454,7 +529,10 @@ impl Writer<'_> {
             },
             (Body::Record(_), Fields::Tuple) => unreachable!("the fields of a record have names"),
         };
-        let plans = if decl.constructors.len() == 1 {
+        let single = decl.constructors.len() == 1;
+        let plans = if single && self.adopted_constructor(at, 0).is_some() {
+            vec![plan(0, Form::Bare)]
+        } else if single {
             let constructor = &decl.constructors[0];
             let fields = &self.names.fields[at][0];
             vec![plan(0, struct_form(None, path.clone(), &constructor.body, fields))]
@@ -465,6 +543,11 @@ impl Writer<'_> {
                 .map(|(c, constructor)| {
                     let variant = format!("{}::{}", path, self.names.variants[at][c]);
                     let form = match &self.names.structs[at][c] {
+                        // A variant whose constructor is adopted holds the adopted type.
+                        Some(_) if self.adopted_constructor(at, c).is_some() => Form::Tuple {
+                            outer: None,
+                            path: variant,
+                        },
                         None => Form::Unit(variant),
                         Some(name) => struct_form(
                             Some(variant),
@@ -477,8 +560,13 @@ impl Writer<'_> {
                 })
                 .collect()
         };
+        // The type of an enum whose one constructor is adopted is the adopted type.
+        let ty = match self.adopted_constructor(at, 0).filter(|_| single) {
+            Some(adoption) => adoption.ty.path.clone(),
+            None => path,
+        };
         let target = Target {
-            ty: format!("{}{}", path, generic_list(kept.iter().cloned())),
+            ty: format!("{}{}", ty, generic_list(kept.iter().cloned())),
             params: kept,
             shown: decl.name.local.clone(),
             up,
@@ -572,6 +660,17 @@ impl Writer<'_> {
                     vec![format!("self.items::<{}>(items, depth)?", plan.types[0])]
                 }
             };
+            let parts = match plan.adopted {
+                Some(adoption) => {
+                    lines.push(format!("                    let arguments = {};", arguments(&parts)));
+                    lines.push(format!(
+                        "                    let adopted = self.adopted(value, {}(arguments))?;",
+                        adoption.from.path
+                    ));
+                    vec!["adopted".to_string()]
+                }
+                None => parts,
+            };
             lines.push(format!(
                 "                    {}::Ok({})",
                 RESULT,
@@ -595,7 +694,8 @@ impl Writer<'_> {
     fn write_impl(&self, target: &Target, plans: &[Plan], lines: &mut Vec<String>) {
         let deep = plans.iter().any(|p| has_parts(p.body));
         lines.push(String::new());
-        lines.push(target.header("WriteValue", &["WriteValue"]));
+        let cloned = plans.iter().any(|p| p.adopted.is_some());
+        lines.push(target.header_with("WriteValue", &["WriteValue"], cloned));
         lines.push(format!(
             "    fn write_value(&self, value: &{}, depth: u32) -> {}<{}, {}> {{",
             target.ty, RESULT, VALUE, ERROR
@@ -614,7 +714,12 @@ impl Writer<'_> {
                 Body::Tuple(parameters) => parameters.len(),
                 Body::Array(_) => 1,
             };
-            let slots: Vec<String> = (0..count).map(|i| format!("f{}", i)).collect();
+            let binders: Vec<String> = (0..count).map(|i| format!("f{}", i)).collect();
+            // The parts of an adopted type are made by its function, and are owned, so they are lent to the writers.
+            let slots: Vec<String> = match plan.adopted {
+                Some(_) => binders.iter().map(|b| format!("&{}", b)).collect(),
+                None => binders.clone(),
+            };
             let expr = match plan.body {
                 Body::None => format!("{}::unit({})", RT, name),
                 Body::Record(fields) => {
@@ -656,7 +761,17 @@ impl Writer<'_> {
                     RT, name, plan.types[0]
                 ),
             };
-            lines.push(format!("            {} => {},", plan.form.with(&slots), expr));
+            match plan.adopted {
+                Some(adoption) => lines.push(format!(
+                    "            {} => {{ let {} = {}(adopted).map_err({}::new)?; {} }}",
+                    plan.form.with(&["adopted".to_string()]),
+                    arguments(&binders),
+                    adoption.to.path,
+                    ERROR,
+                    expr
+                )),
+                None => lines.push(format!("            {} => {},", plan.form.with(&binders), expr)),
+            }
         }
         lines.push("        })".to_string());
         lines.push("    }".to_string());
@@ -689,6 +804,16 @@ impl Writer<'_> {
                         .iter()
                         .map(|ty| format!("self.default_of::<{}>(budget)?", ty))
                         .collect(),
+                };
+                // The default of an adopted type is made by its function from the defaults of its arguments.
+                let parts = match plan.adopted {
+                    Some(adoption) => vec![format!(
+                        "{}({}).map_err({}::Refused)?",
+                        adoption.from.path,
+                        arguments(&parts),
+                        NO_DEFAULT
+                    )],
+                    None => parts,
                 };
                 lines.push(format!("        {}::Ok({})", RESULT, plan.form.with(&parts)));
             }
@@ -805,6 +930,15 @@ impl Writer<'_> {
         lines.push(format!("        {}::Ok({})", RESULT, form.with(&parts)));
         lines.push("    }".to_string());
         lines.push("}".to_string());
+    }
+}
+
+/// The arguments that the functions of an adoption take and give: the one part itself, or a tuple of the parts in the
+/// order of the declaration, which is `()` if there are none.
+fn arguments(parts: &[String]) -> String {
+    match parts {
+        [part] => part.clone(),
+        _ => format!("({})", parts.join(", ")),
     }
 }
 

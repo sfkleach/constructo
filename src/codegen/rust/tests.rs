@@ -853,7 +853,7 @@ fn an_adopted_type_breaks_a_cycle_so_that_nothing_on_it_is_boxed() {
     let generated = adopted(types, &adopt("enum", "Term")).unwrap();
     assert_lines(
         &generated,
-        &["pub struct Neg(pub self::Term);", "pub struct Paren(pub self::Expr);"],
+        &["pub struct Neg(pub crate::Term);", "pub struct Paren(pub self::Expr);"],
     );
 }
 
@@ -865,7 +865,7 @@ fn nothing_is_held_through_the_arguments_of_an_adopted_generic_type() {
         .text
         .contains("::std::boxed::Box<self::Wrap<self::Holder>>"));
     let generated = adopted(types, &adopt("enum", "Wrap")).unwrap();
-    assert_lines(&generated, &["pub struct HolderHolder(pub self::Wrap<self::Holder>);"]);
+    assert_lines(&generated, &["pub struct HolderHolder(pub crate::Wrap<self::Holder>);"]);
 }
 
 #[test]
@@ -874,4 +874,119 @@ fn a_type_that_holds_itself_with_other_arguments_through_an_adopted_type_is_not_
     assert_eq!(adopted(types, "").unwrap_err().len(), 1);
     assert!(adopted(types, &adopt("constructor", "Deep")).is_ok());
     assert!(adopted(types, &adopt("enum", "Nested")).is_ok());
+}
+
+#[test]
+fn an_adopted_constructor_of_an_enum_of_several_is_held_by_its_variant_and_converted_in_its_arm() {
+    let generated = adopted(
+        "enum Shape = Circle { radius: Float }, Dot, Pair(Nat, Int);",
+        &[adopt("constructor", "Circle"), adopt("constructor", "Pair")].concat(),
+    )
+    .unwrap();
+    assert!(!generated.text.contains("pub struct Circle") && !generated.text.contains("pub struct Pair"));
+    assert_lines(
+        &generated,
+        &[
+            "pub enum Shape {",
+            "    Circle(crate::Circle),",
+            "    Pair(crate::Pair),",
+            r#"                "Circle" => {"#,
+            r#"                    let arguments = self.field::<::std::primitive::f64>(f0, depth, "radius")?;"#,
+            "                    let adopted = self.adopted(value, crate::from(arguments))?;",
+            "                    ::std::result::Result::Ok(self::Shape::Circle(adopted))",
+            r#"                "Pair" => {"#,
+            concat!(
+                "                    let arguments = (",
+                "self.argument::<::std::primitive::u64>(a0, depth, value, 0, ::std::option::Option::None)?, ",
+                "self.argument::<::std::primitive::i64>(a1, depth, value, 1, ::std::option::Option::None)?);"
+            ),
+            concat!(
+                "            self::Shape::Circle(adopted) => { ",
+                "let f0 = crate::to(adopted).map_err(::constructo_runtime::codec::Error::new)?; ",
+                r#"::constructo_runtime::codec::tagged_record(self.name("Circle", "Circle"), "#,
+                r#"::std::vec![("radius", self.put::<::std::primitive::f64>(&f0, depth, "radius")?)]) }"#
+            ),
+        ],
+    );
+    assert!(generated.text.contains(concat!(
+        "            self::Shape::Pair(adopted) => { ",
+        "let (f0, f1) = crate::to(adopted).map_err(::constructo_runtime::codec::Error::new)?; "
+    )));
+}
+
+#[test]
+fn an_adopted_constructor_that_is_the_one_of_its_enum_is_the_type_of_the_enum() {
+    let generated = adopted(
+        "enum Uuid = Uuid(String); enum Drawing = Drawing(id: Uuid);",
+        &adopt("constructor", "Uuid"),
+    )
+    .unwrap();
+    assert!(!generated.text.contains("pub struct Uuid"));
+    assert_lines(
+        &generated,
+        &[
+            "// The enum `Uuid`, of one constructor, `Uuid`, is adopted as `crate::Uuid`.",
+            "pub struct Drawing {",
+            "    pub id: crate::Uuid,",
+            "impl self::ReadValue<crate::Uuid> for self::Codec {",
+            "                    let adopted = self.adopted(value, crate::from(arguments))?;",
+            "                    ::std::result::Result::Ok(adopted)",
+            "impl self::WriteValue<crate::Uuid> for self::Codec {",
+            "impl self::DefaultValue<crate::Uuid> for self::Codec {",
+            concat!(
+                "        ::std::result::Result::Ok(crate::from(self.default_of::<::std::string::String>(budget)?)",
+                ".map_err(::constructo_runtime::codec::NoDefault::Refused)?)"
+            ),
+        ],
+    );
+}
+
+#[test]
+fn an_enum_adopted_whole_is_read_into_the_generated_enum_and_converted() {
+    let generated = adopted(
+        "enum Colour = Red, Green; enum Pen = Pen(colour: Colour, spare: Colour?);",
+        &adopt("enum", "Colour"),
+    )
+    .unwrap();
+    assert_lines(
+        &generated,
+        &[
+            "pub enum Colour {",
+            "pub struct Pen {",
+            "    pub colour: crate::Colour,",
+            "    pub spare: ::std::option::Option<crate::Colour>,",
+            "impl self::ReadValue<self::Colour> for self::Codec {",
+            "impl self::ReadValue<crate::Colour> for self::Codec {",
+            "        let generated = <Self as self::ReadValue<self::Colour>>::read_value(self, value, depth)?;",
+            "        self.adopted(value, crate::from(generated))",
+            "impl self::WriteValue<crate::Colour> for self::Codec {",
+            "        let generated = crate::to(value).map_err(::constructo_runtime::codec::Error::new)?;",
+            "        <Self as self::WriteValue<self::Colour>>::write_value(self, &generated, depth)",
+            "impl self::DefaultValue<crate::Colour> for self::Codec {",
+            "        let generated = <Self as self::DefaultValue<self::Colour>>::default_value(self, budget)?;",
+            "        crate::from(generated).map_err(::constructo_runtime::codec::NoDefault::Refused)",
+        ],
+    );
+}
+
+#[test]
+fn an_adopted_generic_constructor_keeps_the_parameters_of_its_struct_and_its_writer_may_clone_them() {
+    let generated = adopted(
+        "enum Tagged<T, _U> = Plain, Tagged(T, label: String);",
+        &adopt("constructor", "Tagged"),
+    )
+    .unwrap();
+    assert_lines(
+        &generated,
+        &[
+            "pub enum Tagged<T> {",
+            "    Tagged(crate::Tagged<T>),",
+            concat!(
+                "impl<T> self::WriteValue<self::Tagged<T>> for self::Codec where self::Codec: self::WriteValue<T>, ",
+                "T: ::std::clone::Clone {"
+            ),
+        ],
+    );
+    // The constructor that would be renamed for its enum has no `struct`, so it is no warning.
+    assert_eq!(warnings(&generated), Vec::<String>::new());
 }

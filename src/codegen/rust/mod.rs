@@ -33,13 +33,18 @@ pub fn generate(model: &Model, defaults: &Defaults, adoptions: &Adoptions) -> Re
     let mut model = model.clone();
     super::recursion::rebox(&mut model, &opaque);
     let model = &model;
-    let names = Names::new(model);
+    let names = Names::new(model, &opaque);
     let mut errors = regular::irregular(model, &names.index, &opaque);
     errors.extend(codec::const_errors(model, &names.index));
     if !errors.is_empty() {
         return Err(errors);
     }
-    let writer = Writer { model, names: &names };
+    let writer = Writer {
+        model,
+        names: &names,
+        adopted_enums: adoptions.enums.iter().map(|a| (a.name.clone(), a)).collect(),
+        adopted_constructors: adoptions.constructors.iter().map(|a| (a.name.clone(), a)).collect(),
+    };
     let mut text = String::new();
     let root = &model.projects[model.root];
     if root.name.is_empty() {
@@ -99,9 +104,33 @@ fn push_line(text: &mut String, line: &str, level: usize) {
 struct Writer<'m> {
     model: &'m Model,
     names: &'m Names,
+    /// The adoptions of enums and of constructors, by their full names.
+    adopted_enums: HashMap<String, &'m Adoption>,
+    adopted_constructors: HashMap<String, &'m Adoption>,
 }
 
-impl Writer<'_> {
+impl<'m> Writer<'m> {
+    /// The adoption of an enum adopted whole.
+    fn adopted_whole(&self, at: usize) -> Option<&'m Adoption> {
+        self.adopted_enums.get(&self.model.enums[at].name.to_string()).copied()
+    }
+
+    /// The adoption of a constructor of an enum.
+    fn adopted_constructor(&self, at: usize, c: usize) -> Option<&'m Adoption> {
+        let name = self.model.enums[at].constructors[c].name.to_string();
+        self.adopted_constructors.get(&name).copied()
+    }
+
+    /// The adoption whose type is every use of an enum: the enum's own, if it is adopted whole, or that of its one
+    /// constructor.
+    fn adopted_uses(&self, at: usize) -> Option<&'m Adoption> {
+        let decl = &self.model.enums[at];
+        self.adopted_whole(at).or_else(|| match decl.constructors.len() {
+            1 => self.adopted_constructor(at, 0),
+            _ => None,
+        })
+    }
+
     /// The lines of the module of a project: its enums, and the records that it uses, each after an empty line.
     fn module(&self, project: usize) -> Vec<String> {
         let mut lines = Vec::new();
@@ -140,6 +169,14 @@ impl Writer<'_> {
         };
         let name = &self.names.types[at];
         lines.push(String::new());
+        if let (Some(adoption), [constructor]) = (self.adopted_constructor(at, 0), &decl.constructors[..]) {
+            // The one constructor is adopted, so the enum's type is the adopted one, and nothing is generated for it.
+            lines.push(format!(
+                "// The enum `{}`, of one constructor, `{}`, is adopted as `{}`.",
+                decl.name, constructor.name.local, adoption.ty.path
+            ));
+            return;
+        }
         if let [constructor] = &decl.constructors[..] {
             lines.push(format!(
                 "/// The enum `{}`, of one constructor, `{}`.",
@@ -159,7 +196,8 @@ impl Writer<'_> {
             match &self.names.structs[at][c] {
                 None => lines.push(format!("    {},", variant)),
                 Some(rust) => {
-                    // The `struct` has the parameters of the enum that its body holds, in the enum's order.
+                    // The `struct` has the parameters of the enum that its body holds, in the enum's order, and so
+                    // does the type that adopts the constructor, if one does.
                     let holds = |p: usize| {
                         kept[p]
                             && body_types(&constructor.body).iter().any(|ty| {
@@ -173,8 +211,13 @@ impl Writer<'_> {
                             })
                     };
                     let generics = generics(&holds);
-                    lines.push(format!("    {}(self::{}{}),", variant, rust, generics));
-                    structs.push((c, rust, generics));
+                    match self.adopted_constructor(at, c) {
+                        Some(adoption) => lines.push(format!("    {}({}{}),", variant, adoption.ty.path, generics)),
+                        None => {
+                            lines.push(format!("    {}(self::{}{}),", variant, rust, generics));
+                            structs.push((c, rust, generics));
+                        }
+                    }
                 }
             }
         }
@@ -307,7 +350,11 @@ impl Writer<'_> {
             TypeRef::Enum(name, list) => {
                 let at = self.names.index[name];
                 let decl = &self.model.enums[at];
-                let path = self.path(from, decl.project, &self.names.types[at]);
+                // An adopted type has the parameters that the generated one would keep, in the same order.
+                let path = match self.adopted_uses(at) {
+                    Some(adoption) => adoption.ty.path.clone(),
+                    None => self.path(from, decl.project, &self.names.types[at]),
+                };
                 format!("{}{}", path, args(list, &self.names.kept[at]))
             }
             TypeRef::Record(at, list) => format!(
