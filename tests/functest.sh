@@ -2478,9 +2478,15 @@ PROJECT_EXAMPLES="$(dirname "$0")/../syntax/examples/project"
 rm -rf "$(dirname "$0")/../_build/functest-codegen"
 mkdir -p "$(dirname "$0")/../_build/functest-codegen"
 codegen_dir="$(cd "$(dirname "$0")/../_build/functest-codegen" && pwd)"
+# The generated code depends on the runtime crate, which is built once, in the target folder of the workspace.
+runtime_target="$(cd "$(dirname "$0")/.." && pwd)/_build/target/debug"
+if ! cargo build --quiet --manifest-path="$(dirname "$0")/../Cargo.toml" -p constructo-runtime \
+    >"$codegen_dir/cargo" 2>&1; then
+    fail "codegen: the runtime crate builds ($(head -1 "$codegen_dir/cargo"))"
+fi
 
-# Generates the Rust for the arguments, and compiles it as a library with every warning an error, in each edition that
-# is given. The output of the run is kept in the folder, for a failure to be looked at.
+# Generates the Rust for the arguments, and compiles it as a library against the runtime with every warning an error,
+# in each edition that is given. The output of the run is kept in the folder, for a failure to be looked at.
 expect_compiles() {
     local name="$1" editions="$2"; shift 2
     local out="$codegen_dir/out.rs" actual=0
@@ -2492,7 +2498,8 @@ expect_compiles() {
     local edition
     for edition in $editions; do
         if ! rustc --edition="$edition" --crate-type=lib --crate-name=generated -D warnings \
-            --out-dir="$codegen_dir" "$out" >"$codegen_dir/rustc" 2>&1; then
+            --extern constructo_runtime="$runtime_target/libconstructo_runtime.rlib" \
+            -L dependency="$runtime_target/deps" --out-dir="$codegen_dir" "$out" >"$codegen_dir/rustc" 2>&1; then
             fail "$name (rustc --edition=$edition: $(grep -m1 '^error' "$codegen_dir/rustc"))"
             return
         fi

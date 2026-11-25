@@ -1,0 +1,627 @@
+
+// =====================================================================================================================
+// The codec. Everything below is the same in every generated file, apart from the settings of `codec()`, the tables of
+// names and consts, and the impls for the types of the run, which follow it.
+// =====================================================================================================================
+
+/// Reads a value of the type `T` from its tree. The codec implements it for every type that it can read, and a program
+/// can implement it for a type of any crate, since the trait is its own. A program calls `Codec::read`, and not this.
+pub trait ReadValue<T> {
+    /// Reads the value, which is `depth` levels down in what is being read.
+    fn read_value(
+        &self,
+        value: &::constructo_runtime::ast::Value,
+        depth: u32,
+    ) -> ::std::result::Result<T, ::constructo_runtime::codec::Error>;
+}
+
+/// Writes a value of the type `T` as a tree, as `ReadValue` reads it. A program calls `Codec::write`, and not this.
+pub trait WriteValue<T> {
+    /// Writes the value, which is `depth` levels down in what is being written.
+    fn write_value(
+        &self,
+        value: &T,
+        depth: u32,
+    ) -> ::std::result::Result<::constructo_runtime::ast::Value, ::constructo_runtime::codec::Error>;
+}
+
+/// The default of the type `T`, for an argument that is left out: the rules of Constructo, and not Rust's `Default`.
+pub trait DefaultValue<T> {
+    /// The default, whose nodes are counted against what is left of the codec's limit in `budget`.
+    fn default_value(&self, budget: &mut usize) -> ::std::result::Result<T, ::constructo_runtime::codec::NoDefault>;
+}
+
+/// The codec of @WHAT@: it reads and writes the values of the types of the run, with the names and consts of the run
+/// and nothing else, and its settings. A codec is cheap, and `codec()` makes a new one each time, so a program that
+/// changes a setting changes it only for itself.
+pub struct Codec {
+    names: ::constructo_runtime::codec::Names,
+    max_depth: u32,
+    default_limit: usize,
+    widening: bool,
+    /// The value of each const, parsed when it is first referred to.
+    consts: [::std::sync::OnceLock<::constructo_runtime::ast::Value>; @CONSTS@],
+}
+
+/// A new codec, with the default settings: names written as the project writes them, the parser's limit on nesting,
+/// and the limit on defaults and the widening of numbers that `constructo codegen` was given, so that the codec reads
+/// what `constructo check` reads with the same options.
+pub fn codec() -> self::Codec {
+    self::Codec {
+        names: ::constructo_runtime::codec::Names::Project,
+        max_depth: ::constructo_runtime::limits::MAX_DEPTH,
+        default_limit: @DEFAULT_LIMIT@,
+        widening: @WIDENING@,
+        consts: ::std::array::from_fn(|_| ::std::sync::OnceLock::new()),
+    }
+}
+
+impl self::Codec {
+    /// Reads the one value of a text as a `T`.
+    pub fn read<T>(&self, text: &str) -> ::std::result::Result<T, ::constructo_runtime::codec::Error>
+    where
+        Self: self::ReadValue<T>,
+    {
+        let value = ::constructo_runtime::codec::parse_one(text)?;
+        <Self as self::ReadValue<T>>::read_value(self, &value, 0)
+    }
+
+    /// Reads every value of a text, each as a `T`.
+    pub fn read_all<T>(
+        &self,
+        text: &str,
+    ) -> ::std::result::Result<::std::vec::Vec<T>, ::constructo_runtime::codec::Error>
+    where
+        Self: self::ReadValue<T>,
+    {
+        ::constructo_runtime::codec::parse(text)?
+            .iter()
+            .map(|value| <Self as self::ReadValue<T>>::read_value(self, value, 0))
+            .collect()
+    }
+
+    /// Writes a value as text, ended by `;` and a new line.
+    pub fn write<T>(
+        &self,
+        value: &T,
+    ) -> ::std::result::Result<::std::string::String, ::constructo_runtime::codec::Error>
+    where
+        Self: self::WriteValue<T>,
+    {
+        let tree = <Self as self::WriteValue<T>>::write_value(self, value, 0)?;
+        ::std::result::Result::Ok(::constructo_runtime::codec::write_text(&[tree]))
+    }
+
+    /// Writes each of the values as text, each ended by `;` and a new line. An error has the index of its value.
+    pub fn write_all<T>(
+        &self,
+        values: &[T],
+    ) -> ::std::result::Result<::std::string::String, ::constructo_runtime::codec::Error>
+    where
+        Self: self::WriteValue<T>,
+    {
+        let trees = values
+            .iter()
+            .enumerate()
+            .map(|(at, value)| {
+                <Self as self::WriteValue<T>>::write_value(self, value, 0)
+                    .map_err(|e| e.step(::constructo_runtime::codec::Step::Index(at)))
+            })
+            .collect::<::std::result::Result<::std::vec::Vec<_>, _>>()?;
+        ::std::result::Result::Ok(::constructo_runtime::codec::write_text(&trees))
+    }
+
+    /// How the names of constructors are written.
+    pub fn names(&self) -> ::constructo_runtime::codec::Names {
+        self.names
+    }
+
+    /// Writes the names of constructors as the project writes them, or in full.
+    pub fn set_names(&mut self, names: ::constructo_runtime::codec::Names) {
+        self.names = names;
+    }
+
+    /// The deepest nesting that is read or written, counted through consts.
+    pub fn max_depth(&self) -> u32 {
+        self.max_depth
+    }
+
+    /// Sets the deepest nesting that is read or written. It is at most the parser's limit, since the parser could not
+    /// read back what is deeper.
+    pub fn set_max_depth(&mut self, depth: u32) {
+        self.max_depth = depth.min(::constructo_runtime::limits::MAX_DEPTH);
+    }
+
+    /// The most nodes in the default of an argument that is left out.
+    pub fn default_limit(&self) -> usize {
+        self.default_limit
+    }
+
+    /// Sets the most nodes in the default of an argument that is left out.
+    pub fn set_default_limit(&mut self, limit: usize) {
+        self.default_limit = limit;
+    }
+
+    /// Whether a `Nat` is read where an `Int` or a `Float` is expected, and an `Int` where a `Float` is.
+    pub fn widening(&self) -> bool {
+        self.widening
+    }
+
+    /// Sets whether a number is read where a wider one is expected.
+    pub fn set_widening(&mut self, widening: bool) {
+        self.widening = widening;
+    }
+
+    /// Reads a value: a reference to a const as its value, which is read as the type that is expected here and at the
+    /// same depth, and anything else with `read`, a level down.
+    fn read_with<T>(
+        &self,
+        value: &::constructo_runtime::ast::Value,
+        depth: u32,
+        read: impl ::std::ops::FnOnce(
+            &::constructo_runtime::ast::Value,
+            u32,
+        ) -> ::std::result::Result<T, ::constructo_runtime::codec::Error>,
+    ) -> ::std::result::Result<T, ::constructo_runtime::codec::Error>
+    where
+        Self: self::ReadValue<T>,
+    {
+        if let ::constructo_runtime::ast::ValueKind::Tagged { name, body: ::std::option::Option::None } = &value.kind {
+            if ::constructo_runtime::codec::is_const_name(name) {
+                let ::std::option::Option::Some((at, text)) = Self::constant(name) else {
+                    let message = ::std::format!("Unknown const {}", name);
+                    return ::std::result::Result::Err(::constructo_runtime::codec::Error::at(value.pos, message));
+                };
+                // The text is written by the generator from a value that `check` accepted, so it parses.
+                let found = self.consts[at].get_or_init(|| {
+                    ::constructo_runtime::codec::parse_one(text).expect("the value of a const parses")
+                });
+                return <Self as self::ReadValue<T>>::read_value(self, found, depth)
+                    .map_err(|e| e.in_const(name, value.pos));
+            }
+        }
+        let depth = ::constructo_runtime::codec::enter(depth, self.max_depth, ::std::option::Option::Some(value.pos))?;
+        read(value, depth)
+    }
+
+    /// The depth of a value that is written inside one at `depth`.
+    fn enter_write(&self, depth: u32) -> ::std::result::Result<u32, ::constructo_runtime::codec::Error> {
+        ::constructo_runtime::codec::enter(depth, self.max_depth, ::std::option::Option::None)
+    }
+
+    /// The full name of a tagged value's constructor, and its body, or an error if it is not tagged or the run has no
+    /// such constructor.
+    fn tagged<'v>(
+        &self,
+        value: &'v ::constructo_runtime::ast::Value,
+        expected: &str,
+    ) -> ::std::result::Result<
+        (&'static str, ::std::option::Option<&'v ::constructo_runtime::ast::TaggedBody>),
+        ::constructo_runtime::codec::Error,
+    > {
+        match &value.kind {
+            ::constructo_runtime::ast::ValueKind::Tagged { name, body } => match Self::constructor(name) {
+                ::std::option::Option::Some((full, _)) => ::std::result::Result::Ok((full, body.as_ref())),
+                ::std::option::Option::None => ::std::result::Result::Err(::constructo_runtime::codec::Error::at(
+                    value.pos,
+                    ::std::format!("Unknown constructor {}", name),
+                )),
+            },
+            _ => ::std::result::Result::Err(self.mismatch(expected, value)),
+        }
+    }
+
+    /// The error for a value that is not of the type that is expected, with the type of a constructor, as `check`
+    /// gives it.
+    fn mismatch(&self, expected: &str, value: &::constructo_runtime::ast::Value) -> ::constructo_runtime::codec::Error {
+        let found = match &value.kind {
+            ::constructo_runtime::ast::ValueKind::Tagged { name, .. } => match Self::constructor(name) {
+                ::std::option::Option::Some((_, ty)) => ::std::format!("{} of type {}", name, ty),
+                ::std::option::Option::None => name.clone(),
+            },
+            _ => ::constructo_runtime::codec::found(value),
+        };
+        ::constructo_runtime::codec::Error::at(value.pos, ::std::format!("Expected {} but found {}", expected, found))
+    }
+
+    /// The error for a constructor that is written with the wrong body.
+    fn takes(
+        &self,
+        value: &::constructo_runtime::ast::Value,
+        constructor: &str,
+        what: &str,
+    ) -> ::constructo_runtime::codec::Error {
+        let message = ::std::format!("Constructor {} takes {}", constructor, what);
+        ::constructo_runtime::codec::Error::at(value.pos, message)
+    }
+
+    fn no_body(
+        &self,
+        value: &::constructo_runtime::ast::Value,
+        body: ::std::option::Option<&::constructo_runtime::ast::TaggedBody>,
+        constructor: &str,
+    ) -> ::std::result::Result<(), ::constructo_runtime::codec::Error> {
+        match body {
+            ::std::option::Option::None => ::std::result::Result::Ok(()),
+            ::std::option::Option::Some(_) => ::std::result::Result::Err(self.takes(value, constructor, "no fields")),
+        }
+    }
+
+    fn record_body<'v>(
+        &self,
+        value: &::constructo_runtime::ast::Value,
+        body: ::std::option::Option<&'v ::constructo_runtime::ast::TaggedBody>,
+        constructor: &str,
+    ) -> ::std::result::Result<&'v [::constructo_runtime::ast::Member], ::constructo_runtime::codec::Error> {
+        match body {
+            ::std::option::Option::Some(::constructo_runtime::ast::TaggedBody::Record(members)) => {
+                ::std::result::Result::Ok(members)
+            }
+            _ => ::std::result::Result::Err(self.takes(value, constructor, "a record")),
+        }
+    }
+
+    fn tuple_body<'v>(
+        &self,
+        value: &::constructo_runtime::ast::Value,
+        body: ::std::option::Option<&'v ::constructo_runtime::ast::TaggedBody>,
+        constructor: &str,
+    ) -> ::std::result::Result<&'v [::constructo_runtime::ast::Argument], ::constructo_runtime::codec::Error> {
+        match body {
+            ::std::option::Option::Some(::constructo_runtime::ast::TaggedBody::Tuple(args)) => {
+                ::std::result::Result::Ok(args)
+            }
+            _ => ::std::result::Result::Err(self.takes(value, constructor, "a tuple")),
+        }
+    }
+
+    fn array_body<'v>(
+        &self,
+        value: &::constructo_runtime::ast::Value,
+        body: ::std::option::Option<&'v ::constructo_runtime::ast::TaggedBody>,
+        constructor: &str,
+    ) -> ::std::result::Result<&'v [::constructo_runtime::ast::Value], ::constructo_runtime::codec::Error> {
+        match body {
+            ::std::option::Option::Some(::constructo_runtime::ast::TaggedBody::Array(items)) => {
+                ::std::result::Result::Ok(items)
+            }
+            _ => ::std::result::Result::Err(self.takes(value, constructor, "an array")),
+        }
+    }
+
+    /// Reads a field of a record, or of a constructor with a record.
+    fn field<T>(
+        &self,
+        value: &::constructo_runtime::ast::Value,
+        depth: u32,
+        name: &str,
+    ) -> ::std::result::Result<T, ::constructo_runtime::codec::Error>
+    where
+        Self: self::ReadValue<T>,
+    {
+        <Self as self::ReadValue<T>>::read_value(self, value, depth)
+            .map_err(|e| e.step(::constructo_runtime::codec::Step::Field(::std::string::String::from(name))))
+    }
+
+    /// Reads the argument of a parameter of a tuple, by its position and its name if it has one, or gives the default
+    /// of its type if it was left out, which is an error at the constructor if there is none.
+    fn argument<T>(
+        &self,
+        slot: ::std::option::Option<&::constructo_runtime::ast::Value>,
+        depth: u32,
+        constructor: &::constructo_runtime::ast::Value,
+        position: usize,
+        name: ::std::option::Option<&str>,
+    ) -> ::std::result::Result<T, ::constructo_runtime::codec::Error>
+    where
+        Self: self::ReadValue<T> + self::DefaultValue<T>,
+    {
+        let step = || match name {
+            ::std::option::Option::Some(name) => {
+                ::constructo_runtime::codec::Step::Field(::std::string::String::from(name))
+            }
+            ::std::option::Option::None => ::constructo_runtime::codec::Step::Position(position),
+        };
+        match slot {
+            ::std::option::Option::Some(value) => {
+                <Self as self::ReadValue<T>>::read_value(self, value, depth).map_err(|e| e.step(step()))
+            }
+            ::std::option::Option::None => {
+                let mut budget = self.default_limit;
+                <Self as self::DefaultValue<T>>::default_value(self, &mut budget).map_err(|why| {
+                    let param = name.unwrap_or_default();
+                    let limit = self.default_limit;
+                    ::constructo_runtime::codec::no_default(why, param, limit, constructor.pos).step(step())
+                })
+            }
+        }
+    }
+
+    /// Reads the elements of an array.
+    fn items<T>(
+        &self,
+        items: &[::constructo_runtime::ast::Value],
+        depth: u32,
+    ) -> ::std::result::Result<::std::vec::Vec<T>, ::constructo_runtime::codec::Error>
+    where
+        Self: self::ReadValue<T>,
+    {
+        items
+            .iter()
+            .enumerate()
+            .map(|(at, item)| {
+                <Self as self::ReadValue<T>>::read_value(self, item, depth)
+                    .map_err(|e| e.step(::constructo_runtime::codec::Step::Index(at)))
+            })
+            .collect()
+    }
+
+    /// The default of a part of a default.
+    fn default_of<T>(&self, budget: &mut usize) -> ::std::result::Result<T, ::constructo_runtime::codec::NoDefault>
+    where
+        Self: self::DefaultValue<T>,
+    {
+        <Self as self::DefaultValue<T>>::default_value(self, budget)
+    }
+
+    /// The name of a constructor as it is written: its full name, or the form that the project writes.
+    fn name(&self, full: &'static str, written: &'static str) -> &'static str {
+        match self.names {
+            ::constructo_runtime::codec::Names::Project => written,
+            ::constructo_runtime::codec::Names::Full => full,
+        }
+    }
+
+    /// Writes a field of a record, or a parameter of a tuple that has a name.
+    fn put<T>(
+        &self,
+        value: &T,
+        depth: u32,
+        name: &str,
+    ) -> ::std::result::Result<::constructo_runtime::ast::Value, ::constructo_runtime::codec::Error>
+    where
+        Self: self::WriteValue<T>,
+    {
+        <Self as self::WriteValue<T>>::write_value(self, value, depth)
+            .map_err(|e| e.step(::constructo_runtime::codec::Step::Field(::std::string::String::from(name))))
+    }
+
+    /// Writes a parameter of a tuple that has no name.
+    fn put_at<T>(
+        &self,
+        value: &T,
+        depth: u32,
+        position: usize,
+    ) -> ::std::result::Result<::constructo_runtime::ast::Value, ::constructo_runtime::codec::Error>
+    where
+        Self: self::WriteValue<T>,
+    {
+        <Self as self::WriteValue<T>>::write_value(self, value, depth)
+            .map_err(|e| e.step(::constructo_runtime::codec::Step::Position(position)))
+    }
+
+    /// Writes the elements of an array.
+    fn put_items<T>(
+        &self,
+        items: &[T],
+        depth: u32,
+    ) -> ::std::result::Result<::std::vec::Vec<::constructo_runtime::ast::Value>, ::constructo_runtime::codec::Error>
+    where
+        Self: self::WriteValue<T>,
+    {
+        items
+            .iter()
+            .enumerate()
+            .map(|(at, item)| {
+                <Self as self::WriteValue<T>>::write_value(self, item, depth)
+                    .map_err(|e| e.step(::constructo_runtime::codec::Step::Index(at)))
+            })
+            .collect()
+    }
+}
+
+impl self::ReadValue<::std::primitive::u64> for self::Codec {
+    fn read_value(
+        &self,
+        value: &::constructo_runtime::ast::Value,
+        depth: u32,
+    ) -> ::std::result::Result<::std::primitive::u64, ::constructo_runtime::codec::Error> {
+        self.read_with(value, depth, |value, _| ::constructo_runtime::codec::read_nat(value))
+    }
+}
+
+impl self::WriteValue<::std::primitive::u64> for self::Codec {
+    fn write_value(
+        &self,
+        value: &::std::primitive::u64,
+        depth: u32,
+    ) -> ::std::result::Result<::constructo_runtime::ast::Value, ::constructo_runtime::codec::Error> {
+        self.enter_write(depth)?;
+        ::std::result::Result::Ok(::constructo_runtime::codec::nat(*value))
+    }
+}
+
+impl self::DefaultValue<::std::primitive::u64> for self::Codec {
+    fn default_value(
+        &self,
+        budget: &mut usize,
+    ) -> ::std::result::Result<::std::primitive::u64, ::constructo_runtime::codec::NoDefault> {
+        ::constructo_runtime::codec::spend(budget)?;
+        ::std::result::Result::Ok(0)
+    }
+}
+
+impl self::ReadValue<::std::primitive::i64> for self::Codec {
+    fn read_value(
+        &self,
+        value: &::constructo_runtime::ast::Value,
+        depth: u32,
+    ) -> ::std::result::Result<::std::primitive::i64, ::constructo_runtime::codec::Error> {
+        self.read_with(value, depth, |value, _| ::constructo_runtime::codec::read_int(value, self.widening))
+    }
+}
+
+impl self::WriteValue<::std::primitive::i64> for self::Codec {
+    fn write_value(
+        &self,
+        value: &::std::primitive::i64,
+        depth: u32,
+    ) -> ::std::result::Result<::constructo_runtime::ast::Value, ::constructo_runtime::codec::Error> {
+        self.enter_write(depth)?;
+        ::std::result::Result::Ok(::constructo_runtime::codec::int(*value))
+    }
+}
+
+impl self::DefaultValue<::std::primitive::i64> for self::Codec {
+    fn default_value(
+        &self,
+        budget: &mut usize,
+    ) -> ::std::result::Result<::std::primitive::i64, ::constructo_runtime::codec::NoDefault> {
+        ::constructo_runtime::codec::spend(budget)?;
+        ::std::result::Result::Ok(0)
+    }
+}
+
+impl self::ReadValue<::std::primitive::f64> for self::Codec {
+    fn read_value(
+        &self,
+        value: &::constructo_runtime::ast::Value,
+        depth: u32,
+    ) -> ::std::result::Result<::std::primitive::f64, ::constructo_runtime::codec::Error> {
+        self.read_with(value, depth, |value, _| ::constructo_runtime::codec::read_float(value, self.widening))
+    }
+}
+
+impl self::WriteValue<::std::primitive::f64> for self::Codec {
+    fn write_value(
+        &self,
+        value: &::std::primitive::f64,
+        depth: u32,
+    ) -> ::std::result::Result<::constructo_runtime::ast::Value, ::constructo_runtime::codec::Error> {
+        self.enter_write(depth)?;
+        ::constructo_runtime::codec::float(*value)
+    }
+}
+
+impl self::DefaultValue<::std::primitive::f64> for self::Codec {
+    fn default_value(
+        &self,
+        budget: &mut usize,
+    ) -> ::std::result::Result<::std::primitive::f64, ::constructo_runtime::codec::NoDefault> {
+        ::constructo_runtime::codec::spend(budget)?;
+        ::std::result::Result::Ok(0.0)
+    }
+}
+
+impl self::ReadValue<::std::string::String> for self::Codec {
+    fn read_value(
+        &self,
+        value: &::constructo_runtime::ast::Value,
+        depth: u32,
+    ) -> ::std::result::Result<::std::string::String, ::constructo_runtime::codec::Error> {
+        self.read_with(value, depth, |value, _| ::constructo_runtime::codec::read_string(value))
+    }
+}
+
+impl self::WriteValue<::std::string::String> for self::Codec {
+    fn write_value(
+        &self,
+        value: &::std::string::String,
+        depth: u32,
+    ) -> ::std::result::Result<::constructo_runtime::ast::Value, ::constructo_runtime::codec::Error> {
+        self.enter_write(depth)?;
+        ::std::result::Result::Ok(::constructo_runtime::codec::string(value))
+    }
+}
+
+impl self::DefaultValue<::std::string::String> for self::Codec {
+    fn default_value(
+        &self,
+        budget: &mut usize,
+    ) -> ::std::result::Result<::std::string::String, ::constructo_runtime::codec::NoDefault> {
+        ::constructo_runtime::codec::spend(budget)?;
+        ::std::result::Result::Ok(::std::string::String::new())
+    }
+}
+
+impl<T> self::ReadValue<::std::vec::Vec<T>> for self::Codec
+where
+    self::Codec: self::ReadValue<T>,
+{
+    fn read_value(
+        &self,
+        value: &::constructo_runtime::ast::Value,
+        depth: u32,
+    ) -> ::std::result::Result<::std::vec::Vec<T>, ::constructo_runtime::codec::Error> {
+        // The type is given, as it is to each helper in a generic impl, since Rust would otherwise take the type of
+        // the bound on `T` for it.
+        self.read_with::<::std::vec::Vec<T>>(value, depth, |value, depth| match &value.kind {
+            ::constructo_runtime::ast::ValueKind::Array(items) => self.items::<T>(items, depth),
+            _ => ::std::result::Result::Err(self.mismatch("an array", value)),
+        })
+    }
+}
+
+impl<T> self::WriteValue<::std::vec::Vec<T>> for self::Codec
+where
+    self::Codec: self::WriteValue<T>,
+{
+    fn write_value(
+        &self,
+        value: &::std::vec::Vec<T>,
+        depth: u32,
+    ) -> ::std::result::Result<::constructo_runtime::ast::Value, ::constructo_runtime::codec::Error> {
+        let depth = self.enter_write(depth)?;
+        ::std::result::Result::Ok(::constructo_runtime::codec::array(self.put_items::<T>(value, depth)?))
+    }
+}
+
+impl<T> self::DefaultValue<::std::vec::Vec<T>> for self::Codec {
+    fn default_value(
+        &self,
+        budget: &mut usize,
+    ) -> ::std::result::Result<::std::vec::Vec<T>, ::constructo_runtime::codec::NoDefault> {
+        ::constructo_runtime::codec::spend(budget)?;
+        ::std::result::Result::Ok(::std::vec::Vec::new())
+    }
+}
+
+// A `Box` is not seen in the text: it is read and written as what it holds, at the same depth.
+
+impl<T> self::ReadValue<::std::boxed::Box<T>> for self::Codec
+where
+    self::Codec: self::ReadValue<T>,
+{
+    fn read_value(
+        &self,
+        value: &::constructo_runtime::ast::Value,
+        depth: u32,
+    ) -> ::std::result::Result<::std::boxed::Box<T>, ::constructo_runtime::codec::Error> {
+        <Self as self::ReadValue<T>>::read_value(self, value, depth).map(::std::boxed::Box::new)
+    }
+}
+
+impl<T> self::WriteValue<::std::boxed::Box<T>> for self::Codec
+where
+    self::Codec: self::WriteValue<T>,
+{
+    fn write_value(
+        &self,
+        value: &::std::boxed::Box<T>,
+        depth: u32,
+    ) -> ::std::result::Result<::constructo_runtime::ast::Value, ::constructo_runtime::codec::Error> {
+        <Self as self::WriteValue<T>>::write_value(self, value, depth)
+    }
+}
+
+impl<T> self::DefaultValue<::std::boxed::Box<T>> for self::Codec
+where
+    self::Codec: self::DefaultValue<T>,
+{
+    fn default_value(
+        &self,
+        budget: &mut usize,
+    ) -> ::std::result::Result<::std::boxed::Box<T>, ::constructo_runtime::codec::NoDefault> {
+        <Self as self::DefaultValue<T>>::default_value(self, budget).map(::std::boxed::Box::new)
+    }
+}

@@ -179,6 +179,13 @@ pub fn enter(depth: u32, max: u32, pos: Option<Pos>) -> Result<u32, Error> {
     Ok(depth + 1)
 }
 
+/// Whether a name is that of a const, which starts with a lower-case letter or `_`, after any qualifier, as a
+/// constructor starts with a capital letter (decision 35).
+pub fn is_const_name(name: &str) -> bool {
+    let local = name.rsplit("::").next().unwrap_or(name);
+    local.starts_with(|c: char| c.is_ascii_lowercase() || c == '_')
+}
+
 /// What a value is, for a message, as `check` says it: `Nat`, `Int`, `Float`, `String`, `an array` or `a record`. A
 /// tagged value is its name as it is written, which a codec can give with its type.
 pub fn found(value: &Value) -> String {
@@ -303,6 +310,37 @@ pub fn read_float(value: &Value, widening: bool) -> Result<f64, Error> {
 
 fn does_not_fit(value: &Value, text: &str, what: &str) -> Error {
     Error::at(value.pos, format!("The number {} does not fit {}", text, what))
+}
+
+/// Why a type has no default that can be used where an argument is left out.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NoDefault {
+    /// The enum, by its name, has no default at all, since its first constructor leads back to it.
+    None(String),
+    /// The default has more nodes than the limit of the codec.
+    TooLarge,
+}
+
+/// Counts a node of a default against what is left of the limit.
+pub fn spend(budget: &mut usize) -> Result<(), NoDefault> {
+    if *budget == 0 {
+        return Err(NoDefault::TooLarge);
+    }
+    *budget -= 1;
+    Ok(())
+}
+
+/// The error for an argument that is left out, at the constructor, where its type has no default that can be used. The
+/// messages are `check`'s, with the codec's limit, and `param` is the name of the parameter.
+pub fn no_default(why: NoDefault, param: &str, limit: usize, pos: Pos) -> Error {
+    let message = match why {
+        NoDefault::None(ty) => format!("Type {} has no default value", ty),
+        NoDefault::TooLarge => format!(
+            "The default value of argument {} has more than {} nodes, which is too large; give argument {}",
+            param, limit, param
+        ),
+    };
+    Error::at(pos, message)
 }
 
 /// A string from its value.
@@ -671,6 +709,33 @@ mod tests {
         assert_eq!(
             read_float(&one("-3"), false).unwrap_err().message(),
             "Expected Float but found Int"
+        );
+    }
+
+    #[test]
+    fn a_const_is_named_in_lower_case_after_any_qualifier() {
+        for name in ["null", "_x", "local::unit", "com.example.Shapes::big"] {
+            assert!(is_const_name(name), "{}", name);
+        }
+        for name in ["None", "local::Circle", "com.example.shapes::Circle"] {
+            assert!(!is_const_name(name), "{}", name);
+        }
+    }
+
+    #[test]
+    fn a_default_spends_the_budget_and_says_why_it_cannot_be_used() {
+        let mut budget = 2;
+        assert_eq!(spend(&mut budget), Ok(()));
+        assert_eq!(spend(&mut budget), Ok(()));
+        assert_eq!(spend(&mut budget), Err(NoDefault::TooLarge));
+        let pos = Pos { line: 1, col: 4 };
+        assert_eq!(
+            no_default(NoDefault::None("Chain".into()), "chain", 10, pos).to_string(),
+            "Type Chain has no default value (line 1, col 4)"
+        );
+        assert_eq!(
+            no_default(NoDefault::TooLarge, "chain", 10, pos).message(),
+            "The default value of argument chain has more than 10 nodes, which is too large; give argument chain"
         );
     }
 

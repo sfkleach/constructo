@@ -1,11 +1,14 @@
 //! The Rust target: one file, which is the module of the root project, with a submodule for each other project of the
-//! run. This writes the types; the codec that reads and writes them is added to the same file.
+//! run. It has the types, and after them the codec that reads and writes them.
 //!
 //! Every path is written in full, as `::std::vec::Vec`, `::std::primitive::u64` or `self::Shape`, so that no name of
 //! the declarations can hide one that the file needs. A type parameter is the only name that is written bare.
 
+mod codec;
 mod names;
 mod regular;
+
+pub use codec::Defaults;
 
 use super::model::{Body, Enum, Model, Record, TypeRef};
 use crate::diagnostics::Diagnostic;
@@ -19,11 +22,12 @@ pub struct Generated {
     pub warnings: Vec<Diagnostic>,
 }
 
-/// Writes the Rust types of the model, or gives the errors for the types that Rust cannot hold, which are at their
-/// declarations.
-pub fn generate(model: &Model) -> Result<Generated, Vec<Diagnostic>> {
+/// Writes the Rust types of the model and their codec, whose settings have the defaults given, or gives the errors for
+/// the types and the consts that Rust cannot hold, which are at their declarations.
+pub fn generate(model: &Model, defaults: &Defaults) -> Result<Generated, Vec<Diagnostic>> {
     let names = Names::new(model);
-    let errors = regular::irregular(model, &names.index);
+    let mut errors = regular::irregular(model, &names.index);
+    errors.extend(codec::const_errors(model, &names.index));
     if !errors.is_empty() {
         return Err(errors);
     }
@@ -38,8 +42,17 @@ pub fn generate(model: &Model) -> Result<Generated, Vec<Diagnostic>> {
             root.name
         ));
     }
+    text.push_str(&format!(
+        "//! It needs the crate constructo-runtime {}.\n",
+        RUNTIME_VERSION
+    ));
     text.push_str("#![allow(non_camel_case_types, non_snake_case, dead_code, clippy::all)]\n");
-    for line in writer.module(model.root) {
+    for line in writer
+        .module(model.root)
+        .into_iter()
+        .chain(writer.codec(defaults))
+        .chain(writer.impls(model.root))
+    {
         push_line(&mut text, &line, 0);
     }
     for (project, info) in model.projects.iter().enumerate() {
@@ -49,7 +62,7 @@ pub fn generate(model: &Model) -> Result<Generated, Vec<Diagnostic>> {
         text.push('\n');
         text.push_str(&format!("/// The project `{}`.\n", info.name));
         text.push_str(&format!("pub mod {} {{\n", module));
-        for line in writer.module(project) {
+        for line in writer.module(project).into_iter().chain(writer.impls(project)) {
             push_line(&mut text, &line, 1);
         }
         text.push_str("}\n");
@@ -60,6 +73,11 @@ pub fn generate(model: &Model) -> Result<Generated, Vec<Diagnostic>> {
     warnings.sort_by_key(|w| (order(&w.file), w.pos));
     Ok(Generated { text, warnings })
 }
+
+/// The version of `constructo-runtime` that the generated code needs, as its major and minor numbers, which is that of
+/// `constructo`, since the two are released together. A version before 1.0 is compatible with those of the same minor
+/// number, so the file names no more, and changes only when a release could change what it needs.
+const RUNTIME_VERSION: &str = concat!(env!("CARGO_PKG_VERSION_MAJOR"), ".", env!("CARGO_PKG_VERSION_MINOR"));
 
 /// Adds a line at the level of indentation, leaving an empty line empty.
 fn push_line(text: &mut String, line: &str, level: usize) {
