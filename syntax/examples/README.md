@@ -91,3 +91,10 @@
 - Every values file here is copied into [the conformance suite](../conformance/README.md), in `conformance/examples`
   in the same folders, and a test of `constructo-runtime` fails if a copy is missing or differs. So a new or changed
   values example needs its copy, and its expected result made with `CONSTRUCTO_BLESS=1`.
+- `codegen`: examples for `constructo codegen --lang=rust`. `names.types` has the names that Rust needs changed: types
+  called like the items of std and like the names that the generated code adds, fields that are keywords or `_`, a
+  constructor called like an enum, and a parameter that no field holds; the functional test compiles its output and
+  checks its warnings. `shapes/` holds the two projects of the codegen task's scenario, and `shapes.rs` is the output
+  for `--project=shapes/shapes`, which the functional test compares with what is generated, so that a change to the
+  generated code is seen in review. Each file of `refused/` declares a type that Rust cannot hold, and its first line
+  is `// expect: <message>`.
