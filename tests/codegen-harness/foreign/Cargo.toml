@@ -1,0 +1,7 @@
+# A stand-in for a crate of a third party, such as uuid, whose types the scenario adopts. The orphan rule treats any
+# other crate alike, and the functests cannot fetch one from crates.io.
+[package]
+name = "foreign"
+version = "0.0.0"
+edition = "2021"
+publish = false

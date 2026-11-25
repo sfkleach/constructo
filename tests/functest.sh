@@ -2615,7 +2615,8 @@ expect_codegen_error "a file of adoptions that cannot be read" 2 "ERROR: Cannot 
     --lang=rust --adopt="$codegen_dir/missing.toml" "$CODEGEN/names.types"
 
 # The harness in tests/codegen-harness runs the generated code: it reads every value of the typed corpus and holds what
-# it writes to check and convert, and it tests the scenario, the names of a project, and the limits of a codec. It is
+# it writes to check and convert, and it tests the scenario with its adoptions, the names of a project, and the limits
+# of a codec. It is
 # built in a copy under _build/, with the modules that it needs generated beside its own source, and it prints a line
 # for each test, which is counted here.
 rm -rf "$(dirname "$0")/../_build/codegen-harness"
@@ -2626,7 +2627,7 @@ EXAMPLES_ROOT="$(cd "$(dirname "$0")/../syntax/examples" && pwd)"
 if "$CONSTRUCTO" codegen --lang=rust --out-file="$harness_dir/src/schema.rs" \
         "$EXAMPLES_ROOT/values/typed/schema.types" 2>"$harness_dir/err" \
     && "$CONSTRUCTO" codegen --lang=rust --out-file="$harness_dir/src/scenario.rs" \
-        --project="$CODEGEN/shapes/shapes" 2>"$harness_dir/err" \
+        --adopt="$CODEGEN/shapes/adopt.toml" --project="$CODEGEN/shapes/shapes" 2>"$harness_dir/err" \
     && "$CONSTRUCTO" codegen --lang=rust --dev --out-file="$harness_dir/src/names.rs" \
         --project="$CODEGEN/names-project/app" 2>"$harness_dir/err" \
     && (cd "$harness_dir" && cargo build --quiet) >"$harness_dir/cargo" 2>&1; then
