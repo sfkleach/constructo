@@ -1,0 +1,13 @@
+# The harness of the codegen functests. It is not a member of the workspace, since it depends on files that the
+# functests generate: they copy it to _build/codegen-harness, put the generated modules in its src folder, and build
+# it there, where the path to the runtime is the same.
+[package]
+name = "codegen-harness"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+constructo-runtime = { path = "../../constructo-runtime" }
+
+[workspace]

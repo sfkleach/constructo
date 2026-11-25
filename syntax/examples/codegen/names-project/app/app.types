@@ -1,0 +1,1 @@
+enum Scene = Scene([g::Shape]);

@@ -96,5 +96,10 @@
   constructor called like an enum, and a parameter that no field holds; the functional test compiles its output and
   checks its warnings. `shapes/` holds the two projects of the codegen task's scenario, and `shapes.rs` is the output
   for `--project=shapes/shapes`, which the functional test compares with what is generated, so that a change to the
-  generated code is seen in review. Each file of `refused/` declares a type that Rust cannot hold, and its first line
-  is `// expect: <message>`.
+  generated code is seen in review. `shapes/shapes/values/drawing.values` is the scenario's drawing, which the codegen
+  harness reads and writes. `names-project/` is a project whose `app` imports `lib` into two groups, one of which
+  renames a constructor and a const and hides another, so that the harness reads a name in each form that the project
+  reads, and writes it as the project writes it. Each file of `refused/` declares a type that Rust cannot hold, and
+  its first line is `// expect: <message>`.
+- `values/typed` is also read by the codegen harness, `tests/codegen-harness`, which has a table of the Rust type of
+  each value. A file that is added there has to be added to the table, or the functional test fails.

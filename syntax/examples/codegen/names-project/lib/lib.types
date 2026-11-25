@@ -1,0 +1,2 @@
+enum Shape = Circle, Square, Triangle;
+const unit: Shape = Circle;

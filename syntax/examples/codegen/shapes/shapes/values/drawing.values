@@ -1,0 +1,8 @@
+Drawing(
+  ids::Uuid("67e55044-10b1-426f-9247-bb680e5fe0c8"),
+  "Sketch",
+  [
+    Styled { item: unit_circle, colour: Some(Red), offset: { dx: 0, dy: 0 } },
+    Styled { item: Polygon[Point(0.0, 0.0), Point(x: 4.0), Point(y: 3.0)], colour: null, offset: { dy: -2, dx: +5 } }
+  ]
+);
