@@ -19,7 +19,7 @@ pub(crate) fn work_out(model: &mut Model) {
     // A field of a node holds its targets, so a target is on a cycle with the node exactly when the two are in one
     // strongly connected component.
     let graph = Graph::new(model, &index, false);
-    let component = graph.components();
+    let component = super::graph::components(&graph.edges);
     let boxed = |ty: &TypeRef, node: usize| {
         let mut targets = Vec::new();
         graph.held.targets(ty, &index, model.enums.len(), &mut targets);
@@ -51,7 +51,7 @@ pub(crate) fn work_out(model: &mut Model) {
         })
         .collect();
     let defaults = Graph::new(model, &index, true);
-    let default_component = defaults.components();
+    let default_component = super::graph::components(&defaults.edges);
     let has_default: Vec<bool> = model
         .enums
         .iter()
@@ -221,65 +221,5 @@ impl Graph {
             edges.push(out);
         }
         Graph { held, edges }
-    }
-
-    /// The strongly connected component of each node, by Tarjan's algorithm. It keeps its own stack, so that a long
-    /// chain of declarations does not overflow the stack of the thread.
-    fn components(&self) -> Vec<usize> {
-        const UNSEEN: usize = usize::MAX;
-        let count = self.edges.len();
-        let mut order = vec![UNSEEN; count];
-        let mut low = vec![0; count];
-        let mut on_stack = vec![false; count];
-        let mut component = vec![UNSEEN; count];
-        let mut stack = Vec::new();
-        let mut next_order = 0;
-        let mut next_component = 0;
-        for start in 0..count {
-            if order[start] != UNSEEN {
-                continue;
-            }
-            // Each entry is a node and how many of its edges have been followed.
-            let mut work = vec![(start, 0)];
-            order[start] = next_order;
-            low[start] = next_order;
-            next_order += 1;
-            stack.push(start);
-            on_stack[start] = true;
-            while let Some(&(node, followed)) = work.last() {
-                if let Some(&next) = self.edges[node].get(followed) {
-                    work.last_mut().expect("the work is not empty").1 += 1;
-                    if order[next] == UNSEEN {
-                        order[next] = next_order;
-                        low[next] = next_order;
-                        next_order += 1;
-                        stack.push(next);
-                        on_stack[next] = true;
-                        work.push((next, 0));
-                    } else if on_stack[next] {
-                        low[node] = low[node].min(order[next]);
-                    }
-                    continue;
-                }
-                work.pop();
-                if let Some(&(parent, _)) = work.last() {
-                    low[parent] = low[parent].min(low[node]);
-                }
-                if low[node] == order[node] {
-                    loop {
-                        let member = stack
-                            .pop()
-                            .expect("a node is on the stack until its component is found");
-                        on_stack[member] = false;
-                        component[member] = next_component;
-                        if member == node {
-                            break;
-                        }
-                    }
-                    next_component += 1;
-                }
-            }
-        }
-        component
     }
 }

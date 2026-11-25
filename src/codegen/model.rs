@@ -48,6 +48,8 @@ pub struct Project {
     pub imports: Vec<Import>,
     /// True for a project that is built in, such as the prelude.
     pub builtin: bool,
+    /// The indexes in `Model::files` of its types files, in order.
+    pub files: Vec<usize>,
 }
 
 /// An import of a project-file.
@@ -277,8 +279,9 @@ pub(crate) fn build(
                 })
                 .collect(),
             builtin: project.builtin,
+            files: Vec::new(),
         })
-        .collect();
+        .collect::<Vec<_>>();
     let types_files: Vec<(usize, usize, &ast::TypesFile)> = parsed
         .iter()
         .enumerate()
@@ -287,6 +290,10 @@ pub(crate) fn build(
             Parsed::Values(_) => None,
         })
         .collect();
+    let mut projects = projects;
+    for &(index, project, _) in &types_files {
+        projects[project].files.push(index);
+    }
     let mut enums = Vec::new();
     for &(index, project, file) in &types_files {
         builder.file = index;
