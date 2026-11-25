@@ -9,5 +9,6 @@ publish = false
 
 [dependencies]
 constructo-runtime = { path = "../../constructo-runtime" }
+foreign = { path = "foreign" }
 
 [workspace]

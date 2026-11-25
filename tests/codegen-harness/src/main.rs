@@ -2,14 +2,18 @@
 //! to `constructo check` and `constructo convert`. The functests generate its three modules:
 //!
 //! - `schema`, from `syntax/examples/values/typed/schema.types`, for the corpus of typed values;
-//! - `scenario`, from the project `syntax/examples/codegen/shapes/shapes`;
+//! - `scenario`, from the project `syntax/examples/codegen/shapes/shapes`, with the adoptions of
+//!   `syntax/examples/codegen/shapes/adopt.toml`, whose functions are in `adopt`, of the types of `paint` and of the
+//!   crate `foreign`, which stands in for a crate of a third party;
 //! - `names`, from the project `syntax/examples/codegen/names-project/app`.
 //!
 //! It is run as `codegen-harness CONSTRUCTO EXAMPLES OUT`, with the binary of `constructo`, the folder
 //! `syntax/examples`, and a folder for the files that it writes, and it prints a line for each test, `PASS NAME` or
 //! `FAIL NAME: WHY`, which the functests count.
 
+mod adopt;
 mod names;
+mod paint;
 mod scenario;
 mod schema;
 
@@ -390,6 +394,16 @@ impl Harness {
                 r#"Drawing(Uuid("67e55044-10b1-426f-9247-bb680e5fe0c8"), "T")"#.to_string(),
                 "id: Unknown constructor Uuid",
             ),
+            // The function of an adoption refuses a value that has the right form and is not valid, at the value.
+            (
+                r#"Drawing(ids::Uuid("not-a-uuid"), "T")"#.to_string(),
+                r#"id: "not-a-uuid" is not a UUID"#,
+            ),
+            // And the default of an argument that is left out, which is made by the same function.
+            (
+                r#"Drawing(title: "T")"#.to_string(),
+                r#"id: The default value of argument id is refused: "" is not a UUID"#,
+            ),
             (
                 format!(r#"Drawing({}, "T", [], 18446744073709551616)"#, id),
                 "layer: The number 18446744073709551616 does not fit Nat",
@@ -430,6 +444,55 @@ impl Harness {
             back.as_ref() == Ok(&huge),
             || format!("{:?}", back),
         );
+        self.adopted(&codec, &drawing);
+    }
+
+    /// The adopted types are read and written wherever they are: in a `Vec`, in an `Option`, as the argument of a
+    /// generic type, and with the arguments of a constructor of two parameters given to the function as a tuple.
+    fn adopted(&self, codec: &scenario::Codec, drawing: &scenario::Drawing) {
+        let id = r#"ids::Uuid("67e55044-10b1-426f-9247-bb680e5fe0c8")"#;
+        let other = r#"com.example.ids::Uuid("00000000-0000-0000-0000-000000000001")"#;
+        self.adopted_round::<Vec<foreign::Uuid>>(codec, "a Vec of a foreign type", &format!("[{}, {}]", id, other));
+        self.adopted_round::<Option<foreign::Uuid>>(codec, "an Option of a foreign type", &format!("Some({})", id));
+        self.adopted_round::<scenario::Styled<foreign::Uuid>>(
+            codec,
+            "a foreign type as the argument of a generic type",
+            &format!(
+                "Styled {{ item: {}, colour: Some(Blue), offset: {{ dx: 1, dy: 2 }} }}",
+                id
+            ),
+        );
+        self.adopted_round::<scenario::Styled<Vec<foreign::Point>>>(
+            codec,
+            "a foreign type of two arguments, in a Vec, as the argument of a generic type",
+            "Styled { item: [Point(1.0, 2.0), Point(y: 3.0)], colour: null, offset: { dx: 0, dy: 0 } }",
+        );
+        let mut custom = drawing.clone();
+        custom.shapes[0].colour = Some(paint::Colour::Custom(0x336699));
+        let written = codec.write(&custom).map_err(|e| e.to_string());
+        self.expect(
+            "a colour of the program's that has no Constructo form is not written",
+            written
+                .as_ref()
+                .is_err_and(|e| e == "shapes[0].colour.0: The colour #336699 has no Constructo form"),
+            || format!("{:?}", written),
+        );
+    }
+
+    /// Reads a value as a `T`, writes it, and reads that back as the same value.
+    fn adopted_round<T: PartialEq + Debug>(&self, codec: &scenario::Codec, name: &str, text: &str)
+    where
+        scenario::Codec: scenario::ReadValue<T> + scenario::WriteValue<T>,
+    {
+        let read = codec.read::<T>(text);
+        let back = read
+            .as_ref()
+            .map_err(Clone::clone)
+            .and_then(|value| codec.write(value))
+            .and_then(|written| codec.read::<T>(&written));
+        self.expect(name, matches!((&read, &back), (Ok(a), Ok(b)) if a == b), || {
+            format!("{:?}, read back as {:?}", read, back)
+        });
     }
 
     /// The names of a project with a group that renames and hides, and another group, are read in every form that the
