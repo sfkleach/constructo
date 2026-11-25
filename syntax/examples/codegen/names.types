@@ -1,0 +1,31 @@
+// Names that cannot be written in Rust as they are, or that would hide a name that the generated code needs. The
+// output must compile, and each renaming is a warning.
+
+// Types called like the items of std and like the names that the generated code adds.
+enum Vec = Vec;
+enum Box = Box(Nat);
+enum Result = Ok(Nat), Err(String);
+enum Codec = Codec;
+enum ReadValue = Read, Write(Nat);
+
+// Fields and parameters that are keywords, or that cannot be raw identifiers.
+enum Keywords = Keywords { type: Nat, self: Nat, self_: Nat, _: Nat, gen: Nat, async: String };
+enum Positions = Positions(Nat, String, _0: Bool);
+enum Generic<Self> = Generic(Self);
+
+// Records whose names would hide a primitive, or are keywords.
+enum Records = Records { a: { u64: Nat }, b: { self: Nat }, c: { type: Nat }, d: {} };
+
+// A constructor called like an enum, and one whose name with its enum's is taken too.
+enum Circle = Round(Float);
+enum ShapeCircle = Other(Nat);
+enum Shape = Circle { r: Float }, Square(Float), Shape;
+
+// A parameter that no field holds, through another type as well.
+enum Phantom<_T> = Phantom;
+enum Holder<T> = Holder(Phantom<T>), Empty;
+
+// Recursion that needs boxes, and the box inside an Option.
+enum Expr = Num(Nat), Neg(Term);
+enum Term = Lit(Nat), Paren(Expr);
+enum Node = Node { value: Nat, next: Node? };

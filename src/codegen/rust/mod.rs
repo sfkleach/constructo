@@ -54,10 +54,11 @@ pub fn generate(model: &Model) -> Result<Generated, Vec<Diagnostic>> {
         }
         text.push_str("}\n");
     }
-    Ok(Generated {
-        text,
-        warnings: names.warnings.clone(),
-    })
+    // The warnings are made a kind at a time, and are given in the order of the files and the places in them.
+    let order = |file: &str| model.files.iter().position(|f| f == file).unwrap_or(model.files.len());
+    let mut warnings = names.warnings.clone();
+    warnings.sort_by_key(|w| (order(&w.file), w.pos));
+    Ok(Generated { text, warnings })
 }
 
 /// Adds a line at the level of indentation, leaving an empty line empty.

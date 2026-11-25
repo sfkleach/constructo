@@ -1,0 +1,3 @@
+// expect: ERROR: Rust cannot hold the enum Nested, since it holds itself with other arguments
+// A type that holds itself with other arguments, which Rust cannot hold, though `check` accepts it.
+enum Nested<T> = Flat(T), Deep(Nested<[T]>);

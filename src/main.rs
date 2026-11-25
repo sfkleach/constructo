@@ -12,8 +12,9 @@ use constructo::typed_files::{first_token, types_end, FirstToken};
 use constructo::values_text::render;
 use constructo::verify::{read_lock, update_lock_with, verify_lock_with};
 use constructo::{
-    check_in_projects, convert_typed, convert_typed_back, convert_typed_lines, query_typed, source_kind, syntax_error,
-    CheckOptions, Config, Experimental, InputFile, Outcome, Project, ProjectSet, QueryTypedError, Source, SourceKind,
+    build_model, check_in_projects, convert_typed, convert_typed_back, convert_typed_lines, query_typed, source_kind,
+    syntax_error, CheckOptions, Config, Experimental, InputFile, Outcome, Project, ProjectSet, QueryTypedError, Source,
+    SourceKind,
 };
 use std::collections::{HashSet, VecDeque};
 use std::ffi::OsString;
@@ -334,6 +335,65 @@ The settings file is read for [global] and [experimental].",
         no_experimental: Vec<Feature>,
 
         /// The files whose values are queried
+        #[arg(value_name = "FILES", required_unless_present_any = ["stdin", "project"])]
+        files: Vec<PathBuf>,
+    },
+
+    /// Write the code that a program in another language uses to read and write the values of the types
+    #[command(after_help = "\
+The types are checked as `check` checks them, values and all, and nothing is written if there is an error. A name \
+that has to change in the target language, because it is a keyword or it clashes, is reported as a warning. For \
+example:
+
+    constructo codegen --lang=rust --project=shapes --out-file=src/shapes.rs")]
+    Codegen {
+        /// The language to write: rust, which writes one file, the module of the project
+        #[arg(long, value_name = "LANG")]
+        lang: String,
+
+        /// Write the code to this file, which is replaced as a whole, instead of to the standard output
+        #[arg(long, value_name = "FILE_PATH")]
+        out_file: Option<PathBuf>,
+
+        /// Write the code to this folder, for a language that writes more than one file
+        #[arg(long, value_name = "FOLDER")]
+        out_dir: Option<PathBuf>,
+
+        /// Also read the standard input as if it were another file
+        #[arg(long)]
+        stdin: bool,
+
+        #[command(flatten)]
+        typing: TypingArgs,
+
+        /// Switch on experimental features. On its own it switches on all of them, and `-x=FEATURE` switches on just
+        /// that one. The option can be repeated, and for each feature the last of this and --no-experimental wins.
+        #[arg(
+            short = 'x',
+            long,
+            value_name = "FEATURE",
+            value_enum,
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "all",
+            action = ArgAction::Append
+        )]
+        experimental: Vec<Feature>,
+
+        /// Switch off experimental features. On its own it switches off all of them, and `--no-experimental=FEATURE`
+        /// switches off just that one. The option can be repeated.
+        #[arg(
+            long,
+            value_name = "FEATURE",
+            value_enum,
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "all",
+            action = ArgAction::Append
+        )]
+        no_experimental: Vec<Feature>,
+
+        /// The types files, and any values files, which are checked with the types
         #[arg(value_name = "FILES", required_unless_present_any = ["stdin", "project"])]
         files: Vec<PathBuf>,
     },
@@ -780,6 +840,68 @@ fn main() -> ExitCode {
                 Err(code) => return code,
             };
             query_typed_files(&checked, type_expr.as_deref(), compact, stdin, &options, &set, &files)
+        }
+        Command::Codegen {
+            lang,
+            out_file,
+            out_dir,
+            stdin,
+            typing,
+            experimental: _,
+            no_experimental: _,
+            files,
+        } => {
+            // The language and the output are checked before anything is read, since they are mistakes of the
+            // invocation that no input can put right.
+            if lang != "rust" {
+                eprintln!("ERROR: Unknown language {}: the languages are rust", lang);
+                return ExitCode::from(EXIT_USAGE);
+            }
+            if out_dir.is_some() {
+                let both = if out_file.is_some() {
+                    "--out-file and --out-dir cannot both be given. "
+                } else {
+                    ""
+                };
+                eprintln!(
+                    "ERROR: {}Rust writes one file: use --out-file=FILE_PATH, or neither for the standard output",
+                    both
+                );
+                return ExitCode::from(EXIT_USAGE);
+            }
+            let codegen_matches = matches
+                .subcommand_matches("codegen")
+                .expect("the codegen subcommand was given");
+            let from_file = config.check_options();
+            let TypingArgs {
+                prelude,
+                no_prelude,
+                widening,
+                no_widening,
+                allow_refs,
+                no_allow_refs,
+                infer_limit,
+                default_limit,
+                dev,
+                no_dev,
+                project,
+            } = typing;
+            let options = CheckOptions {
+                type_check: true,
+                widening: setting(widening, no_widening, from_file.widening),
+                continue_after_error: false,
+                allow_refs: setting(allow_refs, no_allow_refs, from_file.allow_refs),
+                infer_limit: infer_limit.unwrap_or(from_file.infer_limit),
+                default_limit: default_limit.unwrap_or(from_file.default_limit),
+                experimental: experimental(from_file.experimental, &feature_changes(codegen_matches)),
+            };
+            let load_prelude = setting(prelude, no_prelude, config.prelude());
+            let dev = setting(dev, no_dev, config.dev());
+            let set = match load_projects(project.as_deref(), load_prelude, dev, cache.as_deref()) {
+                Ok(set) => set,
+                Err(code) => return code,
+            };
+            codegen(stdin, out_file.as_deref(), &options, &set, &files)
         }
         Command::Check {
             stdin,
@@ -1493,6 +1615,64 @@ fn convert_typed_files(
             ExitCode::from(EXIT_ERRORS)
         }
     }
+}
+
+/// Writes the Rust of the types, to the file or to the standard output. The warnings are written whatever happens to
+/// the output, and nothing is written if the inputs have an error or Rust cannot hold a type.
+fn codegen(
+    stdin: bool,
+    out_file: Option<&Path>,
+    options: &CheckOptions,
+    set: &ProjectSet,
+    files: &[PathBuf],
+) -> ExitCode {
+    let sources = match read_sources(set, files, stdin, options.experimental) {
+        Ok(sources) => sources,
+        Err(code) => return code,
+    };
+    let generated = build_model(&sources, &set.layout(sources.len()), options)
+        .and_then(|model| constructo::codegen::rust::generate(&model));
+    let generated = match generated {
+        Ok(generated) => generated,
+        Err(diagnostics) => {
+            for diagnostic in &diagnostics {
+                eprintln!("{}", diagnostic);
+            }
+            return ExitCode::from(EXIT_ERRORS);
+        }
+    };
+    for warning in &generated.warnings {
+        eprintln!("{}", warning);
+    }
+    let written = match out_file {
+        Some(path) => replace_file(path, &generated.text),
+        None => write_stdout(&generated.text),
+    };
+    match written {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(code) => code,
+    }
+}
+
+/// Writes the text to a new file beside the one at the path, which then takes its place, so that the file is either
+/// the old one or the new one, and never part of either.
+fn replace_file(path: &Path, text: &str) -> Result<(), ExitCode> {
+    let Some(name) = path.file_name() else {
+        eprintln!("ERROR: Cannot write {}: it is not the path of a file", path.display());
+        return Err(ExitCode::from(EXIT_USAGE));
+    };
+    let mut temporary = OsString::from(".");
+    temporary.push(name);
+    temporary.push(format!(".{}.tmp", std::process::id()));
+    let temporary = path.with_file_name(temporary);
+    let result = std::fs::write(&temporary, text).and_then(|()| std::fs::rename(&temporary, path));
+    if let Err(e) = result {
+        // The new file is only removed if it was made, and a failure to remove it is not the error to report.
+        let _ = std::fs::remove_file(&temporary);
+        eprintln!("ERROR: Cannot write {}: {}", path.display(), e);
+        return Err(ExitCode::from(EXIT_USAGE));
+    }
+    Ok(())
 }
 
 fn check(

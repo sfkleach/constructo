@@ -2470,6 +2470,125 @@ rm -f "$query_dir/out" "$query_dir/err" "$query_dir/moves.values" "$query_dir/ar
 rmdir "$query_dir"
 echo ""
 
+echo "=== codegen ==="
+# The generated Rust is compiled, in a folder under _build/ that each run starts afresh. The examples of codegen are
+# in syntax/examples/codegen.
+CODEGEN="$(dirname "$0")/../syntax/examples/codegen"
+PROJECT_EXAMPLES="$(dirname "$0")/../syntax/examples/project"
+rm -rf "$(dirname "$0")/../_build/functest-codegen"
+mkdir -p "$(dirname "$0")/../_build/functest-codegen"
+codegen_dir="$(cd "$(dirname "$0")/../_build/functest-codegen" && pwd)"
+
+# Generates the Rust for the arguments, and compiles it as a library with every warning an error, in each edition that
+# is given. The output of the run is kept in the folder, for a failure to be looked at.
+expect_compiles() {
+    local name="$1" editions="$2"; shift 2
+    local out="$codegen_dir/out.rs" actual=0
+    "$CONSTRUCTO" codegen --lang=rust --out-file="$out" "$@" >/dev/null 2>"$codegen_dir/err" || actual=$?
+    if [[ "$actual" -ne 0 ]]; then
+        fail "$name (codegen exited $actual: $(head -1 "$codegen_dir/err"))"
+        return
+    fi
+    local edition
+    for edition in $editions; do
+        if ! rustc --edition="$edition" --crate-type=lib --crate-name=generated -D warnings \
+            --out-dir="$codegen_dir" "$out" >"$codegen_dir/rustc" 2>&1; then
+            fail "$name (rustc --edition=$edition: $(grep -m1 '^error' "$codegen_dir/rustc"))"
+            return
+        fi
+    done
+    pass "$name"
+}
+
+for f in "$EXAMPLES"/valid/*.types; do
+    expect_compiles "codegen compiles: types/valid/$(basename "$f")" 2021 "$f"
+done
+# Every folder of a valid project example is a project, whether it is the one that the functests check or one that it
+# imports. A reference to a const is allowed, as one example needs it.
+while IFS= read -r project_file; do
+    folder="$(dirname "$project_file")"
+    expect_compiles "codegen compiles: project/${folder#"$PROJECT_EXAMPLES"/}" 2021 --dev --allow-refs \
+        --project="$folder"
+done < <(find "$PROJECT_EXAMPLES"/valid "$PROJECT_EXAMPLES"/valid-imports "$PROJECT_EXAMPLES"/valid-names \
+    "$PROJECT_EXAMPLES"/valid-prelude -name constructo.toml | sort)
+expect_compiles "codegen compiles: the names that Rust needs changed" "2021 2024" "$CODEGEN/names.types"
+expect_compiles "codegen compiles: the shapes scenario" "2021 2024" --project="$CODEGEN/shapes/shapes"
+
+# The output for the scenario is checked in, so that a change to it is seen in review.
+actual=0
+"$CONSTRUCTO" codegen --lang=rust --project="$CODEGEN/shapes/shapes" >"$codegen_dir/shapes.rs" 2>&1 || actual=$?
+if [[ "$actual" -eq 0 ]] && cmp -s "$codegen_dir/shapes.rs" "$CODEGEN/shapes.rs"; then
+    pass "codegen: the shapes scenario is as checked in"
+else
+    fail "codegen: the shapes scenario differs from $CODEGEN/shapes.rs (exit $actual)"
+fi
+
+# Each renaming is a warning at its declaration, and the run succeeds.
+actual=0
+"$CONSTRUCTO" codegen --lang=rust "$CODEGEN/names.types" >/dev/null 2>"$codegen_dir/err" || actual=$?
+expected="WARNING: The constructor Circle is ShapeCircle_2 in Rust, since the enum Circle has its name and \
+ShapeCircle is taken ($CODEGEN/names.types, line 22, col 14)"
+if [[ "$actual" -eq 0 ]] && grep -qxF "$expected" "$codegen_dir/err" && [[ "$(wc -l <"$codegen_dir/err")" -eq 11 ]]
+then
+    pass "codegen: every renaming is a warning at its declaration"
+else
+    fail "codegen: the warnings for renamings (exit $actual): $(cat "$codegen_dir/err")"
+fi
+
+# A type that Rust cannot hold is an error, with the message on the first line of its file.
+for f in "$CODEGEN"/refused/*.types; do
+    expected="$(head -1 "$f" | sed 's|^// expect: ||')"
+    actual=0
+    err="$("$CONSTRUCTO" codegen --lang=rust "$f" 2>&1 >/dev/null)" || actual=$?
+    if [[ "$actual" -eq 1 && "$err" == "$expected"* ]]; then
+        pass "codegen refused: $(basename "$f")"
+    else
+        fail "codegen refused: $(basename "$f") (expected exit 1 with '$expected', got exit $actual and '$err')"
+    fi
+done
+
+# The usage errors, with exit code 2 and the message that names the right option.
+expect_codegen_error() {
+    local name="$1" code="$2" expected="$3"; shift 3
+    local actual=0 err
+    err="$("$CONSTRUCTO" codegen "$@" 2>&1 >/dev/null)" || actual=$?
+    if [[ "$actual" -eq "$code" && "$err" == *"$expected"* ]]; then
+        pass "codegen: $name"
+    else
+        fail "codegen: $name (expected exit $code with '$expected', got exit $actual and '$err')"
+    fi
+}
+expect_codegen_error "an unknown language" 2 "ERROR: Unknown language python: the languages are rust" \
+    --lang=python "$CODEGEN/names.types"
+expect_codegen_error "no language" 2 "--lang <LANG>" "$CODEGEN/names.types"
+expect_codegen_error "a folder for Rust" 2 \
+    "ERROR: Rust writes one file: use --out-file=FILE_PATH, or neither for the standard output" \
+    --lang=rust --out-dir="$codegen_dir/package" "$CODEGEN/names.types"
+expect_codegen_error "both a file and a folder" 2 "ERROR: --out-file and --out-dir cannot both be given." \
+    --lang=rust --out-dir="$codegen_dir/package" --out-file="$codegen_dir/both.rs" "$CODEGEN/names.types"
+expect_codegen_error "a file that cannot be written" 2 "ERROR: Cannot write $codegen_dir/missing/out.rs" \
+    --lang=rust --out-file="$codegen_dir/missing/out.rs" "$CODEGEN/names.types"
+[[ ! -e "$codegen_dir/package" && ! -e "$codegen_dir/both.rs" ]] \
+    && pass "codegen: a usage error writes nothing" || fail "codegen: a usage error wrote something"
+
+# An error in the inputs, a value included, writes nothing, and leaves the file that is there as it was.
+printf 'enum A = A(Nat);\n' >"$codegen_dir/a.types"
+printf 'A("no");\n' >"$codegen_dir/a.values"
+printf 'old\n' >"$codegen_dir/kept.rs"
+expect_codegen_error "an error in a value" 1 "ERROR: Expected Nat" \
+    --lang=rust --out-file="$codegen_dir/kept.rs" "$codegen_dir/a.types" "$codegen_dir/a.values"
+[[ "$(cat "$codegen_dir/kept.rs")" == "old" ]] \
+    && pass "codegen: an error leaves the file as it was" || fail "codegen: an error changed the file"
+# A run that succeeds replaces the file, with what it would write to the standard output, and leaves nothing beside it.
+"$CONSTRUCTO" codegen --lang=rust --out-file="$codegen_dir/kept.rs" "$codegen_dir/a.types"
+"$CONSTRUCTO" codegen --lang=rust "$codegen_dir/a.types" >"$codegen_dir/a.rs"
+if cmp -s "$codegen_dir/kept.rs" "$codegen_dir/a.rs" && [[ -z "$(find "$codegen_dir" -name '.*.tmp')" ]]; then
+    pass "codegen: the file is replaced with the output"
+else
+    fail "codegen: the file is not the output, or a new file was left beside it"
+fi
+echo ""
+
 TOTAL=$(( PASS + FAIL ))
 echo "Results: $PASS/$TOTAL passed"
 if [[ $FAIL -gt 0 ]]; then

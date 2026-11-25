@@ -1,0 +1,7 @@
+[project]
+name = "com.example.shapes"
+
+[[import]]
+project-name = "com.example.ids"
+group = "ids"
+path = "../ids"
