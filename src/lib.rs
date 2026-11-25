@@ -730,6 +730,7 @@ fn check_with_layout(
     if let ValueMode::Model(modelling) = mode {
         if type_checked && found.is_empty() {
             modelling.model = Some(codegen::model::build(
+                &file_names,
                 &parsed_sources,
                 layout,
                 &resolution,
