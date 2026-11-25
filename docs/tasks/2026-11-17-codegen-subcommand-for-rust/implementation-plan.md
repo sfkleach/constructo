@@ -33,7 +33,7 @@ third raised only questions of its own language, which is the sign that the comm
   `tests/functest.sh`. A step that adds a kind of test adds it to one of these, so that it runs every time.
 - **The decisions are written by the step that implements them**, so that each is checked against working code when
   it is written. The table at the end gives each entry of the draft's "Decisions to write" a step. The next number is
-  0051.
+  0055.
 - **Three pull requests**, so that the large mechanical change is merged before the new code depends on it:
   - the design and steps 1 and 2, which change no behaviour and touch every import of the six modules;
   - steps 3, 4 and 5, which give a working codec without adoption;
@@ -138,6 +138,11 @@ no default at all, and not the default of every type, and the module name of a p
 - **Done when** every example compiles, and the warnings for renamings are as the draft says.
 
 ## Step 5: Rust, the codec
+
+*Done,* as [plan-step5.md](plan-step5.md) says: the codec in the generated file, the module `codec` of the runtime,
+the forms of a name that the root reads in the model, the codegen harness in `tests/codegen-harness`, and decisions 51
+to 54. The impls of a project are in its module, each helper of a generic impl is given its type, and `read_tree` and
+serde are not added.
 
 - **What it writes:** the traits `ReadValue`, `WriteValue` and `DefaultValue`, generated with the codec; the `Codec`,
   with its tables of names and of consts, and `codec()`; and the impls for every type and for `u64`, `i64`, `f64`,

@@ -209,6 +209,31 @@ The outline gives step 5 seven entries of the draft's "Decisions to write". They
 4. The harness and the functests beside it.
 5. The decisions, and the draft and the outline brought up to date.
 
+## As it was built
+
+*Done,* in the five commits above, with decisions 51 to 54. What the plan did not say:
+
+- **The impls for the types of a project are in its module,** not at the root, and every helper of a generic impl is
+  given its type, as `self.field::<Box<self::List<T>>>(...)`. Rust takes the type of a call from the bound of the impl
+  that it is in, `ReadValue<T>`, before the types around it, so the impl for `Vec<T>` did not compile without it, and a
+  part's type is written as in its own module.
+- **Every path in the codec is written in full,** `::std::result::Result::Ok` included, since a constructor can be
+  called `Ok` or `Some`. No name is reserved beyond those of step 4.
+- **A default that cannot be given is a `NoDefault`,** not a `String`, and the runtime has `spend`, `no_default` and
+  `is_const_name` as well as what the plan listed. A path in an error has a third kind of step, `Position`, for a
+  parameter with no name.
+- **The header says the version of the runtime** as its major and minor numbers, `0.1`, so that the checked-in output
+  changes only when a release could change what it needs.
+- **The part of the codec that is the same in every file** is a template, `src/codegen/rust/codec.rs.in`.
+- **The forms of a name that the root reads** are worked out by trying each candidate with the resolver's own
+  function, so that they are the ones that `check` reads by construction.
+- **The harness runs `check` and `convert` itself,** given the path of the binary, and prints a line for each test,
+  which the functest counts. It reads the corpus, the scenario's drawing, which is now in
+  `syntax/examples/codegen/shapes/shapes/values/`, and a project with a group that renames and hides, in
+  `syntax/examples/codegen/names-project/`. It is outside the workspace, so `cargo fmt` and clippy do not see it.
+- **Not tested yet:** a number in the corpus that is not in its shortest form, which the runtime's unit tests cover,
+  and the two refusals of the scenario that need adoption, a string that is not a UUID and the id left out.
+
 ## Done when
 
 - Every value of the corpus passes the oracle, or is refused, as the harness's table says.
