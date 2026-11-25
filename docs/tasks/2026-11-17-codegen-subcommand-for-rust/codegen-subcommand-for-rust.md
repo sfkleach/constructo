@@ -634,7 +634,8 @@ enum List<T> { Nil, Cons(Cons<T>) }
   an enum with one constructor, would have a parameter that is not used, and it
   needs a hidden `PhantomData`. An enum of several constructors with such a
   parameter needs one too. It is the one case where the generated type has
-  something that the declaration does not.
+  something that the declaration does not. *Decided* in decision 49: such a
+  parameter is left out of the Rust type, and out of every use of it.
 
 Recursion, which needs the `Box` of `Cons`, is below.
 
@@ -760,7 +761,9 @@ pub struct Paren(pub Box<Expr>);    // an Expr can hold a Term by value
   but the bound `Codec: ReadValue<Nested<Vec<T>>>`, inside the impl of
   `ReadValue<Nested<T>>`, may be more than Rust's trait solver can follow. If it
   is, such a type needs a reader that is written out and not bound. The test of
-  step 4, which compiles the output, has one.
+  step 4, which compiles the output, has one. *Found* in step 4: the types alone
+  fail, since Rust's drop-check overflows as soon as a value is made, so the
+  Rust target refuses such a type, as decision 49 says.
 - **Deep values.** The parser's limit on nesting (decision 43) bounds how deep
   the reader goes. A program can build a value that is deeper, such as a long
   chain of `Cons`, and the writer, which is recursive, applies the same limit and
@@ -1178,7 +1181,7 @@ names.
 - That how the names that the generator adds avoid Constructo names is the
   target's choice, provided that they never clash, the ones the program calls
   are fixed, and every renaming is reported: a `_` that yields in Rust and
-  Python, a `$` in TypeScript.
+  Python, a `$` in TypeScript. *Written:* decision 49, for Rust.
 - That names and consts are resolved as the value is read and written, and not
   in a pass of their own.
 - That a generated class may give a named parameter its default, from the
@@ -1200,6 +1203,7 @@ names.
   declarations show that it is exact, with `Option` in Python as the example.
 - That a target writes one file or a folder, with `--out-file` and `--out-dir`,
   and that a folder belongs to the generator, guarded by a marker file.
+  *Written:* decision 50.
 - That every other target has a runtime of its own, held to the syntax by a
   conformance suite whose expected results are Constructo text, and that every
   runtime makes the tree of a value public. *Written:* decision 47.
@@ -1207,7 +1211,7 @@ names.
   project and not in the types, so that an application can have more than one
   codec, and that the generated code has a Rust module for each project.
 - How the modules and the names in Rust are chosen: the root is the file, the rest
-  are flat, and a clash is numbered.
+  are flat, and a clash is numbered. *Written:* decision 49.
 - How a record type without a name is named, the handling of consts, and the
   defaults of omitted arguments, once chosen. *Written:* decision 48, for the
   model; how the codec reads consts and builds defaults is step 5's.

@@ -33,7 +33,7 @@ third raised only questions of its own language, which is the sign that the comm
   `tests/functest.sh`. A step that adds a kind of test adds it to one of these, so that it runs every time.
 - **The decisions are written by the step that implements them**, so that each is checked against working code when
   it is written. The table at the end gives each entry of the draft's "Decisions to write" a step. The next number is
-  0049.
+  0051.
 - **Three pull requests**, so that the large mechanical change is merged before the new code depends on it:
   - the design and steps 1 and 2, which change no behaviour and touch every import of the six modules;
   - steps 3, 4 and 5, which give a working codec without adoption;
@@ -114,6 +114,10 @@ no default at all, and not the default of every type, and the module name of a p
 - **Done when** the model of every valid types example and project example can be built.
 
 ## Step 4: Rust, the types
+
+*Done,* as [plan-step4.md](plan-step4.md) says: `codegen::rust`, the command, the examples in
+`syntax/examples/codegen/`, and decisions 49 and 50. A parameter that no field holds is left out rather than given a
+`PhantomData`, and a type that holds itself with other arguments is refused, since Rust cannot hold it.
 
 - **The command:** `constructo codegen --lang=rust` with `--project`, the inputs of `check`, and `--out-file`, else the
   standard output, written to a new file that then takes the place of the old one. `--out-dir` with `--lang=rust` is a
@@ -236,8 +240,8 @@ this task implements it.
 ## Risks
 
 - **The trait solver.** The draft notes that a bound such as `Codec: ReadValue<Nested<Vec<T>>>` inside the impl of
-  `ReadValue<Nested<T>>` may be more than Rust can follow. Step 4's tests compile the types only, so it is first met
-  in step 5. A case for it goes in step 5's first tests, so that a change of approach is found early.
+  `ReadValue<Nested<T>>` may be more than Rust can follow. *Settled in step 4:* the types alone fail Rust's
+  drop-check, so such a type is refused before any codec is written, and step 5 does not meet it.
 - **The size of the workspace change.** Step 2 touches the build of everything. It is kept to the move and the
   re-exports, with no other change, so that the diff can be reviewed as a move.
 - **The corpus and its types.** If many values of the corpus need a `// type:` comment, step 5 may instead have the
