@@ -164,9 +164,9 @@ no default at all, and not the default of every type, and the module name of a p
     compares the two with consts and defaults filled in, and needs no new oracle;
   - with the names set to `full`, the same, with every name written in full.
 
-  The harness reads each value into a type, and a values file does not say its type, so the corpus gains a comment
-  `// type: TYPE` for each value whose type cannot be told from its constructor, which the step's plan checks is
-  few. Beside the corpus: two projects with a type of the same name, read by two codecs in one program; the shapes
+  The harness reads each value into a type, and a values file does not say its type, so the harness has a table of
+  the Rust type of each value of the corpus, as [plan-step5.md](plan-step5.md) decides, and the corpus does not
+  change. Beside the corpus: two projects with a type of the same name, read by two codecs in one program; the shapes
   scenario read, written and read back, as its spike does; and each refusal in the table of the Rust scenario.
 - **Done when** the corpus passes the oracle, and the scenario runs as the spike did.
 
@@ -244,8 +244,9 @@ this task implements it.
   drop-check, so such a type is refused before any codec is written, and step 5 does not meet it.
 - **The size of the workspace change.** Step 2 touches the build of everything. It is kept to the move and the
   re-exports, with no other change, so that the diff can be reviewed as a move.
-- **The corpus and its types.** If many values of the corpus need a `// type:` comment, step 5 may instead have the
-  harness ask `check` for the type of each value, which `check` does not yet report.
+- **The corpus and its types.** About twenty of the fifty valid values have a type that their constructor does not
+  tell. *Settled in the plan of step 5:* the harness has a table of the type of every value, and the corpus does not
+  change.
 - **Compile time of the tests.** The functests of steps 4 and 5 run `rustc` and `cargo`. The harness is one crate for
   the whole corpus, and it shares `_build/target`, so that it is built once a run.
 
