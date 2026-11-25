@@ -165,6 +165,9 @@ pub struct Constructor {
     pub body: Body,
     /// The form in which the root project writes the constructor: bare, else through a group, else in full.
     pub written: Written,
+    /// Every name by which a values file of the root project refers to the constructor, as
+    /// `Resolution::read_in_project` gives them: the full name, and each other form that resolves to it there.
+    pub read: Vec<String>,
 }
 
 /// What a constructor holds.
@@ -238,6 +241,8 @@ pub struct Const {
     /// The value, with every name written in full, as `com.example.shapes::Circle`. A reference to another const
     /// stays a reference.
     pub value: Value,
+    /// Every name by which a values file of the root project refers to the const, as for `Constructor::read`.
+    pub read: Vec<String>,
 }
 
 /// The name of the `index`th parameter of a record type without a name.
@@ -308,6 +313,7 @@ pub(crate) fn build(
             consts.push(builder.const_decl(constant, project, inferred));
         }
     }
+    read_names(&mut enums, &mut consts, layout.root, resolution);
     let mut model = Model {
         projects,
         root: layout.root,
@@ -318,6 +324,24 @@ pub(crate) fn build(
     };
     super::recursion::work_out(&mut model);
     model
+}
+
+/// Gives each constructor and const the names by which a values file of the root project refers to it, which are
+/// worked out for all of them at once.
+fn read_names(enums: &mut [Enum], consts: &mut [Const], root: usize, resolution: &Resolution) {
+    let names: Vec<FullName> = enums
+        .iter()
+        .flat_map(|e| e.constructors.iter().map(|c| c.name.clone()))
+        .chain(consts.iter().map(|c| c.name.clone()))
+        .collect();
+    let declarations: Vec<(&str, &str)> = names.iter().map(|n| (n.local.as_str(), n.project.as_str())).collect();
+    let mut read = resolution.read_in_project(root, &declarations).into_iter();
+    for constructor in enums.iter_mut().flat_map(|e| e.constructors.iter_mut()) {
+        constructor.read = read.next().unwrap_or_default();
+    }
+    for constant in consts.iter_mut() {
+        constant.read = read.next().unwrap_or_default();
+    }
 }
 
 /// What is built up while the declarations are met: the record types without a name, and how to find each by its
@@ -391,6 +415,7 @@ impl Builder {
                     at: self.at(variant.pos),
                     body,
                     written,
+                    read: Vec::new(),
                 }
             })
             .collect();
@@ -438,6 +463,7 @@ impl Builder {
             params,
             ty,
             value,
+            read: Vec::new(),
         }
     }
 
@@ -1142,6 +1168,90 @@ mod tests {
         assert_eq!(
             constructor(&model, "Mid").written,
             Written::Group("mid".into(), "Mid".into())
+        );
+    }
+
+    /// The names that the root reads for the constructor or const, as strings.
+    fn read_of(model: &Model, local: &str) -> Vec<String> {
+        match model.consts.iter().find(|c| c.name.local == local) {
+            Some(constant) => constant.read.clone(),
+            None => constructor(model, local).read.clone(),
+        }
+    }
+
+    #[test]
+    fn the_root_reads_a_name_in_full_through_each_of_its_groups_and_bare_from_local() {
+        let model = scenario();
+        assert_eq!(read_of(&model, "Uuid"), ["com.example.ids::Uuid", "ids::Uuid"]);
+        assert_eq!(
+            read_of(&model, "Circle"),
+            ["com.example.shapes::Circle", "Circle", "local::Circle"]
+        );
+        assert_eq!(
+            read_of(&model, "None"),
+            ["constructo.prelude::None", "None", "local::None"]
+        );
+        assert_eq!(
+            read_of(&model, "unit_circle"),
+            ["com.example.shapes::unit_circle", "unit_circle", "local::unit_circle"]
+        );
+        assert_eq!(
+            read_of(&model, "null"),
+            ["constructo.prelude::null", "null", "local::null"]
+        );
+    }
+
+    #[test]
+    fn the_root_reads_a_renamed_name_by_its_new_name_and_a_hidden_one_through_another_group() {
+        let lib: &[&str] = &["enum Shape = Circle, Square;"];
+        let app: &[&str] = &["enum Scene = Scene;"];
+        let at = crate::diagnostics::Pos { line: 1, col: 1 };
+        let renamed = ImportInfo {
+            rename: vec![("Round".into(), "Circle".into(), at)],
+            ..import("g", 1)
+        };
+        let hidden = ImportInfo {
+            hide: vec![("Circle".into(), at)],
+            ..import("g", 1)
+        };
+        let cases: [(Vec<ImportInfo>, &[&str], &[&str]); 3] = [
+            (
+                vec![renamed],
+                &["example.lib::Circle", "g::Round"],
+                &["Circle", "g::Circle", "Round"],
+            ),
+            (
+                vec![hidden, import("h", 1)],
+                &["example.lib::Circle", "h::Circle"],
+                &["Circle", "g::Circle"],
+            ),
+            // A project that the root does not import is read only in full.
+            (vec![], &["example.lib::Circle"], &["Circle", "local::Circle"]),
+        ];
+        for (imports, read, refused) in cases {
+            let projects = [
+                project("example.lib", vec![], lib),
+                project("example.app", imports, app),
+            ];
+            let model = model_of(&projects, None).unwrap();
+            assert_eq!(read_of(&model, "Circle"), read);
+            // Each name is one that check accepts in a values file of the root, and the others are not.
+            for name in read {
+                assert!(model_of(&projects, Some(name)).is_ok(), "{} is refused", name);
+            }
+            for name in refused {
+                assert!(model_of(&projects, Some(name)).is_err(), "{} is accepted", name);
+            }
+        }
+    }
+
+    #[test]
+    fn files_without_a_project_read_a_name_bare_and_through_local() {
+        let model = model_of(&[project("", vec![], &["enum Shape = Circle;"])], None).unwrap();
+        assert_eq!(read_of(&model, "Circle"), ["Circle", "local::Circle"]);
+        assert_eq!(
+            read_of(&model, "None"),
+            ["constructo.prelude::None", "None", "local::None"]
         );
     }
 
