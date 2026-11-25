@@ -244,6 +244,11 @@ impl ReadValue<Shape> for Codec { ... }
 impl<T> ReadValue<Styled<T>> for Codec where Codec: ReadValue<T> { ... }
 ```
 
+*Changed* in step 5, as decision 51 says: each method has one parameter more,
+the depth or a budget for a default, a default that cannot be given is a
+`NoDefault` and not a `String`, and the impls for the types of a project are in
+its module.
+
 `read_value` for an enum is a `match` over the fixed list of its constructors,
 by their full names, so a name that is not in the list is an error. That is the
 closed set above, and it holds by construction: nothing can be invoked that the
@@ -539,7 +544,9 @@ this makes it public, in every runtime.
 The codec could give it, with `codec.read_tree(text)`, since it has the names and
 the consts of its project: every name in full, and a name that is not of the run
 refused. It is between the neutral tree and a value of a generated type, and
-whether it is wanted is for the first program that asks for it.
+whether it is wanted is for the first program that asks for it. *Decided* in
+step 5: not added yet, since it would be a public function of the runtime for a
+use that no program has.
 
 ### The names in the text
 
@@ -682,14 +689,19 @@ writer writes, since an argument that has a name is written by name, as
 **Open:**
 
 - **Field order.** Fields are written in the order of the declaration, and the
-  generated structs are to keep it.
+  generated structs are to keep it. *Done* in step 4, and the codec writes them
+  in that order.
 - **Limits.** The parser of `check` has a nesting limit (decision 43) and the
   encoder of `convert` has a budget of nodes. The codec has to have
   limits as well, since it is meant for data that is not
-  trusted, and the docs say what they are.
+  trusted, and the docs say what they are. *Decided* in decision 51: a depth,
+  counted through consts, whose default and ceiling is the parser's limit, and
+  the limit on defaults, as settings of the codec.
 - **Other crates.** Whether the generated types also implement the traits of
   another crate, such as `serde`, so that other notations can use them. It is not
   needed for the goal, and it is not in this task unless it is wanted.
+  *Decided* in step 5: not supported in the first version, which step 7
+  documents.
 
 ### Recursion
 
@@ -769,7 +781,8 @@ pub struct Paren(pub Box<Expr>);    // an Expr can hold a Term by value
   chain of `Cons`, and the writer, which is recursive, applies the same limit and
   returns an error, and does not run out of stack. The `Drop` of Rust is
   recursive too, which is the program's to manage, and the documentation says
-  so.
+  so. *Done* in step 5: the writer counts the depth against the codec's limit,
+  and the harness writes a chain too deep and one within it.
 
 ### Numbers
 
@@ -1170,28 +1183,29 @@ names.
 ## Decisions to write
 
 - That reading is constrained by the target type, and the constructors it can
-  invoke are a closed set that is fixed when the code is generated.
+  invoke are a closed set that is fixed when the code is generated. *Written:*
+  decision 52.
 - How a type is adopted, a constructor or a whole enum, and why it is not in the
   project-file.
 - That every reader and writer works through the codec, and where their code
   lives is the target's choice; and that in Rust the traits are generated with
   each codec and not put in the runtime crate, because of the orphan rule, and
   the codec implements them, one for each type, so that it is `self` where names
-  and consts are looked up.
+  and consts are looked up. *Written:* decision 51.
 - That how the names that the generator adds avoid Constructo names is the
   target's choice, provided that they never clash, the ones the program calls
   are fixed, and every renaming is reported: a `_` that yields in Rust and
   Python, a `$` in TypeScript. *Written:* decision 49, for Rust.
 - That names and consts are resolved as the value is read and written, and not
-  in a pass of their own.
+  in a pass of their own. *Written:* decision 52.
 - That a generated class may give a named parameter its default, from the
   codec's own function, where the language has default arguments.
 - The name `codegen`.
 - That names are written relative to the project by default, and in full when a
-  codec is set to write them so.
+  codec is set to write them so. *Written:* decision 53.
 - That a setting which changes the generated code is given to the command, and
   one that changes only behaviour is a property of a codec, which is cheap and
-  never shared by default.
+  never shared by default. *Written:* decision 51.
 - That the syntax layer is a small crate, `constructo-runtime`, which the generated
   code depends on, and what it holds. *Written:* decision 46.
 - That every field on a cycle of types held by value is boxed, at every site,
@@ -1201,6 +1215,7 @@ names.
   and that `Float` is the one exception, mapped to the nearest binary value;
   and so that a target maps a type faithfully, and idiomatically only where the
   declarations show that it is exact, with `Option` in Python as the example.
+  *Written:* decision 54.
 - That a target writes one file or a folder, with `--out-file` and `--out-dir`,
   and that a folder belongs to the generator, guarded by a marker file.
   *Written:* decision 50.
@@ -1210,11 +1225,12 @@ names.
 - That name resolution, the consts and the limits are in a codec for each
   project and not in the types, so that an application can have more than one
   codec, and that the generated code has a Rust module for each project.
+  *Written:* decisions 51 and 49.
 - How the modules and the names in Rust are chosen: the root is the file, the rest
   are flat, and a clash is numbered. *Written:* decision 49.
 - How a record type without a name is named, the handling of consts, and the
   defaults of omitted arguments, once chosen. *Written:* decision 48, for the
-  model; how the codec reads consts and builds defaults is step 5's.
+  model; how the codec reads consts and builds defaults, decisions 51 and 52.
 
 ## Not in scope
 
