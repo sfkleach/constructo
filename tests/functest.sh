@@ -2594,6 +2594,35 @@ if cmp -s "$codegen_dir/kept.rs" "$codegen_dir/a.rs" && [[ -z "$(find "$codegen_
 else
     fail "codegen: the file is not the output, or a new file was left beside it"
 fi
+
+# The harness in tests/codegen-harness runs the generated code: it reads every value of the typed corpus and holds what
+# it writes to check and convert, and it tests the scenario, the names of a project, and the limits of a codec. It is
+# built in a copy under _build/, with the modules that it needs generated beside its own source, and it prints a line
+# for each test, which is counted here.
+rm -rf "$(dirname "$0")/../_build/codegen-harness"
+mkdir -p "$(dirname "$0")/../_build/codegen-harness"
+harness_dir="$(cd "$(dirname "$0")/../_build/codegen-harness" && pwd)"
+cp -r "$(dirname "$0")/codegen-harness/." "$harness_dir/"
+EXAMPLES_ROOT="$(cd "$(dirname "$0")/../syntax/examples" && pwd)"
+if "$CONSTRUCTO" codegen --lang=rust --out-file="$harness_dir/src/schema.rs" \
+        "$EXAMPLES_ROOT/values/typed/schema.types" 2>"$harness_dir/err" \
+    && "$CONSTRUCTO" codegen --lang=rust --out-file="$harness_dir/src/scenario.rs" \
+        --project="$CODEGEN/shapes/shapes" 2>"$harness_dir/err" \
+    && "$CONSTRUCTO" codegen --lang=rust --dev --out-file="$harness_dir/src/names.rs" \
+        --project="$CODEGEN/names-project/app" 2>"$harness_dir/err" \
+    && (cd "$harness_dir" && cargo build --quiet) >"$harness_dir/cargo" 2>&1; then
+    while IFS= read -r line; do
+        case "$line" in
+            PASS\ *) pass "codegen harness: ${line#PASS }" ;;
+            FAIL\ *) fail "codegen harness: ${line#FAIL }" ;;
+            *) fail "codegen harness: an unexpected line: $line" ;;
+        esac
+    done < <("$runtime_target/codegen-harness" "$CONSTRUCTO" "$EXAMPLES_ROOT" "$harness_dir/out" 2>&1 \
+        || echo "FAIL the harness ran to the end")
+else
+    fail "codegen harness: it is generated and built ($(head -1 "$harness_dir/err") $(grep -m1 '^error' \
+        "$harness_dir/cargo"))"
+fi
 echo ""
 
 TOTAL=$(( PASS + FAIL ))

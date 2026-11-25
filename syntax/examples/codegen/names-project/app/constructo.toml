@@ -1,0 +1,18 @@
+# The group g renames Circle and the const unit, and hides Square, which is written through h.
+[project]
+name = "example.app"
+
+[[import]]
+project-name = "example.lib"
+group = "g"
+path = "../lib"
+hide = ["Square"]
+
+[import.rename]
+Round = "Circle"
+ring = "unit"
+
+[[import]]
+project-name = "example.lib"
+group = "h"
+path = "../lib"
