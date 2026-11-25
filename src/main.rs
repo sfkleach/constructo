@@ -1664,7 +1664,7 @@ fn codegen(
         widening: options.widening,
         default_limit: options.default_limit,
     };
-    let generated = match constructo::codegen::rust::generate(&model, &defaults) {
+    let generated = match constructo::codegen::rust::generate(&model, &defaults, adoptions) {
         Ok(generated) => generated,
         Err(diagnostics) => {
             for diagnostic in &diagnostics {

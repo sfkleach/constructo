@@ -7,6 +7,7 @@
 //! misspelt name is never taken for an adoption.
 
 use super::super::model::{Body, FullName, Model};
+use super::super::recursion::Opaque;
 use crate::diagnostics::{Diagnostic, Pos};
 use crate::PRELUDE_PROJECT;
 use serde::Deserialize;
@@ -242,6 +243,30 @@ impl Adoptions {
         }
         errors.sort_by_key(|e| e.pos);
         errors
+    }
+}
+
+impl Adoptions {
+    /// The types that the adoptions make opaque to the generator: every constructor that is adopted, and every enum
+    /// whose uses are of an adopted type, which is one that is adopted whole or whose one constructor is.
+    pub(crate) fn opaque(&self, model: &Model) -> Opaque {
+        let mut opaque = Opaque::default();
+        for adoption in &self.enums {
+            if let Some(decl) = model.enums.iter().find(|e| e.name.to_string() == adoption.name) {
+                opaque.enums.insert(decl.name.clone());
+            }
+        }
+        for adoption in &self.constructors {
+            for decl in &model.enums {
+                if let Some(constructor) = decl.constructors.iter().find(|c| c.name.to_string() == adoption.name) {
+                    opaque.constructors.insert(constructor.name.clone());
+                    if decl.constructors.len() == 1 {
+                        opaque.enums.insert(decl.name.clone());
+                    }
+                }
+            }
+        }
+        opaque
     }
 }
 

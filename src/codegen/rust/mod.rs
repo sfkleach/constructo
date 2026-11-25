@@ -24,11 +24,17 @@ pub struct Generated {
     pub warnings: Vec<Diagnostic>,
 }
 
-/// Writes the Rust types of the model and their codec, whose settings have the defaults given, or gives the errors for
-/// the types and the consts that Rust cannot hold, which are at their declarations.
-pub fn generate(model: &Model, defaults: &Defaults) -> Result<Generated, Vec<Diagnostic>> {
+/// Writes the Rust types of the model and their codec, whose settings have the defaults given, with the adoptions,
+/// which have been checked against the model, or gives the errors for the types and the consts that Rust cannot hold,
+/// which are at their declarations.
+pub fn generate(model: &Model, defaults: &Defaults, adoptions: &Adoptions) -> Result<Generated, Vec<Diagnostic>> {
+    // An adopted type is opaque, so a cycle through it is no cycle of the generated types, which are boxed again.
+    let opaque = adoptions.opaque(model);
+    let mut model = model.clone();
+    super::recursion::rebox(&mut model, &opaque);
+    let model = &model;
     let names = Names::new(model);
-    let mut errors = regular::irregular(model, &names.index);
+    let mut errors = regular::irregular(model, &names.index, &opaque);
     errors.extend(codec::const_errors(model, &names.index));
     if !errors.is_empty() {
         return Err(errors);
