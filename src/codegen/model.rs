@@ -6,6 +6,7 @@
 //! `Ty` has variables that only inference needs, and names in the canonical form `Local@project`, which is internal.
 
 use crate::ast::{self, ConstDecl, EnumDecl, TaggedBody, Type, TypeParam, Value, ValueKind, VariantBody};
+use crate::diagnostics::Pos;
 use crate::parser::Parsed;
 use crate::resolve::{Layout, Resolution, Written};
 use crate::typecheck::{gen_name, Scheme, Ty};
@@ -26,6 +27,16 @@ pub struct Model {
     pub records: Vec<Record>,
     /// The consts, in the order of the files and of the declarations in them.
     pub consts: Vec<Const>,
+    /// The names of the sources of the run, as a message shows them, which `At::file` indexes.
+    pub files: Vec<String>,
+}
+
+/// Where a declaration, or a part of one, is written: the index of its source in `Model::files`, and the position in
+/// it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct At {
+    pub file: usize,
+    pub pos: Pos,
 }
 
 /// A project, and what it imports.
@@ -121,6 +132,8 @@ impl TypeRef {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Param {
     pub name: String,
+    /// Where the parameter is declared, or for a parameter of an inferred type, where its const is.
+    pub at: At,
     /// True for a parameter written with a leading underscore, which is allowed to be unused.
     pub underscore: bool,
 }
@@ -129,6 +142,7 @@ pub struct Param {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Enum {
     pub name: FullName,
+    pub at: At,
     /// The index of the project that declares it.
     pub project: usize,
     pub params: Vec<Param>,
@@ -145,6 +159,7 @@ pub struct Enum {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Constructor {
     pub name: FullName,
+    pub at: At,
     pub body: Body,
     /// The form in which the root project writes the constructor: bare, else through a group, else in full.
     pub written: Written,
@@ -167,6 +182,7 @@ pub enum Body {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Parameter {
     pub name: Option<String>,
+    pub at: At,
     pub ty: TypeRef,
     /// Whether the parameter holds its type by value on a cycle of types that are held by value, which a target such
     /// as Rust has to break with a pointer. Every such parameter and field is boxed, and no other.
@@ -177,6 +193,9 @@ pub struct Parameter {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Field {
     pub name: String,
+    /// Where the field is declared. A field of a record type without a name is where the record was first met, and
+    /// one of a record that only an inferred type has is where its const is.
+    pub at: At,
     pub ty: TypeRef,
     /// As for `Parameter::boxed`.
     pub boxed: bool,
@@ -197,12 +216,16 @@ pub struct Record {
     pub fields: Vec<Field>,
     /// The indexes of the projects whose declarations use it, in order.
     pub projects: Vec<usize>,
+    /// Where the record was first met: its first field, or for `{}` or a record that only an inferred type has, the
+    /// field, parameter or const whose type it is in.
+    pub at: At,
 }
 
 /// A const declaration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Const {
     pub name: FullName,
+    pub at: At,
     /// The index of the project that declares it.
     pub project: usize,
     /// The parameters that are declared, or for a const whose type is inferred, those that its value leaves open,
@@ -227,6 +250,7 @@ fn record_param(index: usize) -> String {
 /// name resolved, the layout, the resolution, and the inferred type of each const that does not declare one, by its
 /// canonical name.
 pub(crate) fn build(
+    files: &[&str],
     parsed: &[Parsed],
     layout: &Layout,
     resolution: &Resolution,
@@ -255,22 +279,24 @@ pub(crate) fn build(
             builtin: project.builtin,
         })
         .collect();
-    let types_files: Vec<(usize, &ast::TypesFile)> = parsed
+    let types_files: Vec<(usize, usize, &ast::TypesFile)> = parsed
         .iter()
         .enumerate()
         .filter_map(|(index, parsed)| match parsed {
-            Parsed::Types(file) => Some((layout.owners.get(index).copied().unwrap_or(layout.root), file)),
+            Parsed::Types(file) => Some((index, layout.owners.get(index).copied().unwrap_or(layout.root), file)),
             Parsed::Values(_) => None,
         })
         .collect();
     let mut enums = Vec::new();
-    for &(project, file) in &types_files {
+    for &(index, project, file) in &types_files {
+        builder.file = index;
         for decl in &file.enums {
             enums.push(builder.enum_decl(decl, project, layout.root, resolution));
         }
     }
     let mut consts = Vec::new();
-    for &(project, file) in &types_files {
+    for &(index, project, file) in &types_files {
+        builder.file = index;
         for constant in &file.consts {
             consts.push(builder.const_decl(constant, project, inferred));
         }
@@ -281,6 +307,7 @@ pub(crate) fn build(
         enums,
         records: builder.records,
         consts,
+        files: files.iter().map(|file| file.to_string()).collect(),
     };
     super::recursion::work_out(&mut model);
     model
@@ -295,9 +322,27 @@ struct Builder {
     identities: HashMap<Vec<(String, TypeRef)>, usize>,
     /// The names that the records have been given.
     names: HashSet<String>,
+    /// The index of the source whose declarations are being met.
+    file: usize,
 }
 
 impl Builder {
+    /// The place in the source whose declarations are being met.
+    fn at(&self, pos: Pos) -> At {
+        At { file: self.file, pos }
+    }
+
+    fn params(&self, params: &[TypeParam]) -> Vec<Param> {
+        params
+            .iter()
+            .map(|p| Param {
+                name: p.name.clone(),
+                at: self.at(p.pos),
+                underscore: p.underscore,
+            })
+            .collect()
+    }
+
     fn enum_decl(&mut self, decl: &EnumDecl, project: usize, root: usize, resolution: &Resolution) -> Enum {
         let params: Vec<String> = decl.params.iter().map(|p| p.name.clone()).collect();
         let constructors = decl
@@ -311,7 +356,8 @@ impl Builder {
                             .iter()
                             .map(|parameter| Parameter {
                                 name: parameter.name.clone(),
-                                ty: self.declared(&parameter.ty, &params, project),
+                                at: self.at(parameter.pos),
+                                ty: self.declared(&parameter.ty, &params, project, self.at(parameter.pos)),
                                 boxed: false,
                             })
                             .collect(),
@@ -321,22 +367,31 @@ impl Builder {
                             .iter()
                             .map(|field| Field {
                                 name: field.name.clone(),
-                                ty: self.declared(&field.ty, &params, project),
+                                at: self.at(field.pos),
+                                ty: self.declared(&field.ty, &params, project, self.at(field.pos)),
                                 boxed: false,
                             })
                             .collect(),
                     ),
-                    VariantBody::Array(element) => Body::Array(self.declared(element, &params, project)),
+                    VariantBody::Array(element) => {
+                        Body::Array(self.declared(element, &params, project, self.at(variant.pos)))
+                    }
                 };
                 let name = FullName::from_canonical(&variant.name);
                 let written = resolution.written_in_project(root, &name.local, &name.project);
-                Constructor { name, body, written }
+                Constructor {
+                    name,
+                    at: self.at(variant.pos),
+                    body,
+                    written,
+                }
             })
             .collect();
         Enum {
             name: FullName::from_canonical(&decl.name),
+            at: self.at(decl.pos),
             project,
-            params: model_params(&decl.params),
+            params: self.params(&decl.params),
             constructors,
             has_default: true,
         }
@@ -346,7 +401,10 @@ impl Builder {
         let (params, ty) = match &constant.ty {
             Some(ty) => {
                 let names: Vec<String> = constant.params.iter().map(|p| p.name.clone()).collect();
-                (model_params(&constant.params), self.declared(ty, &names, project))
+                (
+                    self.params(&constant.params),
+                    self.declared(ty, &names, project, self.at(constant.pos)),
+                )
             }
             None => {
                 // A const of a run with no errors has its type, declared or inferred, since `check_consts` has
@@ -357,16 +415,18 @@ impl Builder {
                 let params = (0..scheme.arity)
                     .map(|index| Param {
                         name: gen_name(index),
+                        at: self.at(constant.pos),
                         underscore: false,
                     })
                     .collect();
-                (params, self.inferred(&scheme.ty, project))
+                (params, self.inferred(&scheme.ty, project, self.at(constant.pos)))
             }
         };
         let mut value = constant.value.clone();
         write_in_full(&mut value);
         Const {
             name: FullName::from_canonical(&constant.name),
+            at: self.at(constant.pos),
             project,
             params,
             ty,
@@ -374,8 +434,9 @@ impl Builder {
         }
     }
 
-    /// A type as it is written in a declaration of the project, whose parameters are `params`.
-    fn declared(&mut self, ty: &Type, params: &[String], project: usize) -> TypeRef {
+    /// A type as it is written in a declaration of the project, whose parameters are `params`, at the field, parameter
+    /// or const `at`.
+    fn declared(&mut self, ty: &Type, params: &[String], project: usize, at: At) -> TypeRef {
         match ty {
             // A parameter is found before a type of the same name, as `typecheck::instantiate` finds it.
             Type::Ref { name, .. } if params.contains(name) => TypeRef::Param(name.clone()),
@@ -386,38 +447,41 @@ impl Builder {
                 "String" => TypeRef::String,
                 _ => TypeRef::Enum(
                     FullName::from_canonical(name),
-                    args.iter().map(|arg| self.declared(arg, params, project)).collect(),
+                    args.iter().map(|arg| self.declared(arg, params, project, at)).collect(),
                 ),
             },
-            Type::Array(element) => TypeRef::Array(Box::new(self.declared(element, params, project))),
+            Type::Array(element) => TypeRef::Array(Box::new(self.declared(element, params, project, at))),
             Type::Record(fields) => {
                 let fields = fields
                     .iter()
-                    .map(|field| (field.name.clone(), self.declared(&field.ty, params, project)))
+                    .map(|field| {
+                        let at = self.at(field.pos);
+                        (field.name.clone(), self.declared(&field.ty, params, project, at), at)
+                    })
                     .collect();
-                self.record(fields, project)
+                self.record(fields, project, at)
             }
         }
     }
 
-    /// A type that the checker inferred for a const of the project, in which an open type is a parameter.
-    fn inferred(&mut self, ty: &Ty, project: usize) -> TypeRef {
+    /// A type that the checker inferred for the const of the project at `at`, in which an open type is a parameter.
+    fn inferred(&mut self, ty: &Ty, project: usize, at: At) -> TypeRef {
         match ty {
             Ty::Nat => TypeRef::Nat,
             Ty::Int => TypeRef::Int,
             Ty::Float => TypeRef::Float,
             Ty::Str => TypeRef::String,
-            Ty::Array(element) => TypeRef::Array(Box::new(self.inferred(element, project))),
+            Ty::Array(element) => TypeRef::Array(Box::new(self.inferred(element, project, at))),
             Ty::Enum(name, args) => TypeRef::Enum(
                 FullName::from_canonical(name),
-                args.iter().map(|arg| self.inferred(arg, project)).collect(),
+                args.iter().map(|arg| self.inferred(arg, project, at)).collect(),
             ),
             Ty::Record(fields) => {
                 let fields = fields
                     .iter()
-                    .map(|(name, field)| (name.clone(), self.inferred(field, project)))
+                    .map(|(name, field)| (name.clone(), self.inferred(field, project, at), at))
                     .collect();
-                self.record(fields, project)
+                self.record(fields, project, at)
             }
             Ty::Param(name) => TypeRef::Param(name.clone()),
             Ty::Gen(index) => TypeRef::Param(gen_name(*index)),
@@ -426,17 +490,24 @@ impl Builder {
         }
     }
 
-    /// The record type without a name that has the fields, which the project uses. It is made the first time that it is
-    /// met.
-    fn record(&mut self, mut fields: Vec<(String, TypeRef)>, project: usize) -> TypeRef {
+    /// The record type without a name that has the fields, each with its place, which the project uses at `at`. It is
+    /// made the first time that it is met.
+    fn record(&mut self, mut fields: Vec<(String, TypeRef, At)>, project: usize, at: At) -> TypeRef {
         fields.sort_by(|a, b| a.0.cmp(&b.0));
         let mut order = Vec::new();
-        for (_, ty) in &fields {
+        for (_, ty, _) in &fields {
             params_of(ty, &mut order);
         }
+        // The record is where its first field is written, which is the first in the text, and not in sorted order.
+        let at = fields
+            .iter()
+            .map(|(_, _, at)| *at)
+            .min_by_key(|at| at.pos)
+            .unwrap_or(at);
+        let places: Vec<At> = fields.iter().map(|(_, _, at)| *at).collect();
         let identity: Vec<(String, TypeRef)> = fields
             .into_iter()
-            .map(|(name, ty)| (name, renamed(&ty, &order)))
+            .map(|(name, ty, _)| (name, renamed(&ty, &order)))
             .collect();
         let index = match self.identities.get(&identity) {
             Some(&index) => index,
@@ -447,13 +518,16 @@ impl Builder {
                     params: (0..order.len()).map(record_param).collect(),
                     fields: identity
                         .iter()
-                        .map(|(name, ty)| Field {
+                        .zip(&places)
+                        .map(|((name, ty), at)| Field {
                             name: name.clone(),
+                            at: *at,
                             ty: ty.clone(),
                             boxed: false,
                         })
                         .collect(),
                     projects: Vec::new(),
+                    at,
                 });
                 self.identities.insert(identity, self.records.len() - 1);
                 self.records.len() - 1
@@ -487,16 +561,6 @@ impl Builder {
         self.names.insert(name.clone());
         name
     }
-}
-
-fn model_params(params: &[TypeParam]) -> Vec<Param> {
-    params
-        .iter()
-        .map(|p| Param {
-            name: p.name.clone(),
-            underscore: p.underscore,
-        })
-        .collect()
 }
 
 /// Adds the parameters that occur in the type to `order`, in the order in which they first occur.
@@ -686,6 +750,20 @@ mod tests {
         const unit_circle = Circle { radius: 1.0 };
     ";
 
+    /// The position of the first occurrence of the text in the source.
+    fn pos_of(source: &str, text: &str) -> Pos {
+        let offset = source.find(text).unwrap_or_else(|| panic!("no {} in the source", text));
+        Pos::at(source, offset)
+    }
+
+    /// The place of the first occurrence of the text in `SHAPES`, which is source 2 of `scenario`.
+    fn in_shapes(text: &str) -> At {
+        At {
+            file: 2,
+            pos: pos_of(SHAPES, text),
+        }
+    }
+
     /// The projects of the scenario of the codegen task, `com.example.ids` and `com.example.shapes`, which imports the
     /// first into the group `ids`.
     fn scenario() -> Model {
@@ -780,11 +858,13 @@ mod tests {
             Body::Tuple(vec![
                 Parameter {
                     name: Some("x".into()),
+                    at: in_shapes("x: Float, y"),
                     ty: TypeRef::Float,
                     boxed: false,
                 },
                 Parameter {
                     name: Some("y".into()),
+                    at: in_shapes("y: Float)"),
                     ty: TypeRef::Float,
                     boxed: false,
                 },
@@ -817,6 +897,7 @@ mod tests {
             styled.params,
             [Param {
                 name: "T".into(),
+                at: in_shapes("T> = Styled"),
                 underscore: false,
             }]
         );
@@ -837,18 +918,49 @@ mod tests {
                 fields: vec![
                     Field {
                         name: "dx".into(),
+                        at: in_shapes("dx: Int"),
                         ty: TypeRef::Int,
                         boxed: false,
                     },
                     Field {
                         name: "dy".into(),
+                        at: in_shapes("dy: Int"),
                         ty: TypeRef::Int,
                         boxed: false,
                     },
                 ],
                 projects: vec![2],
+                at: in_shapes("dx: Int"),
             }]
         );
+    }
+
+    #[test]
+    fn every_declaration_has_its_place() {
+        let model = scenario();
+        assert_eq!(model.files[2], "com.example.shapes-0.types");
+        assert_eq!(model.files[model.enums[0].at.file], crate::PRELUDE_NAME);
+        assert_eq!(find_enum(&model, "Shape").at, in_shapes("Shape ="));
+        assert_eq!(constructor(&model, "Box").at, in_shapes("Box {"));
+        assert_eq!(find_const(&model, "unit_circle").at, in_shapes("unit_circle ="));
+        let Body::Record(fields) = &constructor(&model, "Box").body else {
+            panic!("Box has a record");
+        };
+        assert_eq!(fields[1].at, in_shapes("height"));
+        let uuid = find_enum(&model, "Uuid");
+        assert_eq!(uuid.at.file, 1);
+        assert_eq!(uuid.at.pos, pos_of(IDS, "Uuid ="));
+        // A record that only an inferred type has is where its const is, and so are the open types of the const.
+        let model = model_of_app(&["enum A = A;\nconst pair = { a: None, b: 1 };"]);
+        let pair = find_const(&model, "pair");
+        assert_eq!(model.records[0].at, pair.at);
+        assert_eq!(model.records[0].fields[1].at, pair.at);
+        assert_eq!(pair.params[0].at, pair.at);
+        assert_eq!(pair.at.pos, Pos { line: 2, col: 7 });
+        // A record is where its first field is written, though its fields are sorted.
+        let model = model_of_app(&["enum B = B { r: { z: Nat,\n  a: Nat } };"]);
+        assert_eq!(model.records[0].at.pos, Pos { line: 1, col: 19 });
+        assert_eq!(model.records[0].fields[0].at.pos, Pos { line: 2, col: 3 });
     }
 
     #[test]
@@ -870,6 +982,10 @@ mod tests {
             null.params,
             [Param {
                 name: "T".into(),
+                at: At {
+                    file: 0,
+                    pos: pos_of(crate::PRELUDE, "T>: Option"),
+                },
                 underscore: false,
             }]
         );
