@@ -1630,8 +1630,13 @@ fn codegen(
         Ok(sources) => sources,
         Err(code) => return code,
     };
-    let generated = build_model(&sources, &set.layout(sources.len()), options)
-        .and_then(|model| constructo::codegen::rust::generate(&model));
+    let generated = build_model(&sources, &set.layout(sources.len()), options).and_then(|model| {
+        let defaults = constructo::codegen::rust::Defaults {
+            widening: options.widening,
+            default_limit: options.default_limit,
+        };
+        constructo::codegen::rust::generate(&model, &defaults)
+    });
     let generated = match generated {
         Ok(generated) => generated,
         Err(diagnostics) => {
