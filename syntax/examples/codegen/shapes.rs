@@ -405,6 +405,15 @@ impl self::Codec {
         }
     }
 
+    /// What a function of an adoption made, or its refusal, as an error of reading at the value.
+    fn adopted<T>(
+        &self,
+        value: &::constructo_runtime::ast::Value,
+        made: ::std::result::Result<T, ::std::string::String>,
+    ) -> ::std::result::Result<T, ::constructo_runtime::codec::Error> {
+        made.map_err(|why| ::constructo_runtime::codec::Error::at(value.pos, why))
+    }
+
     /// Reads the elements of an array.
     fn items<T>(
         &self,
