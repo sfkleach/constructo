@@ -6,9 +6,12 @@
 //! parameters of the first. Each strongly connected component of the graph of the types that a declaration names,
 //! anywhere in its constructors, is followed from its first member with its own parameters, and a member that is
 //! reached with two sets of arguments is the error.
+//!
+//! An opaque type, as an adopted one is, is not followed: what it holds is its author's, and not a part of the cycle.
 
 use super::super::graph::components;
 use super::super::model::{At, Body, FullName, Model, TypeRef};
+use super::super::recursion::Opaque;
 use crate::diagnostics::Diagnostic;
 use std::collections::{HashMap, VecDeque};
 
@@ -21,7 +24,7 @@ enum Node {
 
 /// The errors for the types that Rust cannot hold, one for each cycle, at the type that is reached with other
 /// arguments.
-pub(super) fn irregular(model: &Model, index: &HashMap<FullName, usize>) -> Vec<Diagnostic> {
+pub(super) fn irregular(model: &Model, index: &HashMap<FullName, usize>, opaque: &Opaque) -> Vec<Diagnostic> {
     let enums = model.enums.len();
     let number = |node: Node| match node {
         Node::Enum(at) => at,
@@ -39,6 +42,7 @@ pub(super) fn irregular(model: &Model, index: &HashMap<FullName, usize>) -> Vec<
             Node::Enum(at) => model.enums[at]
                 .constructors
                 .iter()
+                .filter(|c| !opaque.constructors.contains(&c.name))
                 .flat_map(|c| match &c.body {
                     Body::None => Vec::new(),
                     Body::Tuple(parameters) => parameters.iter().map(|p| &p.ty).collect(),
@@ -54,7 +58,7 @@ pub(super) fn irregular(model: &Model, index: &HashMap<FullName, usize>) -> Vec<
         .map(|n| {
             let mut out = Vec::new();
             for ty in held(node_of(n)) {
-                named(ty, index, &mut |node, _| out.push(number(node)));
+                named(ty, index, opaque, &mut |node, _| out.push(number(node)));
             }
             out
         })
@@ -89,7 +93,7 @@ pub(super) fn irregular(model: &Model, index: &HashMap<FullName, usize>) -> Vec<
             let args = reached[&n].clone();
             for ty in held(node) {
                 let mut found = Vec::new();
-                named(ty, index, &mut |target, list: &[TypeRef]| {
+                named(ty, index, opaque, &mut |target, list: &[TypeRef]| {
                     found.push((target, list.to_vec()))
                 });
                 for (target, list) in found {
@@ -116,20 +120,22 @@ pub(super) fn irregular(model: &Model, index: &HashMap<FullName, usize>) -> Vec<
     errors
 }
 
-/// Calls `found` with every enum and record that the type names, with its arguments, outside in.
-fn named(ty: &TypeRef, index: &HashMap<FullName, usize>, found: &mut dyn FnMut(Node, &[TypeRef])) {
+/// Calls `found` with every enum and record that the type names, with its arguments, outside in. An opaque enum, and
+/// what its arguments name, are passed over.
+fn named(ty: &TypeRef, index: &HashMap<FullName, usize>, opaque: &Opaque, found: &mut dyn FnMut(Node, &[TypeRef])) {
     match ty {
+        TypeRef::Enum(name, _) if opaque.enums.contains(name) => {}
         TypeRef::Enum(name, args) => {
             if let Some(&at) = index.get(name) {
                 found(Node::Enum(at), args);
             }
-            args.iter().for_each(|arg| named(arg, index, found));
+            args.iter().for_each(|arg| named(arg, index, opaque, found));
         }
         TypeRef::Record(at, args) => {
             found(Node::Record(*at), args);
-            args.iter().for_each(|arg| named(arg, index, found));
+            args.iter().for_each(|arg| named(arg, index, opaque, found));
         }
-        TypeRef::Array(element) => named(element, index, found),
+        TypeRef::Array(element) => named(element, index, opaque, found),
         TypeRef::Nat | TypeRef::Int | TypeRef::Float | TypeRef::String | TypeRef::Param(_) => {}
     }
 }
