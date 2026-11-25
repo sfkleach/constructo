@@ -1,0 +1,10 @@
+# expect: The constructor com.example.shapes::Circle and its enum com.example.shapes::Shape cannot both be adopted
+[rust.enum."com.example.shapes::Shape"]
+type = "crate::paint::Shape"
+from = "crate::adopt::shape_from"
+to = "crate::adopt::shape_to"
+
+[rust.constructor."com.example.shapes::Circle"]
+type = "crate::paint::Circle"
+from = "crate::adopt::circle_from"
+to = "crate::adopt::circle_to"

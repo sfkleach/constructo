@@ -4,10 +4,12 @@
 //! Every path is written in full, as `::std::vec::Vec`, `::std::primitive::u64` or `self::Shape`, so that no name of
 //! the declarations can hide one that the file needs. A type parameter is the only name that is written bare.
 
+mod adopt;
 mod codec;
 mod names;
 mod regular;
 
+pub use adopt::{Adoption, Adoptions, RustPath};
 pub use codec::Defaults;
 
 use super::model::{Body, Enum, Model, Record, TypeRef};

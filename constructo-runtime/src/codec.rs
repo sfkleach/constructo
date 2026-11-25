@@ -319,6 +319,9 @@ pub enum NoDefault {
     None(String),
     /// The default has more nodes than the limit of the codec.
     TooLarge,
+    /// The default of an adopted type was built from the defaults of its arguments, and the function of the adoption
+    /// refused them, for the reason given.
+    Refused(String),
 }
 
 /// Counts a node of a default against what is left of the limit.
@@ -339,6 +342,7 @@ pub fn no_default(why: NoDefault, param: &str, limit: usize, pos: Pos) -> Error 
             "The default value of argument {} has more than {} nodes, which is too large; give argument {}",
             param, limit, param
         ),
+        NoDefault::Refused(why) => format!("The default value of argument {} is refused: {}", param, why),
     };
     Error::at(pos, message)
 }
@@ -736,6 +740,10 @@ mod tests {
         assert_eq!(
             no_default(NoDefault::TooLarge, "chain", 10, pos).message(),
             "The default value of argument chain has more than 10 nodes, which is too large; give argument chain"
+        );
+        assert_eq!(
+            no_default(NoDefault::Refused("\"\" is not a UUID".into()), "id", 10, pos).message(),
+            "The default value of argument id is refused: \"\" is not a UUID"
         );
     }
 

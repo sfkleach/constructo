@@ -1,0 +1,5 @@
+# expect: The run has no constructor Uuid
+[rust.constructor."Uuid"]
+type = "foreign::Uuid"
+from = "crate::adopt::uuid_from_string"
+to = "crate::adopt::uuid_to_string"

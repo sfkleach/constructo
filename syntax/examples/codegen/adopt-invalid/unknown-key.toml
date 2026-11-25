@@ -1,0 +1,6 @@
+# expect: unknown field `into`, expected one of `type`, `from`, `to`
+[rust.constructor."com.example.ids::Uuid"]
+type = "foreign::Uuid"
+from = "crate::adopt::uuid_from_string"
+to = "crate::adopt::uuid_to_string"
+into = "crate::adopt::uuid_to_string"

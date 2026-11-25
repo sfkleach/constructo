@@ -2595,6 +2595,25 @@ else
     fail "codegen: the file is not the output, or a new file was left beside it"
 fi
 
+# The adoptions of the scenario are accepted, and each file of adopt-invalid names its expected error, which is
+# reported in the usual form with exit code 2, before anything is written.
+expect_exit "codegen: the adoptions of the scenario are accepted" 0 codegen --lang=rust \
+    --adopt="$CODEGEN/shapes/adopt.toml" --project="$CODEGEN/shapes/shapes"
+for f in "$CODEGEN"/adopt-invalid/*.toml; do
+    expected="$(sed -n 's|^# expect: ||p' "$f")"
+    actual=0
+    err="$("$CONSTRUCTO" codegen --lang=rust --adopt="$f" --project="$CODEGEN/shapes/shapes" \
+        --out-file="$codegen_dir/adopted.rs" 2>&1 >/dev/null)" || actual=$?
+    if [[ -n "$expected" && "$actual" -eq 2 && "$err" == "ERROR: $expected"*"($f, line "* \
+        && ! -e "$codegen_dir/adopted.rs" ]]; then
+        pass "codegen: adopt-invalid/$(basename "$f")"
+    else
+        fail "codegen: adopt-invalid/$(basename "$f") (expected exit 2 with '$expected', got exit $actual and '$err')"
+    fi
+done
+expect_codegen_error "a file of adoptions that cannot be read" 2 "ERROR: Cannot read $codegen_dir/missing.toml: " \
+    --lang=rust --adopt="$codegen_dir/missing.toml" "$CODEGEN/names.types"
+
 # The harness in tests/codegen-harness runs the generated code: it reads every value of the typed corpus and holds what
 # it writes to check and convert, and it tests the scenario, the names of a project, and the limits of a codec. It is
 # built in a copy under _build/, with the modules that it needs generated beside its own source, and it prints a line

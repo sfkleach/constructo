@@ -1,0 +1,5 @@
+# expect: The enum constructo.prelude::Option is Rust's own, and cannot be adopted
+[rust.enum."constructo.prelude::Option"]
+type = "crate::Maybe"
+from = "crate::adopt::maybe_from"
+to = "crate::adopt::maybe_to"
