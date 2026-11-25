@@ -33,7 +33,7 @@ third raised only questions of its own language, which is the sign that the comm
   `tests/functest.sh`. A step that adds a kind of test adds it to one of these, so that it runs every time.
 - **The decisions are written by the step that implements them**, so that each is checked against working code when
   it is written. The table at the end gives each entry of the draft's "Decisions to write" a step. The next number is
-  0055.
+  0056.
 - **Three pull requests**, so that the large mechanical change is merged before the new code depends on it:
   - the design and steps 1 and 2, which change no behaviour and touch every import of the six modules;
   - steps 3, 4 and 5, which give a working codec without adoption;
@@ -176,6 +176,10 @@ serde are not added.
 - **Done when** the corpus passes the oracle, and the scenario runs as the spike did.
 
 ## Step 6: adoption
+
+*Done,* as [plan-step6.md](plan-step6.md) says: the spike, `--adopt` and its file, adopted types opaque to boxing and
+to the check of regularity, the generated code for the three ways of adopting, the scenario run in the harness with its
+adoptions, and decision 55. The writer of an adopted generic type bounds its parameters by `Clone`.
 
 - **First, a spike that compiles:** a codec whose traits are implemented for a type of another crate (`uuid::Uuid`,
   in `_build/`), inside a `Vec` and as the argument of a generic type. The Rust scenario adopts types of its own crate,

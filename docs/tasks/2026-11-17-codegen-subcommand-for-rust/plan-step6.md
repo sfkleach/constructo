@@ -149,6 +149,26 @@ wrong where a module has an item with the name of the crate.
 4. The harness with the adoptions of the scenario.
 5. The decision, and the draft and the outline brought up to date.
 
+## As it was built
+
+*Done,* in the five commits above, with decision 55. What the plan did not say:
+
+- **The writer of an adopted generic type bounds each of its parameters by `Clone`,** since `to` gives the arguments
+  back owned. A scratch crate with a generic constructor adopted as `Tag<T>` did not compile without it.
+- **A `struct` that is not generated is renamed without a warning,** as that of an adopted constructor, or an enum whose
+  one constructor is adopted, so that a program is not told of a name that it never sees. The names are still worked
+  out as before, so an adoption renames nothing else.
+- **An enum whose one constructor is adopted is a comment in its module,** `// The enum ... is adopted as ...`, since a
+  doc comment needs an item.
+- **Two adoptions that would give one Rust type two impls** are reported at the later of the two in the file.
+- **The mistakes of the TOML are reported in the words of the `toml` crate,** as for the settings file: a language
+  that is not known is `unknown field `python`, expected `rust``.
+- **The spike's cases are in the harness,** with its stand-in crate `foreign` and the program's side, `adopt.rs` and
+  `paint.rs`, and the scenario's file of adoptions, `syntax/examples/codegen/shapes/adopt.toml`, which adopts `Point`
+  as well as `Uuid` and `Colour`, so that a constructor of two arguments is tested. The spike itself stays in `_build/`.
+- **An adopted constructor of an enum of several,** and a generic one with a parameter left out, were compiled and run
+  in a scratch crate, and their generated text is held by unit tests; the harness has neither.
+
 ## Done when
 
 - The shapes scenario runs in the harness with its adoptions, `Uuid` and `Colour`, generated and not written by hand.

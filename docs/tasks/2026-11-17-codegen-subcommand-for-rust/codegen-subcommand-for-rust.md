@@ -176,6 +176,9 @@ them, whereas an adoption is data and not a setting.
 
 **Open:** the format. For the moment it is TOML, as the settings file is, and
 this section is a sketch of what that would look like and not a design.
+*Decided* in decision 55: TOML, as sketched here, with the arguments of `from`
+and `to` the one argument or a tuple of them, and every path written so that it
+does not depend on the module.
 
 ```toml
 # Adoptions for the Rust target. The name of a table is the full name of a
@@ -1186,7 +1189,7 @@ names.
   invoke are a closed set that is fixed when the code is generated. *Written:*
   decision 52.
 - How a type is adopted, a constructor or a whole enum, and why it is not in the
-  project-file.
+  project-file. *Written:* decision 55.
 - That every reader and writer works through the codec, and where their code
   lives is the target's choice; and that in Rust the traits are generated with
   each codec and not put in the runtime crate, because of the orphan rule, and
