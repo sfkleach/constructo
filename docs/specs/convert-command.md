@@ -596,4 +596,5 @@ used by the typed formats for a project from a repository, and otherwise neither
 - [The exit codes](exit-codes.md) and [the configuration file](config-file.md).
 - [Validity checks](validity-checks.md), [type checking](type-checking.md) and
   [resolving identifiers](resolving-identifiers.md), for the checks that the typed formats make before they convert.
+- [The codegen command](codegen-command.md), whose codec writes the names in the form that the typed formats write.
 - Decisions 18, 35, 36, 37, 38 and 39, in `docs/decisions/`.

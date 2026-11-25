@@ -146,4 +146,6 @@ quoted in a message is left as it is, even if it contains an `@`.
 ## Related
 
 - [The project-file](project-file-format.md), where groups and imports are defined.
+- [The codegen command](codegen-command.md#names-in-the-text), for the forms of a name that a generated codec reads
+  and writes.
 - Decisions 4, 25, 26, 31 to 34, in `docs/decisions/`.

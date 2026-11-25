@@ -235,4 +235,6 @@ verbose output even if its error was not one of those reported, and a values fil
 - [The check command](check-command.md), for the stages around this one.
 - [Validity checks](validity-checks.md), which must pass first.
 - [Resolving identifiers](resolving-identifiers.md), for the scope of names.
+- [The codegen command](codegen-command.md#numbers), for the range of a number in Rust, and the one change that a
+  mapping may make, to the precision of a `Float`.
 - Decisions 9 to 11, 13 to 20, 22 and 45, in `docs/decisions/`.

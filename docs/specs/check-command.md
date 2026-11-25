@@ -181,4 +181,5 @@ which `--print-config` writes and which [the configuration file](config-file.md)
 - [Resolving identifiers](resolving-identifiers.md), for stage 3.
 - [The exit codes](exit-codes.md), for the codes of every command.
 - [The project-file](project-file-format.md) and [the lock file](lock-file-format.md), for `--project` and `--dev`.
+- [The codegen command](codegen-command.md), which reads the same inputs and checks them in the same way.
 - Decisions 1, 2, 6, 8, 9, 11, 12, 20 and 23, in `docs/decisions/`.
