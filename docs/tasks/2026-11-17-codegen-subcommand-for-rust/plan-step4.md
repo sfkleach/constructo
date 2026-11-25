@@ -149,6 +149,23 @@ as every other message of `constructo` is at the place it is about.
 3. The command, its functests, the compiling functest and the scenario.
 4. The decisions, and the draft and the outline brought up to date.
 
+## As it was built
+
+*Done,* in the four commits above. What the plan did not say:
+
+- **A type that holds itself with other arguments is refused.** Compiling the output found that Rust's drop-check
+  overflows on `Nested<T> = Flat(T), Deep(Nested<[T]>)` as soon as a value is made, through a `Box` or a `Vec`, so
+  `generate` returns an error at the declaration, and `syntax/examples/codegen/refused/` has the case. The check is in
+  `src/codegen/rust/regular.rs`, and Tarjan's algorithm moved to `src/codegen/graph.rs` for it.
+- A constructor that has the name of its own enum takes the prefix too, as `HolderHolder`.
+- A parameter that is left out is a warning, unless its name starts with `_`.
+- The prelude has a module if it declares anything besides `Bool` and `Option`, which it does not today.
+- The model's projects have the indexes of their files, so that a module that is renamed is reported at the start of
+  its first types file. One with no types files is reported with the name of the project.
+- The warnings are given in the order of the files and of the places in them.
+- The examples are `names.types`, `shapes/` with `shapes.rs`, and `refused/`, and the compiled output is kept in
+  `_build/functest-codegen`.
+
 ## Done when
 
 - The file for every valid types example and project example, and for the names example, compiles with `-D warnings`.
