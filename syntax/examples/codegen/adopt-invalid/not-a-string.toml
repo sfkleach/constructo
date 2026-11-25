@@ -1,0 +1,5 @@
+# expect: invalid type: integer `1`, expected a string
+[rust.constructor."com.example.ids::Uuid"]
+type = 1
+from = "crate::adopt::uuid_from_string"
+to = "crate::adopt::uuid_to_string"

@@ -1,0 +1,4 @@
+# expect: missing field `to`
+[rust.constructor."com.example.ids::Uuid"]
+type = "foreign::Uuid"
+from = "crate::adopt::uuid_from_string"

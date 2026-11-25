@@ -1,0 +1,10 @@
+# expect: com.example.ids::Uuid and com.example.shapes::Colour are both adopted as crate::Same
+[rust.constructor."com.example.ids::Uuid"]
+type = "crate::Same"
+from = "crate::adopt::uuid_from_string"
+to = "crate::adopt::uuid_to_string"
+
+[rust.enum."com.example.shapes::Colour"]
+type = "crate::Same"
+from = "crate::adopt::colour_from_generated"
+to = "crate::adopt::colour_to_generated"

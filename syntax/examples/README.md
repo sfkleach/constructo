@@ -100,6 +100,8 @@
   harness reads and writes. `names-project/` is a project whose `app` imports `lib` into two groups, one of which
   renames a constructor and a const and hides another, so that the harness reads a name in each form that the project
   reads, and writes it as the project writes it. Each file of `refused/` declares a type that Rust cannot hold, and
-  its first line is `// expect: <message>`.
+  its first line is `// expect: <message>`. `shapes/adopt.toml` is the file of adoptions of the scenario, for
+  `--adopt`, and each file of `adopt-invalid/` is a file of adoptions with a mistake, which is checked against the
+  scenario, and whose first line is `# expect: <message>`, which the error starts with, with exit code 2.
 - `values/typed` is also read by the codegen harness, `tests/codegen-harness`, which has a table of the Rust type of
   each value. A file that is added there has to be added to the table, or the functional test fails.

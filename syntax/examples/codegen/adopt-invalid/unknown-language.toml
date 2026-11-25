@@ -1,0 +1,3 @@
+# expect: unknown field `python`, expected `rust`
+[python.constructor."com.example.ids::Uuid"]
+type = "foreign.Uuid"

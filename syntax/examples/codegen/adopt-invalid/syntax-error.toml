@@ -1,0 +1,3 @@
+# expect: unclosed table, expected `]`
+[rust.constructor."com.example.ids::Uuid"
+type = "foreign::Uuid"

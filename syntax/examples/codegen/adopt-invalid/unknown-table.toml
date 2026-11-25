@@ -1,0 +1,3 @@
+# expect: unknown field `type`, expected `constructor` or `enum`
+[rust.type."com.example.ids::Uuid"]
+type = "foreign::Uuid"

@@ -1,0 +1,5 @@
+# expect: The type of com.example.ids::Uuid is "foreign::Uuid<T>", which is not a Rust path
+[rust.constructor."com.example.ids::Uuid"]
+type = "foreign::Uuid<T>"
+from = "crate::adopt::uuid_from_string"
+to = "crate::adopt::uuid_to_string"

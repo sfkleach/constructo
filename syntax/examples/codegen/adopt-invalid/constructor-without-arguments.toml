@@ -1,0 +1,5 @@
+# expect: The constructor com.example.shapes::Red has no arguments to convert, so it cannot be adopted on its own
+[rust.constructor."com.example.shapes::Red"]
+type = "crate::paint::Red"
+from = "crate::adopt::red_from"
+to = "crate::adopt::red_to"

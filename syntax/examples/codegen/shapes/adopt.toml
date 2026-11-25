@@ -1,0 +1,16 @@
+# The adoptions of the scenario: the program's own types for a UUID, which is of another crate, for a point of two
+# arguments, and for the whole enum of colours, which has a colour that Constructo cannot write.
+[rust.constructor."com.example.ids::Uuid"]
+type = "foreign::Uuid"
+from = "crate::adopt::uuid_from_string"
+to = "crate::adopt::uuid_to_string"
+
+[rust.constructor."com.example.shapes::Point"]
+type = "foreign::Point"
+from = "crate::adopt::point_from"
+to = "crate::adopt::point_to"
+
+[rust.enum."com.example.shapes::Colour"]
+type = "crate::paint::Colour"
+from = "crate::adopt::colour_from_generated"
+to = "crate::adopt::colour_to_generated"

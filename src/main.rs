@@ -359,6 +359,11 @@ example:
         #[arg(long, value_name = "FOLDER")]
         out_dir: Option<PathBuf>,
 
+        /// Have the program's own types hold the values of the constructors and enums that this file names, in place
+        /// of the generated ones, with the functions that it names to convert them
+        #[arg(long, value_name = "FILE_PATH")]
+        adopt: Option<PathBuf>,
+
         /// Also read the standard input as if it were another file
         #[arg(long)]
         stdin: bool,
@@ -845,6 +850,7 @@ fn main() -> ExitCode {
             lang,
             out_file,
             out_dir,
+            adopt,
             stdin,
             typing,
             experimental: _,
@@ -869,6 +875,11 @@ fn main() -> ExitCode {
                 );
                 return ExitCode::from(EXIT_USAGE);
             }
+            // The file of adoptions is read before the inputs, since a mistake in it is one of the invocation too.
+            let adoptions = match adopt.as_deref().map(read_adoptions).transpose() {
+                Ok(adoptions) => adoptions.unwrap_or_default(),
+                Err(code) => return code,
+            };
             let codegen_matches = matches
                 .subcommand_matches("codegen")
                 .expect("the codegen subcommand was given");
@@ -901,7 +912,7 @@ fn main() -> ExitCode {
                 Ok(set) => set,
                 Err(code) => return code,
             };
-            codegen(stdin, out_file.as_deref(), &options, &set, &files)
+            codegen(stdin, out_file.as_deref(), &adoptions, &options, &set, &files)
         }
         Command::Check {
             stdin,
@@ -1622,6 +1633,7 @@ fn convert_typed_files(
 fn codegen(
     stdin: bool,
     out_file: Option<&Path>,
+    adoptions: &constructo::codegen::rust::Adoptions,
     options: &CheckOptions,
     set: &ProjectSet,
     files: &[PathBuf],
@@ -1630,14 +1642,29 @@ fn codegen(
         Ok(sources) => sources,
         Err(code) => return code,
     };
-    let generated = build_model(&sources, &set.layout(sources.len()), options).and_then(|model| {
-        let defaults = constructo::codegen::rust::Defaults {
-            widening: options.widening,
-            default_limit: options.default_limit,
-        };
-        constructo::codegen::rust::generate(&model, &defaults)
-    });
-    let generated = match generated {
+    let model = match build_model(&sources, &set.layout(sources.len()), options) {
+        Ok(model) => model,
+        Err(diagnostics) => {
+            for diagnostic in &diagnostics {
+                eprintln!("{}", diagnostic);
+            }
+            return ExitCode::from(EXIT_ERRORS);
+        }
+    };
+    // The adoptions are checked against the run once the inputs are known to be right, and a mistake in them is one
+    // of the file that `--adopt` names, as a mistake in the file of `--config` is.
+    let mistakes = adoptions.check(&model);
+    if !mistakes.is_empty() {
+        for mistake in &mistakes {
+            eprintln!("{}", mistake);
+        }
+        return ExitCode::from(EXIT_USAGE);
+    }
+    let defaults = constructo::codegen::rust::Defaults {
+        widening: options.widening,
+        default_limit: options.default_limit,
+    };
+    let generated = match constructo::codegen::rust::generate(&model, &defaults) {
         Ok(generated) => generated,
         Err(diagnostics) => {
             for diagnostic in &diagnostics {
@@ -1657,6 +1684,18 @@ fn codegen(
         Ok(()) => ExitCode::SUCCESS,
         Err(code) => code,
     }
+}
+
+/// Reads the file of adoptions that `--adopt` names, or reports why it cannot, with exit code 2.
+fn read_adoptions(path: &Path) -> Result<constructo::codegen::rust::Adoptions, ExitCode> {
+    let text = std::fs::read_to_string(path).map_err(|e| {
+        eprintln!("ERROR: Cannot read {}: {}", path.display(), e);
+        ExitCode::from(EXIT_USAGE)
+    })?;
+    constructo::codegen::rust::Adoptions::parse(&text, &path.display().to_string()).map_err(|diagnostic| {
+        eprintln!("{}", diagnostic);
+        ExitCode::from(EXIT_USAGE)
+    })
 }
 
 /// Writes the text to a new file beside the one at the path, which then takes its place, so that the file is either
