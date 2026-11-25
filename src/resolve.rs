@@ -618,6 +618,18 @@ impl Resolution {
         self.names.written(home, local, project, true)
     }
 
+    /// The names by which a values file of the project with the index in the layout refers to each of the
+    /// declarations, constructors or consts, given by their local names and the full names of their projects: every
+    /// name that it resolves to that declaration and to nothing else. These are the full name, the name through each
+    /// group whose scope has the declaration, `local` among them, and the bare name if `local` has it, each the new
+    /// name where an import renames it, and none where an import hides it.
+    ///
+    /// Each candidate is resolved as `check` resolves the names of a values file, and only those that resolve to the
+    /// declaration are kept, so a name that is given here is one that `check` accepts there, by construction.
+    pub fn read_in_project(&self, home: usize, declarations: &[(&str, &str)]) -> Vec<Vec<String>> {
+        self.names.read(home, declarations)
+    }
+
     /// A canonical name as the file with the index writes it, in the form that `written` gives. A name with no
     /// project, which is that of the files that were given without one, is written as it is.
     pub fn write_name(&self, file: usize, name: &str) -> String {
@@ -711,6 +723,60 @@ impl Names {
             Written::Group(group, name) => format!("{}::{}", group, name),
             Written::Full => format!("{}::{}", project, local),
         }
+    }
+
+    /// The names that a values file of the project `home` resolves to each declaration, as
+    /// `Resolution::read_in_project` says.
+    fn read(&self, home: Home, declarations: &[(&str, &str)]) -> Vec<Vec<String>> {
+        let resolver = Resolver {
+            layout: &self.layout,
+            homes: Vec::new(),
+            declared: self.declared.clone(),
+            sites: HashMap::new(),
+        };
+        let mut groups: Vec<&str> = vec!["local"];
+        for import in &self.layout.projects[home].imports {
+            if let Some(group) = import.group.as_deref() {
+                if !groups.contains(&group) {
+                    groups.push(group);
+                }
+            }
+        }
+        declarations
+            .iter()
+            .map(|&(local, project)| {
+                let Some(target) = self.layout.projects.iter().position(|p| p.name == project) else {
+                    return Vec::new();
+                };
+                let wanted = key(&self.layout, target, local);
+                let mut candidates = Vec::new();
+                if !project.is_empty() {
+                    candidates.push(format!("{}::{}", project, local));
+                }
+                for &group in &groups {
+                    let members = resolver.group_members(home, group).unwrap_or_default();
+                    for member in members.iter().filter(|m| m.home == target) {
+                        if let Some(name) = member.visible_name(local) {
+                            if group == "local" {
+                                candidates.push(name.clone());
+                            }
+                            candidates.push(format!("{}::{}", group, name));
+                        }
+                    }
+                }
+                let mut found: Vec<String> = Vec::new();
+                for candidate in candidates {
+                    if found.contains(&candidate) {
+                        continue;
+                    }
+                    let (resolved, error) = resolver.name(home, Ns::Value, &candidate, &[], true);
+                    if error.is_none() && resolved == wanted {
+                        found.push(candidate);
+                    }
+                }
+                found
+            })
+            .collect()
     }
 
     /// The shortest form in which a file of the project `home` can write a name: bare, else through a group if `groups`
