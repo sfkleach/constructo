@@ -44,6 +44,9 @@ other formats, since they need no types. With `--from=json-typed` or `--from=jso
 with the other values of `--from` it uses no setting and the options for experimental features and for types are
 refused, though the file is still read and has to be valid. It has no table of its own, because `--to-array` and
 `--compact` are choices for a run and not settings.
+`constructo codegen` reads `[global]` and `[experimental]`, and the same keys of `[check]` as `convert` does for the
+typed formats. It has no table of its own, since `--lang`, `--out-file` and `--adopt` are choices for a run, and the
+adoptions have [a file of their own](adopt-file-format.md).
 `constructo project init` uses no setting, though the file named by `--config` is still read and has to be valid.
 
 ### `[global]`

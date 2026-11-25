@@ -12,9 +12,9 @@ problems give which. The messages themselves are described with the commands tha
 
 There are no other codes. A diagnostic is a line on the standard error that starts `ERROR:` or `WARNING:`. An error
 is what makes a run exit with 1 or 2, and such a run has printed at least one. A run with exit code 1 may print many. A
-warning says that the inputs were used but something was left out, and does not change the exit code, so a run that
-only warns exits with 0. Only `constructo convert` gives warnings so far, and `constructo check` gives none, so a run of
-it that reports anything at all does not have exit code 0.
+warning says that the inputs were used but something was left out or changed, and does not change the exit code, so a
+run that only warns exits with 0. Only `constructo convert` and `constructo codegen` give warnings so far, and
+`constructo check` gives none, so a run of it that reports anything at all does not have exit code 0.
 
 The test that separates 1 from 2 is whether the thing that is wrong is **in the data that is being checked**. A syntax
 error, a duplicate name and a value of the wrong type are in the data, and are 1. A file that cannot be read, an
@@ -121,6 +121,25 @@ and the same errors have the same codes.
   cannot be read, an output that cannot be written, and, typed, the problems with a project-file or with how projects
   are found, as for `check`.
 
+## `constructo codegen`
+
+[The codegen command](codegen-command.md) checks the inputs as `check` does, so the errors of `check` have the same
+codes. What gives 1 is in the types, and 2 is the command, the file of adoptions and the setup.
+
+- **Exit code 0:** the code was written, to the file or the standard output, and `--help`. The warnings for the names
+  that the target language has to change are 0.
+- **Exit code 1:** the errors of `check` in the inputs, a type that the target language cannot hold, such as one that
+  holds itself with other arguments in Rust, and a const whose value it cannot hold, such as a `Nat` too large for a
+  `u64`. Nothing is written.
+- **Exit code 2:** an option or an argument that is not understood, which includes a missing `--lang`, a language that
+  is not known, and `--out-dir` for a language that writes one file; a file of adoptions that cannot be read or has a
+  mistake in it, including a name that the run does not have (see [the file of adoptions](adopt-file-format.md));
+  `--config` given more than once or one that cannot be read, an input that cannot be read, an output that cannot be
+  written, and the problems with a project-file or with how projects are found, as for `check`. Nothing is written.
+
+A mistake in the file of adoptions is 2 although some of them are only found once the inputs are known, as a name that
+the run does not have, since the file is a setting of the run, and is put right where the setting is.
+
 ## `constructo project`
 
 - `constructo project update` exits with 0 when it has written the lock or found it up to date, and with 2 for any
@@ -162,6 +181,8 @@ constructo check missing.types bad-syntax.types   # exit code 2
 
 - [The check command](check-command.md), for the stages of a run and where the errors of code 1 come from.
 - [The convert command](convert-command.md), for the warning and the errors of `convert`.
+- [The codegen command](codegen-command.md) and [the file of adoptions](adopt-file-format.md), for the warnings and the
+  errors of `codegen`.
 - [The configuration file](config-file.md), [the project-file](project-file-format.md),
   [the lock file](lock-file-format.md), [the cache](cache-management.md) and
   [how git is run](git-management.md), for the errors of code 2.
