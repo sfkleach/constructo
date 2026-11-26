@@ -33,7 +33,7 @@ third raised only questions of its own language, which is the sign that the comm
   `tests/functest.sh`. A step that adds a kind of test adds it to one of these, so that it runs every time.
 - **The decisions are written by the step that implements them**, so that each is checked against working code when
   it is written. The table at the end gives each entry of the draft's "Decisions to write" a step. The next number is
-  0056.
+  0058.
 - **Three pull requests**, so that the large mechanical change is merged before the new code depends on it:
   - the design and steps 1 and 2, which change no behaviour and touch every import of the six modules;
   - steps 3, 4 and 5, which give a working codec without adoption;
@@ -195,6 +195,10 @@ adoptions, and decision 55. The writer of an adopted generic type bounds its par
 - **Done when** the shapes scenario runs with its adoptions, generated and not written by hand.
 
 ## Step 7: documentation
+
+*Done,* as [plan-step7.md](plan-step7.md) says: `docs/specs/codegen-command.md` and, for the file of adoptions,
+`docs/specs/adopt-file-format.md`, with the links from the other specs; decisions 56 and 57; a note on decision 39 in
+place of a new wording; and the CHANGELOG, the README and the `--help` of the command.
 
 - `docs/specs/codegen-command.md`: the command, its options, its output, its messages and exit codes, and the mapping
   for Rust, including the range of each number type and the `Float` exception. `exit-codes.md` and the "Related"
