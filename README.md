@@ -41,6 +41,23 @@ see the [spec](docs/specs/convert-command.md). `constructo query` extracts and t
 expression over the stream of the input values, such as `#values.filter_match(|Move { x, .. }| x)`, with or without
 the types; see the [spec](docs/specs/query-command.md).
 
+`constructo codegen --lang=rust` writes the Rust types of a project, and a codec
+that reads data-values into them and writes them back, so that a program can
+keep its data in Constructo:
+
+```
+constructo codegen --lang=rust --project=shapes --out-file=src/shapes.rs
+```
+
+```rust
+let drawing: shapes::Drawing = shapes::codec().read(&text)?;
+```
+
+The data can only be what the type permits, and a program can have its own
+types hold some values with `--adopt`. The generated code depends on the small
+crate `constructo-runtime`, which holds the syntax of data-values; see the
+[spec](docs/specs/codegen-command.md).
+
 Types can be organised into *projects*: a folder with a `constructo.toml` that
 names the project and lists the projects it imports, whether from a folder, from
 a git repository at a pinned revision, or built in. `constructo project init`

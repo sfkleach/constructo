@@ -220,6 +220,26 @@ Following the style in https://keepachangelog.com/en/1.0.0/
   query can instead be read from a file with `--expr-file=QUERY_FILE`. See
   `docs/specs/query-command.md`, decision 44, and the query grammar in `syntax/grammar.md`, with its examples in
   `syntax/examples/query/`. The library has the `query` module and `query_typed`, and depends on `num-bigint`.
+- The crate `constructo-runtime`, which holds the syntax of data-values, the lexer, the parser, the printer and the
+  depth limit, and which generated code depends on. `constructo` and it are a workspace, released at the same version,
+  and `constructo` re-exports its modules under their old paths. See decision 46.
+- A conformance suite for the syntax, in `syntax/conformance/`, which every runtime must pass: values files and the
+  Constructo text or the error that each gives. The Rust runtime passes it. See decision 47.
+- `constructo codegen --lang=rust` writes a Rust module with a type for each type of a project and its imports, and a
+  codec that reads the text of data-values into them and writes them back, as `shapes::codec().read::<Drawing>(text)`.
+  The inputs are checked as `check` checks them, and nothing is written if there is an error. The code needs
+  `constructo-runtime`. See `docs/specs/codegen-command.md` and decisions 48 to 54 and 57.
+  - The codec reads only the constructors and consts of the run, as the root project names them, and writes the names
+    as the root project writes them, or in full. Its settings are the names, the depth limit, the limit on defaults
+    and widening. An error has the path in the value and the position in the text.
+  - A name that Rust needs changed, such as a keyword or a clash, is a warning. A type that holds itself with other
+    arguments, and a const whose value Rust cannot hold, such as a `Nat` too large for a `u64`, are errors with exit
+    code 1. A `Nat` or `Int` outside the range of a `u64` or `i64` is refused when it is read.
+  - `--out-file=FILE_PATH` replaces the file at once. `--out-dir` is for a language that writes a folder, and is a
+    usage error for Rust.
+  - `--adopt=FILE_PATH` names a TOML file of the program's own types for some constructors and enums, with the
+    functions that convert them, which may refuse a value. See `docs/specs/adopt-file-format.md` and decision 55.
+  - serde, Rust items for the consts and default arguments when a program builds a value are not supported.
 
 ### Changed
 
