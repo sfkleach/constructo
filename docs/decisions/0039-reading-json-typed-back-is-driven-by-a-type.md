@@ -56,3 +56,11 @@ The chosen option is the one under Decision. Alternatives considered:
   are known.
 - Only a declared name as the type: shorter to implement, and `[Shape]` and `Option<Shape>` are what a person wants.
 - Leaving out a field that has a default: it would write text that `check` refuses.
+
+## Additional Notes
+
+- *Added 2026-11-26.* "Driven by a type" describes how the reader is written: it is given the type, and follows it. What
+  the data may do is the stronger statement of
+  [decision 52](0052-reading-is-constrained-by-the-target-type.md), that reading is constrained by the target type, so
+  that the data can only be what the type permits. It holds of this reader too, which builds nothing that the type does
+  not have. The title is kept, since it is linked from other documents.

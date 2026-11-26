@@ -352,6 +352,8 @@ for it, and its errors are in [the file of adoptions](adopt-file-format.md). See
   long chain of a list, can overflow the stack when it is dropped. The codec reads nothing deeper than `max_depth`, so
   this is only for what the program builds, and is the program's to manage.
 - **Default arguments when a program builds a value.** Rust has none, and the generated types have no `impl Default`.
+  A language that has them may, as
+  [decision 56](../decisions/0056-a-generated-class-may-give-a-named-parameter-its-default.md) says.
 
 ## Exit codes
 
@@ -373,4 +375,4 @@ See [the exit codes](exit-codes.md).
 - [Type checking](type-checking.md), for the defaults and what a number is, and
   [resolving identifiers](resolving-identifiers.md), for the forms of a name.
 - [The exit codes](exit-codes.md) and [the configuration file](config-file.md).
-- Decisions 18 and 46 to 55, in `docs/decisions/`.
+- Decisions 18 and 46 to 57, in `docs/decisions/`.
