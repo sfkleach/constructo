@@ -341,11 +341,24 @@ The settings file is read for [global] and [experimental].",
 
     /// Write the code that a program in another language uses to read and write the values of the types
     #[command(after_help = "\
-The types are checked as `check` checks them, values and all, and nothing is written if there is an error. A name \
-that has to change in the target language, because it is a keyword or it clashes, is reported as a warning. For \
-example:
+The file has a type for each type of the project and its imports, and a codec that reads the text of data-values into \
+them and writes them back, as `shapes::codec().read::<shapes::Drawing>(&text)`. The generated code depends on the \
+crate constructo-runtime, of the version that its header names. For example:
 
-    constructo codegen --lang=rust --project=shapes --out-file=src/shapes.rs")]
+    constructo codegen --lang=rust --project=shapes --out-file=src/shapes.rs
+
+The types are checked as `check` checks them, values and all, and nothing is written if there is an error. A name \
+that has to change in the target language, because it is a keyword or it clashes, is reported as a warning.
+
+With --adopt=FILE_PATH, the program's own types hold the values of the constructors and enums that a TOML file names:
+
+    [rust.constructor.\"com.example.ids::Uuid\"]
+    type = \"uuid::Uuid\"
+    from = \"crate::adopt::uuid_from_string\"
+    to = \"crate::adopt::uuid_to_string\"
+
+The command and the file are described in
+https://github.com/sfkleach/constructo/blob/main/docs/specs/codegen-command.md")]
     Codegen {
         /// The language to write: rust, which writes one file, the module of the project
         #[arg(long, value_name = "LANG")]
