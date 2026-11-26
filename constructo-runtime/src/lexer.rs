@@ -5,25 +5,40 @@ use crate::diagnostics::Pos;
 /// The words that the lexer gives their own tokens, so that they cannot be the name of anything.
 pub const KEYWORDS: [&str; 2] = ["enum", "const"];
 
+/// A token of a types file or a values file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Tok {
+    /// The keyword `enum`.
     Enum,
+    /// The keyword `const`.
     Const,
     /// An identifier starting with an uppercase letter.
     TypeName(String),
     /// An identifier starting with a lowercase letter or underscore, other than `enum` and `const`.
     Name(String),
+    /// `=`.
     Eq,
+    /// `,`.
     Comma,
+    /// `;`.
     Semi,
+    /// `<`.
     Lt,
+    /// `>`.
     Gt,
+    /// `{`.
     LBrace,
+    /// `}`.
     RBrace,
+    /// `(`.
     LParen,
+    /// `)`.
     RParen,
+    /// `[`.
     LBracket,
+    /// `]`.
     RBracket,
+    /// `:`.
     Colon,
     /// `::`, which follows the group or the full name of a project in a qualified name.
     ColonColon,
@@ -43,12 +58,16 @@ pub enum Tok {
     Invalid(char),
     /// A malformed literal. The token's position is that of the offending character.
     Error(String),
+    /// The end of the text.
     Eof,
 }
 
+/// A token and where it starts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token {
+    /// The token.
     pub tok: Tok,
+    /// The position of its first character.
     pub pos: Pos,
 }
 
@@ -214,7 +233,9 @@ fn scan_number(chars: &[char], start: usize) -> (Tok, usize, Option<(usize, Stri
 ///
 /// Returns the decoded text and the index after the closing quote. For a malformed string it returns the index of the
 /// error, the message, and the index at which lexing should resume. The lexer of queries uses it too, so that a string
-/// in a query is read as one in a values file is.
+/// in a query is read as one in a values file is. It is hidden from the documentation, since it is there for
+/// `constructo` and is not a part of the API that generated code relies on.
+#[doc(hidden)]
 pub fn scan_string(chars: &[char], start: usize) -> Result<(String, usize), (usize, String, usize)> {
     let mut text = String::new();
     let mut i = start + 1;

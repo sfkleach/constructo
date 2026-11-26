@@ -5,7 +5,9 @@ use std::fmt;
 /// A position in a source text. Both fields are 1-based and the column counts characters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Pos {
+    /// The line, from 1.
     pub line: u32,
+    /// The column, from 1, in characters.
     pub col: u32,
 }
 
@@ -26,11 +28,13 @@ impl fmt::Display for Pos {
 }
 
 /// How serious a diagnostic is. An error means that the inputs are wrong, and a warning that they were used but
-/// something was left out or may not be what was meant. Only the `convert` subcommand reports warnings at present.
+/// something was left out or may not be what was meant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Severity {
+    /// The inputs are wrong, and the run fails.
     #[default]
     Error,
+    /// The inputs were used, and the run does not fail.
     Warning,
 }
 
@@ -64,15 +68,20 @@ pub fn shown(text: &str) -> String {
 /// warning.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
+    /// Whether it is an error or a warning.
     pub severity: Severity,
+    /// The name of the file, as it is shown.
     pub file: String,
+    /// Where in the file it was found.
     pub pos: Pos,
+    /// What the problem is.
     pub message: String,
     /// Extra information, such as where a duplicated name was first declared.
     pub note: Option<String>,
 }
 
 impl Diagnostic {
+    /// A diagnostic that is an error, with no note.
     pub fn new(file: &str, pos: Pos, message: impl Into<String>) -> Self {
         Diagnostic {
             severity: Severity::Error,
@@ -91,6 +100,7 @@ impl Diagnostic {
         }
     }
 
+    /// The diagnostic with a note added.
     pub fn with_note(mut self, note: impl Into<String>) -> Self {
         self.note = Some(note.into());
         self

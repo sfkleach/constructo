@@ -232,7 +232,9 @@ fn quoted(text: &str) -> String {
 }
 
 /// The value with every position replaced by one place, so that values can be compared. It is public so that the
-/// tests of the crates that use this one can compare values too.
+/// tests of `constructo` can compare values too. It is hidden from the documentation, since it is there for those
+/// tests and is not a part of the API that generated code relies on.
+#[doc(hidden)]
 pub fn bare(value: &Value) -> Value {
     let pos = crate::diagnostics::Pos { line: 1, col: 1 };
     let all = |items: &[Value]| items.iter().map(bare).collect::<Vec<_>>();

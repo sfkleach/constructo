@@ -1,4 +1,7 @@
-//! A recursive-descent parser for data-type declarations.
+//! A recursive-descent parser for types files and values files.
+//!
+//! It is the parser of `constructo check`. Generated code reads values through `codec::parse`, which uses it, and
+//! does not parse types files.
 //!
 //! The parser stops at the first syntax error: there is no error recovery.
 
@@ -13,7 +16,9 @@ use crate::limits::MAX_DEPTH;
 /// The first syntax error found in a text.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyntaxError {
+    /// Where the error was found.
     pub pos: Pos,
+    /// What the error is.
     pub message: String,
     /// The enum or const being parsed when the error occurred, if its name had been read, e.g. `enum Shape`.
     pub context: Option<String>,
@@ -24,7 +29,9 @@ type Result<T> = std::result::Result<T, SyntaxError>;
 /// The kind of a file, which is decided by its first token.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceKind {
+    /// A types file, which declares enums and consts.
     Types,
+    /// A values file, which holds data values.
     Values,
 }
 
@@ -41,7 +48,9 @@ impl SourceKind {
 /// The contents of a successfully parsed file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Parsed {
+    /// The declarations of a types file.
     Types(TypesFile),
+    /// The values of a values file, in order.
     Values(Vec<Value>),
 }
 
