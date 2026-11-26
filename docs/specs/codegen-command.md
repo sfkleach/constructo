@@ -49,6 +49,9 @@ codec reads and writes the names and consts of the run and no others.
 | `--dev`, `--no-dev`               | Whether imported folders are left out of the lock check.                       |
 | `-x`, `--no-experimental`         | The experimental features of the syntax.                                       |
 
+**The languages are listed by `--help`,** under `--lang`, each with what it writes, and a language that is not one of
+them is refused by the argument parser, which lists them: `[possible values: rust]`.
+
 The options for the types mean what they mean for [the check command](check-command.md), and the keys of `[check]` of a
 settings file with the same names, `prelude`, `widening`, `allow-refs`, `infer-limit`, `default-limit` and `dev`, set
 them, as for `convert` (see [the configuration file](config-file.md)). `--widening` and `--default-limit` also give the
@@ -360,10 +363,9 @@ for it, and its errors are in [the file of adoptions](adopt-file-format.md). See
 - **Exit code 0:** the code was written, with warnings or without, and `--help`.
 - **Exit code 1:** an error of `check` in the inputs, a type that Rust cannot hold, and a const whose value Rust cannot
   hold.
-- **Exit code 2:** an option or an argument that is not understood, a language that is not known (`ERROR: Unknown
-  language python: the languages are rust`), `--out-dir` for Rust, a file of adoptions that cannot be read or has a
-  mistake, an input that cannot be read, an output that cannot be written, and the problems with a project-file or with
-  how projects are found, as for `check`.
+- **Exit code 2:** an option or an argument that is not understood, which includes a language that is not known,
+  `--out-dir` for Rust, a file of adoptions that cannot be read or has a mistake, an input that cannot be read, an
+  output that cannot be written, and the problems with a project-file or with how projects are found, as for `check`.
 
 See [the exit codes](exit-codes.md).
 

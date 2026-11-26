@@ -53,6 +53,14 @@ enum Feature {
     SomeQuery,
 }
 
+/// The languages that `codegen` writes. Clap lists them, with their descriptions, in `--help` and in the error for a
+/// language that is not one of them, so a new target is added here and nowhere else.
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+enum Lang {
+    /// One file, the module of the root project, with a module in it for each other project
+    Rust,
+}
+
 /// Works out which experimental features have been switched on, given the ones that are on to begin with and the
 /// arguments that switch features on or off in the order in which they were written. The last argument to mention a
 /// feature wins.
@@ -360,9 +368,9 @@ With --adopt=FILE_PATH, the program's own types hold the values of the construct
 The command and the file are described in
 https://github.com/sfkleach/constructo/blob/main/docs/specs/codegen-command.md")]
     Codegen {
-        /// The language to write: rust, which writes one file, the module of the project
-        #[arg(long, value_name = "LANG")]
-        lang: String,
+        /// The language to write
+        #[arg(long, value_name = "LANG", value_enum)]
+        lang: Lang,
 
         /// Write the code to this file, which is replaced as a whole, instead of to the standard output
         #[arg(long, value_name = "FILE_PATH")]
@@ -870,12 +878,9 @@ fn main() -> ExitCode {
             no_experimental: _,
             files,
         } => {
-            // The language and the output are checked before anything is read, since they are mistakes of the
-            // invocation that no input can put right.
-            if lang != "rust" {
-                eprintln!("ERROR: Unknown language {}: the languages are rust", lang);
-                return ExitCode::from(EXIT_USAGE);
-            }
+            // The output is checked before anything is read, since it is a mistake of the invocation that no input
+            // can put right. Clap has already refused a language that is not one of `Lang`.
+            let Lang::Rust = lang;
             if out_dir.is_some() {
                 let both = if out_file.is_some() {
                     "--out-file and --out-dir cannot both be given. "
