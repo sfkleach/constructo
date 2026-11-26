@@ -104,6 +104,23 @@ project-file, the lock file and the settings file, and the commands' specs link 
 3. The CHANGELOG, the README and `--help`.
 4. The draft and the outline brought up to date.
 
+## As it was built
+
+*Done,* in the four commits above, with decisions 56 and 57. What the plan did not say:
+
+- **The specs were checked against the code and the binary,** and two of the draft's claims were corrected: a type with
+  no default is named without its arguments, as `Type List has no default value`, and the column of the example of an
+  error is the one that the codec gives.
+- **The codec's section on names is "Names in the text",** so that it has an anchor of its own beside the section on the
+  names that Rust needs changed, which `resolving-identifiers.md` links to.
+- **`exit-codes.md` no longer says that only `convert` gives warnings,** since `codegen` gives them too, and it says why
+  a mistake in the file of adoptions that is only found against the run is exit code 2.
+- **`codegen-command.md` links to decisions 56 and 57,** in its "Related" section and where it says that Rust has no
+  default arguments.
+- **The `--help` links to the spec,** as that of `check` links to the spec of the settings file.
+- **`docs/specs/query-command.md:125` is longer than 120 characters,** from an earlier commit, and is left for the user
+  to decide.
+
 ## Done when
 
 - Every behaviour of `codegen` and of the code that it writes, which a user or a program can rely on, is in a spec.

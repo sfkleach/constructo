@@ -703,8 +703,8 @@ writer writes, since an argument that has a name is written by name, as
 - **Other crates.** Whether the generated types also implement the traits of
   another crate, such as `serde`, so that other notations can use them. It is not
   needed for the goal, and it is not in this task unless it is wanted.
-  *Decided* in step 5: not supported in the first version, which step 7
-  documents.
+  *Decided* in step 5: not supported in the first version, which
+  `docs/specs/codegen-command.md` documents.
 
 ### Recursion
 
@@ -1202,8 +1202,9 @@ names.
 - That names and consts are resolved as the value is read and written, and not
   in a pass of their own. *Written:* decision 52.
 - That a generated class may give a named parameter its default, from the
-  codec's own function, where the language has default arguments.
-- The name `codegen`.
+  codec's own function, where the language has default arguments. *Written:*
+  decision 56.
+- The name `codegen`. *Written:* decision 57.
 - That names are written relative to the project by default, and in full when a
   codec is set to write them so. *Written:* decision 53.
 - That a setting which changes the generated code is given to the command, and
