@@ -2565,7 +2565,7 @@ expect_codegen_error() {
         fail "codegen: $name (expected exit $code with '$expected', got exit $actual and '$err')"
     fi
 }
-expect_codegen_error "an unknown language" 2 "ERROR: Unknown language python: the languages are rust" \
+expect_codegen_error "an unknown language" 2 "[possible values: rust]" \
     --lang=python "$CODEGEN/names.types"
 expect_codegen_error "no language" 2 "--lang <LANG>" "$CODEGEN/names.types"
 expect_codegen_error "a folder for Rust" 2 \
