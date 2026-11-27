@@ -60,9 +60,15 @@ functest:
 install:
     cargo install --path .
 
-# A release has to publish constructo-runtime before constructo, since cargo publish refuses a crate whose dependency
-# is not on crates.io, and the two have the same version. The recipes below do not do that yet: step 8 of the codegen
-# task (docs/tasks/2026-11-17-codegen-subcommand-for-rust/implementation-plan.md) changes them to.
+# A release publishes both crates, constructo-runtime and constructo, which have the same version: shippable refuses
+# one where they differ. cargo publish --workspace, which release-publish.yml runs, publishes the runtime first, since
+# cargo publish refuses a crate whose dependency is not on crates.io.
+#
+# The workflow gets its token from crates.io by trusted publishing, which crates.io gives only to a crate that exists.
+# So the first release of the two is published by hand, after draft-release, with a token of the maintainer's:
+#     git checkout v0.1.0 && cargo publish --workspace && gh release edit v0.1.0 --draft=false --latest
+# and trusted publishing is then set up on the page of each crate, for this repository and release-publish.yml.
+# Every later release is published by publish-release.
 
 # Sign and push a release tag, triggering the release-draft.yml workflow.
 # Monitor the workflow run manually via: gh run list --workflow=release-draft.yml

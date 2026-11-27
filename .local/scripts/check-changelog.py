@@ -1,38 +1,83 @@
 #!/usr/bin/env python3
-"""Check that the top section of CHANGELOG.md is a version release and matches Cargo.toml.
+"""Check that the top section of CHANGELOG.md is a version release and matches Cargo.toml, and that the two crates
+that are released together have the same version.
 
 Usage: check-changelog.py
 
 Exits with a non-zero status if:
 - The first ## section heading contains the word 'unreleased', or
 - The version in the first ## heading does not match the version in Cargo.toml, or
-- The version in Cargo.lock does not match the version in Cargo.toml.
+- The version in Cargo.lock does not match the version in Cargo.toml, or
+- The version of constructo-runtime, in its Cargo.toml or in Cargo.lock, is not that of constructo, or
+- constructo does not depend on exactly that version of constructo-runtime.
+
+The two crates are published together, the runtime first, and the code that constructo codegen writes names the
+version of the runtime that it needs from the version of constructo, so they cannot differ.
 """
 import re
 import sys
 
 
-def cargo_version() -> str:
-    with open("Cargo.toml") as f:
+RUNTIME = "constructo-runtime"
+
+
+def cargo_version(path: str = "Cargo.toml") -> str:
+    """Return the first version in a manifest, which is that of its package."""
+    with open(path) as f:
         for line in f:
             m = re.match(r'^version\s*=\s*"([^"]+)"', line)
             if m:
                 return m.group(1)
-    print("FAIL: Could not find version in Cargo.toml.")
+    print(f"FAIL: Could not find version in {path}.")
     sys.exit(1)
 
 
-def lock_version() -> str:
-    """Return the version of the top-level package recorded in Cargo.lock."""
+def lock_version(package: str = "constructo") -> str:
+    """Return the version of a package of the workspace recorded in Cargo.lock."""
     with open("Cargo.lock") as f:
         content = f.read()
-    # Cargo.lock lists the workspace packages first; find the [[package]] block
-    # for 'constructo' and extract its version.
-    m = re.search(r'\[\[package\]\]\s+name\s*=\s*"constructo"\s+version\s*=\s*"([^"]+)"', content)
+    # Find the [[package]] block for the package and extract its version.
+    m = re.search(r'\[\[package\]\]\s+name\s*=\s*"' + re.escape(package) + r'"\s+version\s*=\s*"([^"]+)"', content)
     if m:
         return m.group(1)
-    print("FAIL: Could not find constructo package entry in Cargo.lock.")
+    print(f"FAIL: Could not find {package} package entry in Cargo.lock.")
     sys.exit(1)
+
+
+def runtime_requirement() -> str:
+    """Return the version requirement of the dependency of constructo on constructo-runtime."""
+    with open("Cargo.toml") as f:
+        for line in f:
+            m = re.match(r'^' + re.escape(RUNTIME) + r'\s*=\s*\{[^}]*\bversion\s*=\s*"([^"]+)"', line)
+            if m:
+                return m.group(1)
+    print(f"FAIL: Could not find the version of the dependency on {RUNTIME} in Cargo.toml.")
+    sys.exit(1)
+
+
+def check_runtime(version: str) -> None:
+    """Fail unless constructo-runtime has the version of constructo, and constructo depends on exactly it."""
+    runtime = cargo_version(f"{RUNTIME}/Cargo.toml")
+    if runtime != version:
+        print(
+            f"FAIL: {RUNTIME}/Cargo.toml version '{runtime}' does not match "
+            f"Cargo.toml version '{version}' — the two are released together."
+        )
+        sys.exit(1)
+    locked = lock_version(RUNTIME)
+    if locked != version:
+        print(
+            f"FAIL: Cargo.lock version '{locked}' of {RUNTIME} does not match "
+            f"Cargo.toml version '{version}' — run 'cargo build' and commit Cargo.lock."
+        )
+        sys.exit(1)
+    requirement = runtime_requirement()
+    if requirement != f"={version}":
+        print(
+            f"FAIL: Cargo.toml depends on {RUNTIME} '{requirement}', "
+            f"which should be '={version}'."
+        )
+        sys.exit(1)
 
 
 def main() -> None:
@@ -91,7 +136,12 @@ def main() -> None:
         )
         sys.exit(1)
 
-    print(f"OK: Top CHANGELOG section is '{heading}' (matches Cargo.toml v{version}, Cargo.lock v{locked}).")
+    check_runtime(version)
+
+    print(
+        f"OK: Top CHANGELOG section is '{heading}' (matches Cargo.toml v{version}, Cargo.lock v{locked}, "
+        f"and {RUNTIME} v{version})."
+    )
     sys.exit(0)
 
 
