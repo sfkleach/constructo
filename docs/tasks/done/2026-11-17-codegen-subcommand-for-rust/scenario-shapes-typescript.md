@@ -202,7 +202,7 @@ in `_build/`, so that nothing is installed in `docs/`:
 
 ```
 npm install --prefix _build/scenario/ts typescript@7.0.2 @types/node@24
-cd docs/tasks/2026-11-17-codegen-subcommand-for-rust/scenario-shapes/typescript
+cd docs/tasks/done/2026-11-17-codegen-subcommand-for-rust/scenario-shapes/typescript
 ../../../../../_build/scenario/ts/node_modules/.bin/tsc -p .
 cd ../projects/shapes
 CONSTRUCTO=../../../../../../_build/target/debug/constructo \

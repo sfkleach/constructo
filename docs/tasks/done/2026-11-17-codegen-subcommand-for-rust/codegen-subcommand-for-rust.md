@@ -814,7 +814,7 @@ of any size and would use them.
 is an error, as writing can be (below), and a `Float` that is too large for an
 `f64`, such as `1.0e400`, is refused when it is read, as a whole number that
 does not fit is. The task
-[non-finite-values](../todo/2026-11-21-non-finite-values/non-finite-values.md)
+[non-finite-values](../../todo/2026-11-21-non-finite-values/non-finite-values.md)
 gives them a text (`0n1.0`, `-0n1.0` and `0n0.0`), and when it is done the
 `f64` of Rust maps to it in both directions.
 
@@ -1036,7 +1036,7 @@ Two consequences, which the targets so far have to meet:
 
 **`Float` is the one exception.** A `Float` is a real number, extended by +∞, −∞
 and nullity, with Anderson's transreal arithmetic as their theory (the task
-[non-finite-values](../todo/2026-11-21-non-finite-values/non-finite-values.md)
+[non-finite-values](../../todo/2026-11-21-non-finite-values/non-finite-values.md)
 gives them a text). The notation writes only rationals, an integer over a power
 of ten, so a value in a text is always one of those. Held exactly, it would need
 a decimal or rational type in every target, which no one would want, since the
@@ -1061,7 +1061,7 @@ hardware is IEEE 754, and escaping it gains little and costs much. So:
   the infinities, and nullity to NaN, and every NaN is written as nullity.
   Until then, writing one is an error, as the section on numbers says.
 
-The model of a `Float` is in [type checking](../../specs/type-checking.md), the
+The model of a `Float` is in [type checking](../../../specs/type-checking.md), the
 section "What a number is", and in decision 45, which step 1 wrote.
 
 `Option` in Python is the case that showed it

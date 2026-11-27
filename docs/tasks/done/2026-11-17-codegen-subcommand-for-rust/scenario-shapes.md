@@ -394,7 +394,7 @@ From the root of the repository, with the build in `_build/` so that nothing is
 written in `docs/`:
 
 ```
-cd docs/tasks/2026-11-17-codegen-subcommand-for-rust/scenario-shapes/projects/shapes
+cd docs/tasks/done/2026-11-17-codegen-subcommand-for-rust/scenario-shapes/projects/shapes
 CARGO_TARGET_DIR=../../../../../../_build/scenario cargo run --offline \
     --manifest-path ../../rust/Cargo.toml -- values/drawing.values ../../../../../../_build/scenario/written.values
 constructo check --project=. ../../../../../../_build/scenario/written.values

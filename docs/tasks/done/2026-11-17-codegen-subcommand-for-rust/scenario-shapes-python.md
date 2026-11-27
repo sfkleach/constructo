@@ -326,7 +326,7 @@ common to every target, or what the draft says of all of them.
 From the folder of the shapes project, with the binary built and Python 3.12:
 
 ```
-cd docs/tasks/2026-11-17-codegen-subcommand-for-rust/scenario-shapes/projects/shapes
+cd docs/tasks/done/2026-11-17-codegen-subcommand-for-rust/scenario-shapes/projects/shapes
 CONSTRUCTO=../../../../../../_build/target/debug/constructo PYTHONPATH=../../python PYTHONDONTWRITEBYTECODE=1 \
     python3 ../../python/main.py values/drawing.values ../../../../../../_build/scenario/py-written.values
 ```
