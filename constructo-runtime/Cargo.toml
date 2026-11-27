@@ -5,5 +5,10 @@ edition = "2021"
 description = "The syntax of Constructo data-values: the lexer, parser and printer that generated code depends on"
 license = "MIT"
 repository = "https://github.com/sfkleach/constructo"
+readme = "README.md"
+keywords = ["constructo", "parser", "serialization", "codegen"]
+categories = ["parser-implementations", "encoding"]
+# The tests need the repository, the conformance suite and the licence beside the crate, so they are not published.
+exclude = ["tests/"]
 
 [dependencies]
