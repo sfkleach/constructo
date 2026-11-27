@@ -49,6 +49,7 @@ records a checksum of every imported project in `constructo.lock`, and
 `constructo check --project=FOLDER` verifies it. See the
 [formats](docs/specs/project-file-format.md) for the details.
 
-See [docs/vision.md](docs/vision.md) for the intended use and
+New to Constructo? Start with the [tutorials](docs/teach/README.md). See
+[docs/vision.md](docs/vision.md) for the intended use and
 [syntax/](syntax/grammar.md) for the grammars and examples. It is open source
 under the MIT licence.

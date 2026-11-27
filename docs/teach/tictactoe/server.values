@@ -1,0 +1,11 @@
+Welcome { playerId: "0x276ef98" };
+GameCreated { gameId: "2026-11-11-14:19:05-1" };
+GameStart { gameId: "2026-11-11-14:19:05-1", you: Cross, opponent: "Grace", turn: Cross };
+State { board: [Some(Cross),None,Some(Nought),None,Some(Cross),None,None,None,None], turn: Nought };
+MoveMade { cell: 4, mark: Cross, next: Nought };
+GameOver { outcome: Won{ winner: Cross, line: [0,4,8] } };
+RematchOffered { from: "Grace" };
+OpponentLeft { reason: Disconnection };
+ChatFrom { from: "Grace", text: "gg" };
+Error { code: NOT_YOUR_TURN, message: "..." };
+Pong {};

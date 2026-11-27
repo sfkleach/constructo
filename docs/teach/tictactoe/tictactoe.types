@@ -1,0 +1,30 @@
+enum Mark = Nought, Cross;
+enum Result = Win, Draw;
+enum Outcome = Won{  winner: Mark, line: [Nat] }, Drawn {};
+
+enum ErrorCode = NOT_YOUR_TURN, CELL_TAKEN, INVALID_CELL, GAME_NOT_FOUND, GAME_FULL, GAME_OVER, BAD_MESSAGE;
+enum Reason = Disconnection, Resignation;
+
+enum Client =
+    Join { name: String },
+    CreateGame {},
+    JoinGame { gameId: String },
+    Move { gameId: String, cell: Nat },
+    Rematch { gameId: String },
+    Resign { gameId: String },
+    Leave { gameId: String },
+    ChatTo { gameId: String, text: String },
+    Ping {};
+
+enum Server =
+    Welcome { playerId: String },
+    GameCreated { gameId: String },
+    GameStart { gameId: String, you: Mark, opponent: String, turn: Mark },
+    State { board: [Mark?], turn: Mark },
+    MoveMade { cell: Nat, mark: Mark, next: Mark },
+    GameOver { outcome: Outcome },
+    RematchOffered { from: String },
+    OpponentLeft { reason: Reason },
+    ChatFrom { from: String, text: String },
+    Error { code: ErrorCode, message: String },
+    Pong {};

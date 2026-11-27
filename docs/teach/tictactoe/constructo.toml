@@ -1,0 +1,17 @@
+[project]
+# The full name of the project: two or more parts, separated by dots.
+name = "com.steelypip.scrapbook.constructo.tictactoe"
+# The files that belong to the project, as glob patterns in the folder of the project.
+include = ["**/*.types"]
+exclude = []
+
+# Another project is imported with a table like this, with exactly one of path, builtin and repo.
+# [[import]]
+# project-name = "com.example.base"
+# group = "base"
+# path = "../base"
+# hide = ["Debug"]
+#
+# [import.rename]
+# The name used here = the name in the imported project.
+# Point = "BasePoint"
