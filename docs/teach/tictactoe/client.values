@@ -1,0 +1,9 @@
+Join { name: "Steve" };
+CreateGame {};
+JoinGame { gameId: "2026-11-11-14:19:05-1" };
+Move { gameId: "2026-11-11-14:19:05-1", cell: 4 };
+Rematch { gameId: "2026-11-11-14:19:05-1" };
+Resign { gameId: "2026-11-11-14:19:05-1" };
+Leave { gameId: "2026-11-11-14:19:05-1" };
+ChatTo { gameId: "2026-11-11-14:19:05-1", text: "gg" };
+Ping {};

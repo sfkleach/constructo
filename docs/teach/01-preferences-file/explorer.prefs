@@ -1,0 +1,9 @@
+Preferences {
+    show_hidden: true,
+    symlinks: Follow,
+    sort_by: Name,
+    folders_first: true,
+    layout: Icons,
+    start_folder: "/home/user",
+    bookmarks: ["/home/user/Documents", "/home/user/Downloads"],
+};

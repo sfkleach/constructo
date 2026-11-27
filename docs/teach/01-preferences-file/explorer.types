@@ -1,0 +1,20 @@
+// The preferences of an imaginary file explorer.
+enum Preferences =
+    Preferences {
+        show_hidden: Bool,
+        symlinks: Symlinks,
+        sort_by: SortKey,
+        folders_first: Bool,
+        layout: Layout,
+        start_folder: String,
+        bookmarks: [String],
+    };
+
+// How to treat a symbolic link.
+enum Symlinks = Show, Follow, Hide;
+
+// What the listing is sorted by.
+enum SortKey = Name, Size, Type, Modified;
+
+// How the listing is laid out.
+enum Layout = Icons, List, Columns;
