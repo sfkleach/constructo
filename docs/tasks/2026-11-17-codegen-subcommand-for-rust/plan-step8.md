@@ -14,7 +14,7 @@ so the step is done when a release would publish both.
 - **`cargo publish --workspace` publishes both, the runtime first.** Cargo 1.98 orders a workspace by its dependencies,
   and verifies `constructo` against a local registry that has the runtime in it. *Checked* with
   `cargo publish --workspace --dry-run`, which verified and would have uploaded both, in that order.
-- **The package of the runtime has `tests/conformance.rs`,** which reads `../syntax/conformance`, outside the crate, so
+- **The package of the runtime has `constructo-runtime/tests/conformance.rs`,** which reads `syntax/conformance`, so
   it fails in the published crate. Nothing runs it there, but it is a file that cannot work.
 - **The public API.** 87 public items have no doc comment: 52 in `ast`, 10 in `diagnostics`, 19 in `lexer` and 6 in
   `parser`, counted with `-W missing_docs`. Most are the fields and variants of `ast`. `lexer::scan_string` is public
@@ -103,6 +103,30 @@ so the step is done when a release would publish both.
 3. The release: `check-changelog.py`, the two workflows, the `Justfile`, and the `exclude` of `constructo`.
 4. The draft and the outline brought up to date. The move of the task to `docs/tasks/done/` comes after the review, as
    the last commit before the merge.
+
+## As it was built
+
+*Done,* in the first three commits above. What the plan did not say:
+
+- **`constructo-runtime/tests/conformance.rs` already skips itself** outside the repository, so it did not fail in the
+  published crate, as the plan said. The `exclude` of `tests/` keeps it, and the test of the licence, which reads the
+  root's `LICENSE`, out of the package all the same, and `cargo package` warns that it is leaving them out.
+- **The doc comment of `Severity` said that only `convert` gives warnings,** which `codegen` made untrue, and the
+  sentence is gone. The doc of the module `parser` says that it reads values files as well as types files.
+- **The README's example of the tree was compiled and run** in a crate of its own, outside the repository.
+- **The `exclude` of `constructo` is wider than the plan's list:** it also has `.cargo/`, `.github/`, `CLAUDE.md` and
+  `.coderabbit.yaml`, which are tooling too. It does not name `constructo-runtime/`, which Cargo leaves out of the
+  package of `constructo` since it is a package of its own.
+- **`release-publish.yml` refuses a tag that has no draft release,** since the draft is the record that
+  `release-draft.yml` tested the tag, and `release-draft.yml` checks the tag against the version of `Cargo.toml`, as
+  the recipe does, so that a tag pushed by hand is held to it too. Each passes the tag to its scripts through the
+  environment, and not written into them, so that the text of a tag cannot be run.
+- **The actions are pinned** to `actions/checkout` 7.0.1, `taiki-e/install-action` 2.90.11 and
+  `rust-lang/crates-io-auth-action` 1.0.6, by their commits.
+- **The workflows have not run,** since they run only on GitHub, and `actionlint` is not installed here: they were
+  read, and parsed as YAML. The first tag pushed after the merge is their first test.
+- **`check-changelog.py` was tried** on copies of the manifests and the lock with the CHANGELOG released, and refuses a
+  runtime of another version, in its manifest or in the lock, and a dependency that is not `=` the version.
 
 ## Done when
 
