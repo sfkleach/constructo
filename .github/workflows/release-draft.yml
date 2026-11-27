@@ -1,0 +1,65 @@
+# Makes a draft release on GitHub from a pushed tag, after testing the tagged commit and checking that both crates
+# would publish. `just draft-release VERSION` pushes the tag. Nothing is published to crates.io here: that is
+# release-publish.yml, run by `just publish-release VERSION` once the draft looks right.
+name: release-draft
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  draft:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy,rustfmt
+          rustup default stable
+
+      - name: Install just and cargo-audit
+        uses: taiki-e/install-action@073e1fd0bc889c9aee68dbaaa927cde1b5653a83 # v2.90.11
+        with:
+          tool: just,cargo-audit
+
+      # The recipe checks this before it tags, and it is checked again so that a tag pushed by hand is held to it too.
+      - name: Check that the tag names the version of the crates
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -n 1)
+          if [[ "$TAG" != "v$version" && "$TAG" != "v$version-"* ]]; then
+            echo "::error::The tag $TAG does not name the version v$version of Cargo.toml."
+            exit 1
+          fi
+
+      - name: Test
+        run: just test
+
+      - name: Check the CHANGELOG and the versions
+        run: just shippable
+
+      # This packages both crates and builds constructo against the packaged runtime, so a release that could not be
+      # published is found before the draft is made.
+      - name: Check that both crates would publish
+        run: cargo publish --workspace --dry-run
+
+      - name: Make the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          notes="$RUNNER_TEMP/notes.md"
+          python3 .local/scripts/extract-changelog.py "$TAG" > "$notes"
+          prerelease=()
+          if [[ "$TAG" == *-* ]]; then
+            prerelease=(--prerelease)
+          fi
+          gh release create "$TAG" --draft --verify-tag --title "$TAG" --notes-file "$notes" "${prerelease[@]}"
