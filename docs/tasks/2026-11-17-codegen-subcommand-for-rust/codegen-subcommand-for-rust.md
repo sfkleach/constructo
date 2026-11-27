@@ -541,7 +541,9 @@ this makes it public, in every runtime.
 - **The tree is an interface,** in Rust as in every other target, so its shape is
   a promise once it is published. For Rust it is the `ast` module of the parser,
   which was written for `check`, and it is to be looked at for public use
-  before the runtime crate is published.
+  before the runtime crate is published. *Done:* it is kept as it is, without
+  `#[non_exhaustive]`, so that a match on it is checked to be complete, and
+  documented; see [plan-step8.md](plan-step8.md).
 
 **Open:** a tree with the names resolved and the consts replaced, but no types.
 The codec could give it, with `codec.read_tree(text)`, since it has the names and
@@ -1182,6 +1184,9 @@ names.
    that needs an adoption has one, and the refusal of an open type.
 7. **Documentation.** A spec of the command in `docs/specs/`, a decision for the
    closed set and one for the adoption, and the wording of decision 39.
+8. **Publishing the runtime.** The runtime made fit to be published on its own,
+   and the release made to publish it before `constructo`. *Done,* as the
+   [implementation plan](implementation-plan.md) says.
 
 ## Decisions to write
 

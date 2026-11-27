@@ -212,6 +212,12 @@ place of a new wording; and the CHANGELOG, the README and the `--help` of the co
 From step 2 on, `constructo` depends on `constructo-runtime`, and `cargo publish` refuses a crate whose dependency is
 not on crates.io. So the runtime is published with `constructo`, at the same version, and before it.
 
+*Done,* as [plan-step8.md](plan-step8.md) says: the doc comments of every public item of the runtime, with
+`#![warn(missing_docs)]`, and `scan_string` and `bare` hidden from the documentation; a README and a licence of the
+runtime's own; `check-changelog.py` checking the runtime's version; the two workflows of the release, which were in
+neither the repository nor its history; and an `exclude` of the tooling from the package of `constructo`. The first
+release is published by hand, since crates.io gives trusted publishing only to a crate that exists.
+
 - **The public API is looked at,** as the draft's section on the tree of a value asks: the `ast` module becomes a
   promise once it is published, and it was written for `check`. So do the two functions that step 2 had to make
   public, `lexer::scan_string` and `values_text::bare`, which are kept, renamed or hidden from the documentation.
